@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { DatePickerWithRange } from "@/components/dashboard/date-range-filter"
+import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { Button } from "@/components/ui/button"
 import { Download, Printer, Settings } from "lucide-react"
 import { useState } from "react"
@@ -20,9 +20,9 @@ interface ReportFiltersProps {
 }
 
 export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersProps) {
-  const [dateRange, setDateRange] = useState<{ from: Date; to: Date } | undefined>({
-    from: new Date(new Date().setDate(new Date().getDate() - 30)),
-    to: new Date(),
+  const [dateRange, setDateRange] = useState<{ start: Date | undefined; end: Date | undefined }>({
+    start: new Date(new Date().setDate(new Date().getDate() - 30)),
+    end: new Date(),
   })
   const [outlet, setOutlet] = useState<string>("all")
   const [staff, setStaff] = useState<string>("all")
@@ -35,9 +35,8 @@ export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersPr
         <div className="flex flex-wrap gap-4 items-end">
           <div className="flex-1 min-w-[200px]">
             <label className="text-sm font-medium mb-2 block">Date Range</label>
-            <DatePickerWithRange
-              date={dateRange}
-              onDateChange={setDateRange}
+            <DateRangeFilter
+              onRangeChange={setDateRange}
             />
           </div>
 
@@ -49,9 +48,6 @@ export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersPr
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Outlets</SelectItem>
-                <SelectItem value="downtown">Downtown Branch</SelectItem>
-                <SelectItem value="mall">Mall Location</SelectItem>
-                <SelectItem value="airport">Airport Kiosk</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -64,9 +60,6 @@ export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersPr
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Staff</SelectItem>
-                <SelectItem value="john">John Manager</SelectItem>
-                <SelectItem value="jane">Jane Cashier</SelectItem>
-                <SelectItem value="bob">Bob Supervisor</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -79,9 +72,6 @@ export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersPr
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="electronics">Electronics</SelectItem>
-                <SelectItem value="clothing">Clothing</SelectItem>
-                <SelectItem value="food">Food</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -94,9 +84,6 @@ export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersPr
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Methods</SelectItem>
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="card">Card</SelectItem>
-                <SelectItem value="mobile">Mobile Money</SelectItem>
               </SelectContent>
             </Select>
           </div>
