@@ -126,20 +126,27 @@ export const outletService = {
 
   async update(id: string, data: Partial<Outlet>): Promise<Outlet> {
     // Transform frontend data to backend format
-    const backendData: any = {
-      name: data.name?.trim(),
-      address: data.address?.trim() || "",
-      phone: data.phone?.trim() || "",
-      email: data.email?.trim() || "",
-      is_active: data.isActive !== undefined ? data.isActive : (data.is_active !== undefined ? data.is_active : undefined),
-    }
+    const backendData: any = {}
     
-    // Remove undefined fields
-    Object.keys(backendData).forEach(key => {
-      if (backendData[key] === undefined) {
-        delete backendData[key]
-      }
-    })
+    // Only include fields that are provided (not undefined)
+    if (data.name !== undefined) {
+      backendData.name = data.name.trim()
+    }
+    if (data.address !== undefined) {
+      backendData.address = data.address.trim() || ""
+    }
+    if (data.phone !== undefined) {
+      backendData.phone = data.phone.trim() || ""
+    }
+    if (data.email !== undefined) {
+      backendData.email = data.email.trim() || ""
+    }
+    // Always include is_active if provided, even if false
+    if (data.isActive !== undefined) {
+      backendData.is_active = data.isActive
+    } else if (data.is_active !== undefined) {
+      backendData.is_active = data.is_active
+    }
     
     // Validate required fields if name is being updated
     if (backendData.name !== undefined && !backendData.name) {

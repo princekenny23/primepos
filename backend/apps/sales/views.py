@@ -30,7 +30,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     ordering = ['-created_at']
     
     def get_queryset(self):
-        """Ensure tenant filtering is applied correctly"""
+        """Ensure tenant and outlet filtering is applied correctly with strict isolation"""
         # Ensure user.tenant is loaded
         user = self.request.user
         if not hasattr(user, '_tenant_loaded'):
@@ -49,9 +49,12 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         tenant = request_tenant or user_tenant
         
         # Get base queryset with optimized prefetching to avoid N+1 queries
-        queryset = Sale.objects.select_related('tenant', 'outlet', 'user', 'shift', 'customer').prefetch_related(
+        # Using select_related for ForeignKey relationships and prefetch_related for reverse relationships
+        queryset = Sale.objects.select_related(
+            'tenant', 'outlet', 'user', 'shift', 'customer'
+        ).prefetch_related(
             'items',
-            'items__product'  # Prefetch product data for sale items
+            'items__product'  # Prefetch product data for sale items to avoid N+1 queries
         ).all()
         
         # Apply tenant filter - CRITICAL for security
@@ -61,17 +64,28 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             else:
                 return queryset.none()
         
-        # Apply outlet filter if provided (for outlet isolation)
+        # Apply outlet filter for outlet isolation - CRITICAL for data security
+        # Always filter by outlet to ensure transactions are isolated per outlet
         outlet = self.get_outlet_for_request(self.request)
-        if outlet:
-            queryset = queryset.filter(outlet=outlet)
-        # Also check explicit outlet filter in query params (for backward compatibility)
-        elif self.request.query_params.get('outlet'):
+        if not outlet:
+            # Also check explicit outlet filter in query params (for backward compatibility)
             outlet_id = self.request.query_params.get('outlet')
-            try:
-                queryset = queryset.filter(outlet_id=outlet_id)
-            except (ValueError, TypeError):
-                pass
+            if outlet_id:
+                try:
+                    # Validate outlet belongs to tenant before filtering
+                    from apps.outlets.models import Outlet
+                    outlet = Outlet.objects.filter(id=outlet_id, tenant=tenant).first()
+                except (ValueError, TypeError):
+                    outlet = None
+        
+        # STRICT OUTLET ISOLATION: Always filter by outlet if tenant is set
+        # This ensures users only see transactions from their current outlet
+        if outlet and tenant:
+            queryset = queryset.filter(outlet=outlet)
+        elif tenant and not is_saas_admin:
+            # If tenant exists but no outlet specified, return empty queryset for security
+            # (unless user is SaaS admin who can see all outlets)
+            return queryset.none()
         
         # Filter by date range if provided
         start_date = self.request.query_params.get('start_date')
@@ -80,7 +94,9 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             queryset = queryset.filter(created_at__gte=start_date)
         if end_date:
             queryset = queryset.filter(created_at__lte=end_date)
-        return queryset
+        
+        # Order by most recent first (default ordering)
+        return queryset.order_by('-created_at')
     
     def update(self, request, *args, **kwargs):
         """Override update to ensure tenant matches"""

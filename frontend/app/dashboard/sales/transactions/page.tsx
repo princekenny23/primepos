@@ -50,8 +50,6 @@ import {
 } from "lucide-react"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { saleService, type SaleFilters } from "@/lib/services/saleService"
-import { customerService } from "@/lib/services/customerService"
-import { outletService } from "@/lib/services/outletService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { useToast } from "@/components/ui/use-toast"
@@ -106,23 +104,15 @@ export default function TransactionsPage() {
   const [showDetailPanel, setShowDetailPanel] = useState(false)
   
   const [searchTerm, setSearchTerm] = useState("")
-  const [outletFilter, setOutletFilter] = useState<string>("all")
   const [cashierFilter, setCashierFilter] = useState<string>("all")
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({
     from: subDays(new Date(), 30),
     to: new Date(),
   })
-  const [availableOutlets, setAvailableOutlets] = useState<any[]>([])
   const [availableCashiers, setAvailableCashiers] = useState<any[]>([])
 
-  useEffect(() => {
-    outletService.list().then((outlets) => {
-      setAvailableOutlets(outlets)
-    }).catch(console.error)
-  }, [])
-
   const loadSales = useCallback(async () => {
-    if (!currentBusiness) {
+    if (!currentBusiness || !currentOutlet) {
       setIsLoading(false)
       return
     }
@@ -131,9 +121,9 @@ export default function TransactionsPage() {
     try {
       const filters: SaleFilters = {}
       
-      if (outletFilter !== "all") {
-        filters.outlet = outletFilter
-      }
+      // STRICT OUTLET ISOLATION: Always filter by current outlet
+      // Backend will enforce this, but we send it explicitly for clarity
+      filters.outlet = String(currentOutlet.id)
       
       if (dateRange.from) {
         filters.start_date = format(dateRange.from, "yyyy-MM-dd")
@@ -145,68 +135,94 @@ export default function TransactionsPage() {
       const response = await saleService.list(filters)
       let salesData = response.results || []
 
-      const enrichedSales = await Promise.all(
-        salesData.map(async (sale: any) => {
-          const saleDetail: SaleDetail = { ...sale, _raw: sale._raw || sale }
-          
-          if (sale._raw?.customer) {
-            try {
-              const customerId = typeof sale._raw.customer === 'object' 
-                ? sale._raw.customer.id 
-                : sale._raw.customer
-              if (customerId) {
-                const customer = await customerService.get(String(customerId))
-                saleDetail.customer = {
-                  id: customer.id,
-                  name: customer.name,
-                  email: customer.email,
-                  phone: customer.phone,
-                }
-              }
-            } catch (e) {
-              // Customer not found
+      // Use nested data from backend (outlet_detail, user_detail, shift_detail, customer_detail)
+      // This eliminates N+1 queries - backend already includes all necessary data
+      const enrichedSales = salesData.map((sale: any) => {
+        const saleDetail: SaleDetail = { ...sale, _raw: sale._raw || sale }
+        
+        // Use nested customer_detail from backend (already fetched via select_related)
+        if (sale._raw?.customer_detail) {
+          saleDetail.customer = {
+            id: String(sale._raw.customer_detail.id),
+            name: sale._raw.customer_detail.name,
+            email: sale._raw.customer_detail.email || '',
+            phone: sale._raw.customer_detail.phone || '',
+          }
+        } else if (sale._raw?.customer) {
+          // Fallback for backward compatibility
+          const customer = typeof sale._raw.customer === 'object' 
+            ? sale._raw.customer 
+            : { id: sale._raw.customer }
+          if (customer.id) {
+            saleDetail.customer = {
+              id: String(customer.id),
+              name: customer.name || '',
+              email: customer.email || '',
+              phone: customer.phone || '',
             }
           }
+        }
 
-          // Payment service removed - payments will be implemented in new system
-          saleDetail.payments = []
+        // Payment service removed - payments will be implemented in new system
+        saleDetail.payments = []
 
-          if (sale._raw?.user) {
-            saleDetail.user = typeof sale._raw.user === 'object'
-              ? {
-                  id: String(sale._raw.user.id || ""),
-                  email: sale._raw.user.email || "",
-                  first_name: sale._raw.user.first_name,
-                  last_name: sale._raw.user.last_name,
-                }
-              : undefined
+        // Use nested user_detail from backend
+        if (sale._raw?.user_detail) {
+          saleDetail.user = {
+            id: String(sale._raw.user_detail.id),
+            email: sale._raw.user_detail.email || '',
+            first_name: sale._raw.user_detail.first_name || '',
+            last_name: sale._raw.user_detail.last_name || '',
           }
-
-          if (sale._raw?.outlet) {
-            saleDetail.outlet = typeof sale._raw.outlet === 'object'
-              ? {
-                  id: String(sale._raw.outlet.id || ""),
-                  name: sale._raw.outlet.name || "",
-                }
-              : undefined
+        } else if (sale._raw?.user) {
+          // Fallback for backward compatibility
+          const user = typeof sale._raw.user === 'object' ? sale._raw.user : { id: sale._raw.user }
+          saleDetail.user = {
+            id: String(user.id || ""),
+            email: user.email || "",
+            first_name: user.first_name || '',
+            last_name: user.last_name || '',
           }
+        }
 
-          if (sale._raw?.shift) {
-            saleDetail.shift = typeof sale._raw.shift === 'object'
-              ? {
-                  id: String(sale._raw.shift.id || ""),
-                  shift_number: sale._raw.shift.shift_number,
-                  status: sale._raw.shift.status || "",
-                }
-              : undefined
+        // Use nested outlet_detail from backend
+        if (sale._raw?.outlet_detail) {
+          saleDetail.outlet = {
+            id: String(sale._raw.outlet_detail.id),
+            name: sale._raw.outlet_detail.name || "",
           }
+        } else if (sale._raw?.outlet) {
+          // Fallback for backward compatibility
+          const outlet = typeof sale._raw.outlet === 'object' ? sale._raw.outlet : { id: sale._raw.outlet }
+          saleDetail.outlet = {
+            id: String(outlet.id || ""),
+            name: outlet.name || "",
+          }
+        }
 
-          return saleDetail
-        })
-      )
+        // Use nested shift_detail from backend
+        if (sale._raw?.shift_detail) {
+          saleDetail.shift = {
+            id: String(sale._raw.shift_detail.id),
+            shift_number: sale._raw.shift_detail.operating_date || '',
+            status: sale._raw.shift_detail.status || "",
+          }
+        } else if (sale._raw?.shift) {
+          // Fallback for backward compatibility
+          const shift = typeof sale._raw.shift === 'object' ? sale._raw.shift : { id: sale._raw.shift }
+          saleDetail.shift = {
+            id: String(shift.id || ""),
+            shift_number: shift.operating_date || shift.shift_number || '',
+            status: shift.status || "",
+          }
+        }
+
+        return saleDetail
+      })
 
       setSales(enrichedSales)
       
+      // Extract unique cashiers from enriched sales
       const cashiers = new Map<string, any>()
       enrichedSales.forEach(sale => {
         if (sale.user) {
@@ -226,7 +242,7 @@ export default function TransactionsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, outletFilter, dateRange, toast])
+  }, [currentBusiness, currentOutlet, dateRange, toast])
 
   useEffect(() => {
     loadSales()
@@ -238,10 +254,7 @@ export default function TransactionsPage() {
     
     // Listen for outlet changes
     const handleOutletChange = () => {
-      // Reset outlet filter to current outlet when outlet changes
-      if (currentOutlet) {
-        setOutletFilter(String(currentOutlet.id))
-      }
+      // Reload sales when outlet changes (loadSales already uses currentOutlet)
       loadSales()
     }
     
@@ -383,20 +396,14 @@ export default function TransactionsPage() {
                 </PopoverContent>
               </Popover>
 
-              <Select value={outletFilter} onValueChange={setOutletFilter}>
-                <SelectTrigger className="w-[180px]">
-                  <Building2 className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="All Outlets" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Outlets</SelectItem>
-                  {availableOutlets.map((outlet) => (
-                    <SelectItem key={outlet.id} value={outlet.id}>
-                      {outlet.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Outlet filter - showing current outlet only for strict isolation */}
+              {currentOutlet && (
+                <div className="flex items-center gap-2 px-3 py-2 border rounded-md bg-slate-50 dark:bg-slate-800">
+                  <Building2 className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">{currentOutlet.name}</span>
+                  <Badge variant="secondary" className="text-xs">Current</Badge>
+                </div>
+              )}
 
               <Select value={cashierFilter} onValueChange={setCashierFilter}>
                 <SelectTrigger className="w-[180px]">
@@ -415,12 +422,11 @@ export default function TransactionsPage() {
                 </SelectContent>
               </Select>
 
-              {(outletFilter !== "all" || cashierFilter !== "all" || dateRange.from || searchTerm) && (
+              {(cashierFilter !== "all" || dateRange.from || searchTerm) && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => {
-                    setOutletFilter("all")
                     setCashierFilter("all")
                     setDateRange({ from: subDays(new Date(), 30), to: new Date() })
                     setSearchTerm("")

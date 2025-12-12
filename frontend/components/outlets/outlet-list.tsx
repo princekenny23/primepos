@@ -36,7 +36,7 @@ interface OutletListProps {
 
 export function OutletList(props: OutletListProps = {}) {
   const { onOutletUpdated } = props
-  const { outlets, currentOutlet, switchOutlet } = useTenant()
+  const { outlets, currentOutlet, switchOutlet, setOutlets, setCurrentOutlet } = useTenant()
   const { loadOutlets } = useBusinessStore()
   const { currentBusiness } = useBusinessStore()
   const { toast } = useToast()
@@ -55,30 +55,90 @@ export function OutletList(props: OutletListProps = {}) {
   const handleOutletUpdated = async () => {
     setIsEditModalOpen(false)
     setEditingOutlet(null)
+    
+    // Reload outlets from business store
     if (loadOutlets && currentBusiness?.id) {
       await loadOutlets(currentBusiness.id)
+      
+      // Update tenant context outlets from business store
+      const updatedOutlets = useBusinessStore.getState().outlets
+      const transformedOutlets = updatedOutlets.map((o: any) => ({
+        id: o.id,
+        tenantId: o.businessId,
+        name: o.name,
+        address: o.address || "",
+        phone: o.phone || "",
+        email: o.email || "",
+        isActive: o.isActive,
+        settings: o.settings || {},
+      }))
+      setOutlets(transformedOutlets)
     }
+    
+    // Trigger refresh event for other components
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("outlets-updated"))
+    }
+    
+    // Force router refresh to update all components
+    router.refresh()
+    
     if (onOutletUpdated) {
       onOutletUpdated()
     }
+    
     toast({
       title: "Success",
-      description: "Outlet updated successfully",
+      description: "Outlet updated successfully. Changes are now visible.",
     })
   }
 
   const handleToggleStatus = async (outlet: any) => {
     setIsTogglingStatus(outlet.id)
     try {
-      await outletService.update(outlet.id, {
+      const updatedOutlet = await outletService.update(outlet.id, {
         isActive: !outlet.isActive,
       })
+      
+      // Reload outlets from business store
       if (loadOutlets && currentBusiness?.id) {
         await loadOutlets(currentBusiness.id)
       }
+      
+      // Update tenant context outlets from business store
+      const updatedOutlets = useBusinessStore.getState().outlets
+      const transformedOutlets = updatedOutlets.map((o: any) => ({
+        id: o.id,
+        tenantId: o.businessId,
+        name: o.name,
+        address: o.address || "",
+        phone: o.phone || "",
+        email: o.email || "",
+        isActive: o.isActive,
+        settings: o.settings || {},
+      }))
+      setOutlets(transformedOutlets)
+      
+      // Update current outlet if this is the current outlet
+      if (currentOutlet?.id === outlet.id) {
+        const updatedCurrentOutlet = transformedOutlets.find((o: any) => o.id === outlet.id)
+        if (updatedCurrentOutlet) {
+          setCurrentOutlet(updatedCurrentOutlet)
+        }
+      }
+      
+      // Trigger refresh event
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("outlets-updated"))
+      }
+      
+      // Force router refresh
+      router.refresh()
+      
       if (onOutletUpdated) {
         onOutletUpdated()
       }
+      
       toast({
         title: "Success",
         description: `Outlet ${outlet.isActive ? "deactivated" : "activated"} successfully`,

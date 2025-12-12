@@ -323,6 +323,49 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       }))
     }
   }
+  
+  // Listen for outlet updates to refresh the list
+  useEffect(() => {
+    const handleOutletsUpdated = async () => {
+      if (currentBusiness?.id && loadOutlets) {
+        try {
+          await loadOutlets(currentBusiness.id)
+          const updatedOutlets = useBusinessStore.getState().outlets
+          const transformedOutlets = updatedOutlets.map((o: any) => ({
+            id: o.id,
+            tenantId: o.businessId,
+            name: o.name,
+            address: o.address || "",
+            phone: o.phone || "",
+            email: o.email || "",
+            isActive: o.isActive,
+            settings: o.settings || {},
+          }))
+          setOutlets(transformedOutlets)
+          
+          // Update current outlet if it exists in the updated list
+          if (currentOutlet) {
+            const updatedCurrent = transformedOutlets.find((o: any) => o.id === currentOutlet.id)
+            if (updatedCurrent) {
+              setCurrentOutlet(updatedCurrent)
+            }
+          }
+        } catch (error) {
+          console.error("Failed to refresh outlets after update:", error)
+        }
+      }
+    }
+    
+    if (typeof window !== "undefined") {
+      window.addEventListener("outlets-updated", handleOutletsUpdated)
+    }
+    
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("outlets-updated", handleOutletsUpdated)
+      }
+    }
+  }, [currentBusiness?.id, currentOutlet?.id, loadOutlets, setOutlets, setCurrentOutlet])
 
   const value: TenantContextType = {
     currentTenant,

@@ -39,8 +39,10 @@ function transformSale(backendSale: any): Sale {
   return {
     id: String(backendSale.id),
     businessId: String(backendSale.tenant || backendSale.tenant_id || ""),
-    outletId: String(backendSale.outlet || backendSale.outlet_id || ""),
-    userId: backendSale.user ? String(backendSale.user.id || backendSale.user_id) : "",
+    outletId: String(backendSale.outlet || backendSale.outlet_id || backendSale.outlet_detail?.id || ""),
+    userId: backendSale.user_detail 
+      ? String(backendSale.user_detail.id) 
+      : (backendSale.user ? String(backendSale.user.id || backendSale.user_id) : ""),
     items: (backendSale.items || []).map((item: any) => ({
       productId: item.product ? String(item.product.id || item.product_id) : "",
       productName: item.product_name || item.product?.name || "",
@@ -54,8 +56,16 @@ function transformSale(backendSale: any): Sale {
     paymentMethod: backendSale.payment_method || backendSale.paymentMethod || "cash",
     status: backendSale.status || "completed",
     createdAt: backendSale.created_at || backendSale.createdAt || new Date().toISOString(),
-    // Include raw backend data for restaurant orders
-    _raw: backendSale,
+    // Include raw backend data with nested detail fields (outlet_detail, user_detail, shift_detail, customer_detail)
+    // These are optimized fields from the backend that eliminate N+1 queries
+    _raw: {
+      ...backendSale,
+      // Preserve nested detail fields for efficient data access
+      outlet_detail: backendSale.outlet_detail,
+      user_detail: backendSale.user_detail,
+      shift_detail: backendSale.shift_detail,
+      customer_detail: backendSale.customer_detail,
+    },
   } as any
 }
 

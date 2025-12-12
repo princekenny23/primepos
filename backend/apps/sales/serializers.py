@@ -36,7 +36,7 @@ class SaleItemSerializer(serializers.ModelSerializer):
 
 
 class SaleSerializer(serializers.ModelSerializer):
-    """Sale serializer"""
+    """Sale serializer with optimized nested data"""
     items = SaleItemSerializer(many=True, read_only=True)
     items_data = serializers.ListField(
         child=serializers.DictField(),
@@ -45,6 +45,7 @@ class SaleSerializer(serializers.ModelSerializer):
     )
     kitchen_tickets = serializers.SerializerMethodField()
     
+    # Write-only fields for creation/update
     outlet = serializers.IntegerField(write_only=True, required=True)
     shift = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     customer = serializers.IntegerField(write_only=True, required=False, allow_null=True)
@@ -52,10 +53,17 @@ class SaleSerializer(serializers.ModelSerializer):
     guests = serializers.IntegerField(required=False, allow_null=True)
     priority = serializers.ChoiceField(choices=[('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')], required=False, default='normal')
     
+    # Read-only nested representations (optimized to avoid N+1 queries)
+    outlet_detail = serializers.SerializerMethodField(read_only=True)
+    user_detail = serializers.SerializerMethodField(read_only=True)
+    shift_detail = serializers.SerializerMethodField(read_only=True)
+    customer_detail = serializers.SerializerMethodField(read_only=True)
+    
     class Meta:
         model = Sale
         fields = (
-            'id', 'tenant', 'outlet', 'user', 'shift', 'customer', 'receipt_number',
+            'id', 'tenant', 'outlet', 'outlet_detail', 'user', 'user_detail', 
+            'shift', 'shift_detail', 'customer', 'customer_detail', 'receipt_number',
             'subtotal', 'tax', 'discount', 'total', 'payment_method', 'status',
             'cash_received', 'change_given',
             'due_date', 'amount_paid', 'payment_status',
@@ -63,6 +71,53 @@ class SaleSerializer(serializers.ModelSerializer):
             'notes', 'items', 'items_data', 'kitchen_tickets', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'tenant', 'user', 'receipt_number', 'due_date', 'amount_paid', 'payment_status', 'table', 'created_at', 'updated_at')
+    
+    def get_outlet_detail(self, obj):
+        """Return outlet details as nested object"""
+        if obj.outlet:
+            return {
+                'id': str(obj.outlet.id),
+                'name': obj.outlet.name,
+                'address': obj.outlet.address or '',
+                'phone': obj.outlet.phone or '',
+                'email': obj.outlet.email or '',
+                'is_active': obj.outlet.is_active,
+            }
+        return None
+    
+    def get_user_detail(self, obj):
+        """Return user details as nested object"""
+        if obj.user:
+            return {
+                'id': str(obj.user.id),
+                'email': obj.user.email,
+                'first_name': obj.user.first_name or '',
+                'last_name': obj.user.last_name or '',
+                'full_name': obj.user.get_full_name() or obj.user.email,
+            }
+        return None
+    
+    def get_shift_detail(self, obj):
+        """Return shift details as nested object"""
+        if obj.shift:
+            return {
+                'id': str(obj.shift.id),
+                'operating_date': obj.shift.operating_date.isoformat() if obj.shift.operating_date else None,
+                'status': obj.shift.status or '',
+                'start_time': obj.shift.start_time.isoformat() if obj.shift.start_time else None,
+            }
+        return None
+    
+    def get_customer_detail(self, obj):
+        """Return customer details as nested object"""
+        if obj.customer:
+            return {
+                'id': str(obj.customer.id),
+                'name': obj.customer.name,
+                'email': obj.customer.email or '',
+                'phone': obj.customer.phone or '',
+            }
+        return None
     
     def get_kitchen_tickets(self, obj):
         """Return kitchen order tickets for this sale"""

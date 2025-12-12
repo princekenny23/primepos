@@ -125,9 +125,17 @@ export function AddEditOutletModal({
         })
       }
 
-      // Reload outlets list
+      // Reload outlets list from business store
       if (currentBusiness?.id) {
         await loadOutlets(currentBusiness.id)
+      }
+      
+      // Also refresh tenant context outlets to ensure UI updates
+      // Dispatch event to trigger tenant context refresh
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("outlets-updated", {
+          detail: { outletId: outlet?.id }
+        }))
       }
 
       // Call callback if provided

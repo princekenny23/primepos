@@ -198,7 +198,7 @@ class OutletViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         serializer.save(tenant=tenant)
     
     def update(self, request, *args, **kwargs):
-        """Override update to ensure tenant matches"""
+        """Override update to ensure tenant matches and properly save all fields"""
         instance = self.get_object()
         tenant = getattr(request, 'tenant', None) or request.user.tenant
         
@@ -210,7 +210,25 @@ class OutletViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        return super().update(request, *args, **kwargs)
+        # Call parent update to handle serialization and saving
+        response = super().update(request, *args, **kwargs)
+        
+        # Ensure we return the updated instance with all fields
+        if response.status_code == status.HTTP_200_OK:
+            # Refresh instance from database to get latest data
+            instance.refresh_from_db()
+            # Re-serialize with updated data
+            serializer = self.get_serializer(instance)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        return response
+    
+    def perform_update(self, serializer):
+        """Ensure all fields are properly saved"""
+        # Save the outlet - this will update all fields in the database
+        outlet = serializer.save()
+        logger.info(f"Outlet {outlet.id} updated: name={outlet.name}, address={outlet.address}, phone={outlet.phone}, email={outlet.email}, is_active={outlet.is_active}")
+        return outlet
     
     def destroy(self, request, *args, **kwargs):
         """Override destroy to ensure tenant matches"""
