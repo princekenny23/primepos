@@ -166,6 +166,8 @@ export function LogoUploadModal({
             type="file"
             accept="image/png,image/jpeg,image/jpg,image/webp"
             onChange={handleFileSelect}
+            aria-label="Upload business logo image"
+            title="Upload business logo image (PNG, JPEG, WebP)"
             className="hidden"
           />
 

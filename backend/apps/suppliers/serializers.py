@@ -4,7 +4,7 @@ from .models import (
     PurchaseReturn, ProductSupplier
 )
 from apps.outlets.serializers import OutletSerializer
-from apps.products.serializers import ProductSerializer, ItemVariationSerializer
+from apps.products.serializers import ProductSerializer
 
 
 class SupplierSerializer(serializers.ModelSerializer):

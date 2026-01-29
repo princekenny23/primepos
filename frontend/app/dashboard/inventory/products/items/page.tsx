@@ -23,8 +23,9 @@ import { Plus, Search, Package, Upload, Filter, MoreVertical, Folder, Trash2 } f
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { useState, useEffect } from "react"
-import { AddEditProductModal } from "@/components/modals/add-edit-product-modal"
-import { ImportProductsModal } from "@/components/modals/import-products-modal"
+import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
+import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
+import { dataExchangeConfigs } from "@/lib/utils/data-exchange-config"
 import { productService, categoryService, variationService } from "@/lib/services/productService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
@@ -362,7 +363,7 @@ export default function ProductsItemsPage() {
       </div>
 
       {/* Modals */}
-      <AddEditProductModal
+      <ProductModalTabs
         open={showAddProduct}
         onOpenChange={(open) => {
           setShowAddProduct(open)
@@ -373,11 +374,13 @@ export default function ProductsItemsPage() {
         }}
         product={selectedProduct}
       />
-      <ImportProductsModal
+      <DataExchangeModal
         open={showImport}
         onOpenChange={setShowImport}
+        type="import"
+        config={dataExchangeConfigs.products}
         onSuccess={() => {
-          loadData() // Reload products after successful import
+          loadData()
         }}
       />
       </PageLayout>

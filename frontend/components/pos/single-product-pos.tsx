@@ -16,7 +16,7 @@ import { usePOSStore } from "@/stores/posStore"
 import { useBusinessStore } from "@/stores/businessStore"
 import { productService } from "@/lib/services/productService"
 import { formatCurrency } from "@/lib/utils/currency"
-import { PaymentMethodModal, type DeliveryInfo } from "@/components/modals/payment-method-modal"
+import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
 // Receipt preview removed from POS terminal
 import { printReceipt } from "@/lib/print"
 // printReceiptAuto removed; using receipt preview modal
@@ -63,7 +63,7 @@ export function SingleProductPOS() {
       
       setIsLoadingProducts(true)
       try {
-        const productsData = await productService.list({ is_active: true })
+          const productsData = await productService.list({ is_active: true })
         const productsList = productsData.results || productsData
         setProducts(productsList)
         
@@ -71,7 +71,7 @@ export function SingleProductPOS() {
         if (productsList.length > 0 && !selectedProduct) {
           setSelectedProduct(productsList[0])
           // Auto-select first unit if available
-          const sellingUnits = (productsList[0] as any).selling_units || []
+          const sellingUnits = (productsList[0] as any).units || (productsList[0] as any).selling_units || []
           if (sellingUnits.length > 0) {
             setSelectedUnit(sellingUnits[0])
           }
@@ -94,7 +94,7 @@ export function SingleProductPOS() {
   // Get available units for selected product
   const availableUnits = useMemo(() => {
     if (!selectedProduct) return []
-    const sellingUnits = (selectedProduct as any).selling_units || []
+    const sellingUnits = (selectedProduct as any).units || (selectedProduct as any).selling_units || []
     return sellingUnits.filter((u: any) => u.is_active !== false)
   }, [selectedProduct])
 
@@ -177,7 +177,7 @@ export function SingleProductPOS() {
     setShowPaymentMethod(true)
   }
 
-  const handlePayment = async (paymentMethod: string, amount: number, deliveryInfo?: DeliveryInfo) => {
+  const handlePayment = async (paymentMethod: string, amount: number) => {
     if (!currentBusiness || !currentOutlet || !activeShift) {
       toast({
         title: "Error",
@@ -191,22 +191,25 @@ export function SingleProductPOS() {
     try {
       const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
       
+      const paymentTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+
       const saleData = {
-        outlet: currentOutlet.id,
-        shift: activeShift.id,
-        customer: selectedCustomer?.id || null,
-        items: cart.map((item) => ({
-          product: item.productId,
+        outlet: String(currentOutlet.id),
+        shift: String(activeShift.id),
+        customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+        items_data: cart.map((item) => ({
+          product_id: String(item.productId),
           quantity: item.quantity,
           price: item.price,
-          sale_type: item.saleType || "retail",
         })),
-        payment_method: paymentMethod,
-        amount_paid: amount,
-        delivery_info: deliveryInfo || null,
+        subtotal: paymentTotal,
+        total: paymentTotal,
+        payment_method: paymentMethod as any,
+        discount: 0,
+        tax: 0,
       }
 
-      const sale = await saleService.create(saleData)
+      const sale = await saleService.create(saleData as any)
 
       // Prepare receipt data
       const receiptCartItems = cart.map((item) => ({
@@ -361,7 +364,7 @@ export function SingleProductPOS() {
                               setSelectedUnit(null)
                             } else {
                               const unit = availableUnits.find(
-                                (u) => String(u.id) === value
+                                (u: ProductUnit) => String(u.id) === value
                               )
                               setSelectedUnit(unit || null)
                             }
@@ -375,7 +378,7 @@ export function SingleProductPOS() {
                             <SelectItem value="base">
                               Base Unit ({selectedProduct.unit || "pcs"}) - {formatCurrency(selectedProduct.price || 0, currentBusiness)}
                             </SelectItem>
-                            {availableUnits.map((unit) => (
+                            {availableUnits.map((unit: ProductUnit) => (
                               <SelectItem key={unit.id} value={String(unit.id)}>
                                 {unit.unit_name} - {formatCurrency(unit.retail_price, currentBusiness)}
                               </SelectItem>
@@ -572,7 +575,9 @@ export function SingleProductPOS() {
         open={showPaymentMethod}
         onOpenChange={setShowPaymentMethod}
         total={cartTotal}
-        onPayment={handlePayment}
+        business={currentBusiness || null}
+        selectedCustomer={selectedCustomer}
+        onConfirm={(method, amount) => handlePayment(method, amount || cartTotal)}
       />
 
       {/* Receipt preview removed from POS terminal - printing is automatic */}

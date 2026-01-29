@@ -190,16 +190,18 @@ class ActivityLogMiddleware(MiddlewareMixin):
         """Extract relevant metadata from request and response"""
         metadata = {}
         
-        # Get request body if available
+        # Get request body if available (avoid accessing if already consumed)
         if hasattr(request, 'body') and request.body:
             try:
-                body = json.loads(request.body)
-                # Only include non-sensitive fields
-                safe_fields = ['quantity', 'amount', 'status', 'type']
-                for field in safe_fields:
-                    if field in body:
-                        metadata[field] = body[field]
-            except (json.JSONDecodeError, TypeError):
+                # Check if body has been consumed by checking if _load_post_and_files has been called
+                if not hasattr(request, '_post') or not hasattr(request, '_files'):
+                    body = json.loads(request.body)
+                    # Only include non-sensitive fields
+                    safe_fields = ['quantity', 'amount', 'status', 'type']
+                    for field in safe_fields:
+                        if field in body:
+                            metadata[field] = body[field]
+            except (json.JSONDecodeError, TypeError, AttributeError):
                 pass
         
         # Get response data if available

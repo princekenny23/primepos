@@ -63,6 +63,9 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const useReal = useRealAPI()
 
+  // Track if we've already initialized for this business to prevent re-runs
+  const initializedBusinessRef = React.useRef<string | null>(null)
+
   // Initialize tenant and outlets on mount
   useEffect(() => {
     // Prevent infinite loop - only run when currentBusiness changes
@@ -71,9 +74,15 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    // FIXED: Skip if we've already initialized for this business ID
+    if (initializedBusinessRef.current === currentBusiness.id) {
+      return
+    }
+
     let isMounted = true
     const initializeTenant = async () => {
       setIsLoading(true)
+      initializedBusinessRef.current = currentBusiness.id
       
       if (useReal && currentBusiness) {
         try {
@@ -324,12 +333,22 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     }
   }
   
-  // Listen for outlet updates to refresh the list
+  // Listen for outlet updates to refresh the list - FIXED: Use refs to avoid dependency issues
+  const currentBusinessIdRef = React.useRef(currentBusiness?.id)
+  const currentOutletIdRef = React.useRef(currentOutlet?.id)
+  
+  // Keep refs updated
+  React.useEffect(() => {
+    currentBusinessIdRef.current = currentBusiness?.id
+    currentOutletIdRef.current = currentOutlet?.id
+  }, [currentBusiness?.id, currentOutlet?.id])
+  
   useEffect(() => {
     const handleOutletsUpdated = async () => {
-      if (currentBusiness?.id && loadOutlets) {
+      const businessId = currentBusinessIdRef.current
+      if (businessId && loadOutlets) {
         try {
-          await loadOutlets(currentBusiness.id)
+          await loadOutlets(businessId)
           const updatedOutlets = useBusinessStore.getState().outlets
           const transformedOutlets = updatedOutlets.map((o: any) => ({
             id: o.id,
@@ -344,8 +363,9 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           setOutlets(transformedOutlets)
           
           // Update current outlet if it exists in the updated list
-          if (currentOutlet) {
-            const updatedCurrent = transformedOutlets.find((o: any) => o.id === currentOutlet.id)
+          const currentId = currentOutletIdRef.current
+          if (currentId) {
+            const updatedCurrent = transformedOutlets.find((o: any) => o.id === currentId)
             if (updatedCurrent) {
               setCurrentOutlet(updatedCurrent)
             }
@@ -365,7 +385,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         window.removeEventListener("outlets-updated", handleOutletsUpdated)
       }
     }
-  }, [currentBusiness?.id, currentOutlet?.id, loadOutlets, setOutlets, setCurrentOutlet])
+  }, [loadOutlets]) // FIXED: Reduced dependencies to prevent re-running this effect
 
   const value: TenantContextType = {
     currentTenant,

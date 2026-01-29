@@ -167,13 +167,12 @@ export default function StockMovementReportsPage() {
             </Table>
           </CardContent>
         </Card>
-      </div>
-
       {/* Modals */}
-      <ExportReportModal
+      <DataExchangeModal
         open={showExport}
         onOpenChange={setShowExport}
-        reportType="Stock Movement Report"
+        type="export"
+        config={dataExchangeConfigs.reports}
       />
       <PrintReportModal
         open={showPrint}

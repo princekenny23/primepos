@@ -162,7 +162,8 @@ export default function DiscountsPage() {
   }, [discountedSales, searchTerm])
 
   const totalDiscountAmount = filteredDiscounts.reduce((sum, sale) => {
-    return sum + ((sale as any)._raw?.discount || sale.discount || 0)
+    const discount = Number((sale as any)._raw?.discount || sale.discount || 0)
+    return sum + (isNaN(discount) ? 0 : discount)
   }, 0)
 
   const handleViewSale = async (sale: SaleDetail) => {
@@ -276,15 +277,15 @@ export default function DiscountsPage() {
                       </TableCell>
                       <TableCell>{sale.outlet?.name || "N/A"}</TableCell>
                       <TableCell className="text-right">
-                        {currentBusiness?.currencySymbol || "MWK"} {(sale.subtotal || sale.total).toFixed(2)}
+                        {currentBusiness?.currencySymbol || "MWK"} {Number(sale.subtotal || sale.total || 0).toFixed(2)}
                       </TableCell>
                       <TableCell className="text-right">
                         <Badge variant="secondary">
-                          {currentBusiness?.currencySymbol || "MWK"} {((sale as any)._raw?.discount || sale.discount || 0).toFixed(2)}
+                          {currentBusiness?.currencySymbol || "MWK"} {Number((sale as any)._raw?.discount || sale.discount || 0).toFixed(2)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-semibold">
-                        {currentBusiness?.currencySymbol || "MWK"} {sale.total.toFixed(2)}
+                        {currentBusiness?.currencySymbol || "MWK"} {Number(sale.total || 0).toFixed(2)}
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>

@@ -1,11 +1,38 @@
 import { api, apiEndpoints } from "@/lib/api"
-import type { Product, Category } from "@/lib/types"
+import type { Product, Category, ProductUnit } from "@/lib/types"
+
+// Transform backend unit to frontend format
+function transformUnit(backendUnit: any): ProductUnit {
+  return {
+    id: String(backendUnit.id),
+    unit_name: backendUnit.unit_name || backendUnit.name || `Unit ${backendUnit.id}`,
+    conversion_factor: Number(backendUnit.conversion_factor) || 1,
+    retail_price: Number(backendUnit.retail_price) || 0,
+    wholesale_price: backendUnit.wholesale_price ? Number(backendUnit.wholesale_price) : undefined,
+    is_active: backendUnit.is_active !== false,
+  }
+}
+
+// Transform frontend unit to backend format
+function transformUnitToBackend(frontendUnit: Partial<ProductUnit>): any {
+  return {
+    unit_name: frontendUnit.unit_name,
+    conversion_factor: frontendUnit.conversion_factor || 1,
+    retail_price: frontendUnit.retail_price || 0,
+    wholesale_price: frontendUnit.wholesale_price || undefined,
+    is_active: frontendUnit.is_active !== undefined ? frontendUnit.is_active : true,
+  }
+}
 
 export interface ProductFilters {
   category?: string
   is_active?: boolean
   search?: string
   page?: number
+  tenant?: string
+  businessId?: string
+  outlet?: string
+  limit?: number
 }
 
 // Transform backend product to frontend format
@@ -36,6 +63,40 @@ function transformProduct(backendProduct: any): Product {
     outletId = String(backendProduct.outlet_id)
   }
 
+  // Normalize units for multi-unit support
+  const rawUnits = backendProduct.units || backendProduct.selling_units || []
+  const units = Array.isArray(rawUnits)
+    ? rawUnits.map((u: any) => ({
+        id: String(u.id || u.unit_id || u.name || Math.random()),
+        unit_name: u.name || u.unit_name || "Unit",
+        conversion_factor: Number(u.conversion_factor || u.conversionFactor || u.quantity || 1),
+        retail_price: Number(u.retail_price || u.price || 0),
+        wholesale_price: u.wholesale_price !== undefined ? Number(u.wholesale_price) : undefined,
+        cost_price: u.cost_price !== undefined ? Number(u.cost_price) : undefined,
+        is_active: u.is_active !== false,
+      }))
+    : []
+
+  // Normalize location stocks
+  const location_stocks = Array.isArray(backendProduct.location_stocks || backendProduct.stock_per_location)
+    ? (backendProduct.location_stocks || backendProduct.stock_per_location).map((loc: any) => ({
+        ...loc,
+        id: String(loc.id ?? `${backendProduct.id}-${loc.outlet_id || loc.outlet}`),
+        outlet_id: loc.outlet_id || loc.outlet,
+        outlet_name: loc.outlet_name || loc.outlet?.name,
+        quantity: Number(loc.quantity || 0),
+      }))
+    : []
+
+  // Normalize batch data
+  const batches = Array.isArray(backendProduct.batches)
+    ? backendProduct.batches.map((b: any) => ({
+        ...b,
+        id: String(b.id ?? b.batch_number ?? Math.random()),
+        quantity: Number(b.quantity || 0),
+      }))
+    : []
+
   return {
     id: String(backendProduct.id),
     businessId: tenantId,
@@ -58,8 +119,9 @@ function transformProduct(backendProduct: any): Product {
     stock: backendProduct.stock || 0,
     lowStockThreshold: backendProduct.low_stock_threshold || backendProduct.lowStockThreshold || 0,
     is_low_stock: backendProduct.is_low_stock || false, // Include low stock flag from backend
-    variations: backendProduct.variations || [], // Include variations for low stock checking
-    selling_units: backendProduct.selling_units || [], // Include selling units for multi-unit support
+    selling_units: backendProduct.selling_units || [], // Keep legacy field for backward compatibility
+    location_stocks,
+    batches,
     image: backendProduct.image || undefined,
     isActive: backendProduct.is_active !== undefined ? backendProduct.is_active : (backendProduct.isActive !== undefined ? backendProduct.isActive : true),
     // Wholesale fields
@@ -85,7 +147,7 @@ function transformProductToBackend(frontendProduct: Partial<Product>): any {
     barcode: frontendProduct.barcode || "",
     retail_price: retailPrice.toString(),
     stock: frontendProduct.stock || 0,
-    low_stock_threshold: frontendProduct.lowStockThreshold || 0,
+    low_stock_threshold: (frontendProduct as any).low_stock_threshold !== undefined ? (frontendProduct as any).low_stock_threshold : (frontendProduct.lowStockThreshold || 0),
     unit: frontendProduct.unit || "pcs", // Use provided unit or default to "pcs"
     is_active: frontendProduct.isActive !== undefined ? frontendProduct.isActive : true,
   }
@@ -140,8 +202,58 @@ function transformProductToBackend(frontendProduct: Partial<Product>): any {
   } else if ((frontendProduct as any).outletId) {
     data.outlet = (frontendProduct as any).outletId
   }
+
+  // NOTE: Units are now handled separately via unitService
+  // They should NOT be included in the product create/update payload
   
   return data
+}
+
+// Transform backend category to frontend format
+function transformCategory(backendCategory: any): Category {
+  return {
+    id: String(backendCategory.id),
+    businessId: String(backendCategory.tenant || backendCategory.tenant_id || ""),
+    name: backendCategory.name,
+    description: backendCategory.description || "",
+    createdAt: backendCategory.created_at || backendCategory.createdAt || new Date().toISOString(),
+  }
+}
+
+// Inline categoryService for compatibility
+export const categoryService = {
+  async list(): Promise<Category[]> {
+    const response = await api.get<any>(apiEndpoints.categories.list)
+    const categories = Array.isArray(response) ? response : (response.results || [])
+    return categories.map(transformCategory)
+  },
+
+  async get(id: string): Promise<Category> {
+    const response = await api.get<any>(apiEndpoints.categories.get(id))
+    return transformCategory(response)
+  },
+
+  async create(data: Partial<Category>): Promise<Category> {
+    const backendData = {
+      name: data.name,
+      description: data.description || "",
+    }
+    const response = await api.post<any>(apiEndpoints.categories.create, backendData)
+    return transformCategory(response)
+  },
+
+  async update(id: string, data: Partial<Category>): Promise<Category> {
+    const backendData = {
+      name: data.name,
+      description: data.description || "",
+    }
+    const response = await api.put<any>(apiEndpoints.categories.update(id), backendData)
+    return transformCategory(response)
+  },
+
+  async delete(id: string): Promise<void> {
+    await api.delete(apiEndpoints.categories.delete(id))
+  },
 }
 
 export const productService = {
@@ -151,6 +263,10 @@ export const productService = {
     if (filters?.is_active !== undefined) params.append("is_active", String(filters.is_active))
     if (filters?.search) params.append("search", filters.search)
     if (filters?.page) params.append("page", String(filters.page))
+    if (filters?.tenant) params.append("tenant", filters.tenant)
+    if (filters?.businessId) params.append("business", filters.businessId)
+    if (filters?.outlet) params.append("outlet", filters.outlet)
+    if (filters?.limit) params.append("limit", String(filters.limit))
     
     const query = params.toString()
     const response = await api.get<any>(`${apiEndpoints.products.list}${query ? `?${query}` : ""}`)
@@ -207,6 +323,49 @@ export const productService = {
     await api.delete(apiEndpoints.products.delete(id))
   },
 
+  async getCategories(): Promise<Category[]> {
+    try {
+      return await categoryService.list()
+    } catch (error) {
+      console.error("Failed to load categories via productService:", error)
+      return []
+    }
+  },
+
+  async export(filters: any): Promise<{ url: string; filename?: string; product_count?: number }> {
+    const params = new URLSearchParams()
+    if (filters?.format) params.append("format", filters.format)
+    if (filters?.outlet_id) params.append("outlet_id", String(filters.outlet_id))
+    if (filters?.category_id) params.append("category_id", String(filters.category_id))
+    if (filters?.include_inactive !== undefined) params.append("include_inactive", String(filters.include_inactive))
+    if (filters?.include_stock !== undefined) params.append("include_stock", String(filters.include_stock))
+    if (filters?.include_batches !== undefined) params.append("include_batches", String(filters.include_batches))
+    if (filters?.include_variations !== undefined) params.append("include_variations", String(filters.include_variations))
+    if (filters?.include_units !== undefined) params.append("include_units", String(filters.include_units))
+
+    const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+    const endpoint = `${apiEndpoints.products.list.replace(/\/$/, "")}/bulk-export/`
+    const url = `${base}${endpoint}${params.toString() ? `?${params.toString()}` : ""}`
+
+    const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
+    const response = await fetch(url, {
+      method: "GET",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Export failed (${response.status})`)
+    }
+
+    const blob = await response.blob()
+    const downloadUrl = window.URL.createObjectURL(blob)
+
+    return {
+      url: downloadUrl,
+      filename: `products-export-${new Date().toISOString().split("T")[0]}.${filters?.format || "csv"}`,
+    }
+  },
+
   async bulkDelete(productIds: string[]): Promise<{
     success: boolean
     deleted_count: number
@@ -237,14 +396,13 @@ export const productService = {
     return response.count
   },
 
-  async lookup(barcode: string): Promise<{ products: Product[]; variations: ItemVariation[] }> {
+  async lookup(barcode: string): Promise<{ products: Product[] }> {
     if (!barcode || barcode.trim() === "") {
-      return { products: [], variations: [] }
+      return { products: [] }
     }
     const response = await api.get<any>(`${apiEndpoints.products.lookup}?barcode=${encodeURIComponent(barcode.trim())}`)
     const products = (response.products || []).map(transformProduct)
-    const variations = (response.variations || []).map(transformVariation)
-    return { products, variations }
+    return { products }
   },
 
       async generateSkuPreview(): Promise<string> {
@@ -310,76 +468,10 @@ export const productService = {
       },
     }
 
-// Transform backend category to frontend format
-function transformCategory(backendCategory: any): Category {
-  return {
-    id: String(backendCategory.id),
-    businessId: String(backendCategory.tenant || backendCategory.tenant_id || ""),
-    name: backendCategory.name,
-    description: backendCategory.description || "",
-    createdAt: backendCategory.created_at || backendCategory.createdAt || new Date().toISOString(),
-  }
-}
-
-export const categoryService = {
-  async list(): Promise<Category[]> {
-    const response = await api.get<any>(apiEndpoints.categories.list)
-    const categories = Array.isArray(response) ? response : (response.results || [])
-    return categories.map(transformCategory)
-  },
-
-  async get(id: string): Promise<Category> {
-    const response = await api.get<any>(apiEndpoints.categories.get(id))
-    return transformCategory(response)
-  },
-
-  async create(data: Partial<Category>): Promise<Category> {
-    const backendData = {
-      name: data.name,
-      description: data.description || "",
-    }
-    const response = await api.post<any>(apiEndpoints.categories.create, backendData)
-    return transformCategory(response)
-  },
-
-  async update(id: string, data: Partial<Category>): Promise<Category> {
-    const backendData = {
-      name: data.name,
-      description: data.description || "",
-    }
-    const response = await api.put<any>(apiEndpoints.categories.update(id), backendData)
-    return transformCategory(response)
-  },
-
-  async delete(id: string): Promise<void> {
-    await api.delete(apiEndpoints.categories.delete(id))
-  },
-}
-
-// Item Variation Types and Service
-export interface ItemVariation {
-  id: string
-  product: string | { id: string; name: string }
-  name: string
-  price: number
-  cost?: number
-  sku?: string
-  barcode?: string
-  track_inventory: boolean
-  unit: string
-  low_stock_threshold: number
-  is_active: boolean
-  sort_order: number
-  total_stock?: number
-  is_low_stock?: boolean
-  created_at?: string
-  updated_at?: string
-}
-
 export interface LocationStock {
   id: string
   tenant: string
-  variation: string | ItemVariation
+  variation: string | any
   outlet: string | { id: string; name: string }
   quantity: number
   updated_at?: string
@@ -388,112 +480,14 @@ export interface LocationStock {
   outlet_name?: string
 }
 
-function transformVariation(backendVariation: any): ItemVariation {
-  return {
-    id: String(backendVariation.id),
-    product: typeof backendVariation.product === 'object' 
-      ? { id: String(backendVariation.product.id), name: backendVariation.product.name }
-      : String(backendVariation.product),
-    name: backendVariation.name,
-    price: parseFloat(backendVariation.price) || 0,
-    cost: backendVariation.cost ? parseFloat(backendVariation.cost) : undefined,
-    sku: backendVariation.sku || "",
-    barcode: backendVariation.barcode || "",
-    track_inventory: backendVariation.track_inventory !== undefined ? backendVariation.track_inventory : true,
-    unit: backendVariation.unit || "pcs",
-    low_stock_threshold: backendVariation.low_stock_threshold || 0,
-    is_active: backendVariation.is_active !== undefined ? backendVariation.is_active : true,
-    sort_order: backendVariation.sort_order || 0,
-    total_stock: backendVariation.total_stock !== undefined ? parseFloat(backendVariation.total_stock) : undefined,
-    is_low_stock: backendVariation.is_low_stock,
-    created_at: backendVariation.created_at,
-    updated_at: backendVariation.updated_at,
-  }
-}
-
-function transformVariationToBackend(frontendVariation: Partial<ItemVariation>): any {
-  const data: any = {
-    name: frontendVariation.name,
-    price: frontendVariation.price?.toString() || "0.01",
-    track_inventory: frontendVariation.track_inventory !== undefined ? frontendVariation.track_inventory : true,
-    unit: frontendVariation.unit || "pcs",
-    low_stock_threshold: frontendVariation.low_stock_threshold || 0,
-    is_active: frontendVariation.is_active !== undefined ? frontendVariation.is_active : true,
-    sort_order: frontendVariation.sort_order || 0,
-  }
-  
-  if (frontendVariation.product) {
-    data.product = typeof frontendVariation.product === 'string' 
-      ? frontendVariation.product 
-      : frontendVariation.product.id
-  }
-  
-  if (frontendVariation.cost !== undefined && frontendVariation.cost !== null) {
-    data.cost = frontendVariation.cost.toString()
-  }
-  
-  if (frontendVariation.sku && frontendVariation.sku.trim() !== "") {
-    data.sku = frontendVariation.sku.trim()
-  }
-  
-  if (frontendVariation.barcode && frontendVariation.barcode.trim() !== "") {
-    data.barcode = frontendVariation.barcode.trim()
-  }
-  
-  return data
-}
-
-export const variationService = {
-  async list(filters?: { product?: string; outlet?: string; is_active?: boolean }): Promise<ItemVariation[]> {
-    const params = new URLSearchParams()
-    if (filters?.product) params.append("product", filters.product)
-    if (filters?.outlet) params.append("outlet", filters.outlet)
-    if (filters?.is_active !== undefined) params.append("is_active", String(filters.is_active))
-    
-    const query = params.toString()
-    const response = await api.get<any>(`${apiEndpoints.variations.list}${query ? `?${query}` : ""}`)
-    
-    const variations = Array.isArray(response) ? response : (response.results || [])
-    return variations.map(transformVariation)
-  },
-
-  async get(id: string): Promise<ItemVariation> {
-    const response = await api.get<any>(apiEndpoints.variations.get(id))
-    return transformVariation(response)
-  },
-
-  async create(data: Partial<ItemVariation>): Promise<ItemVariation> {
-    const backendData = transformVariationToBackend(data)
-    const response = await api.post<any>(apiEndpoints.variations.create, backendData)
-    return transformVariation(response)
-  },
-
-  async update(id: string, data: Partial<ItemVariation>): Promise<ItemVariation> {
-    const backendData = transformVariationToBackend(data)
-    const response = await api.put<any>(apiEndpoints.variations.update(id), backendData)
-    return transformVariation(response)
-  },
-
-  async delete(id: string): Promise<void> {
-    await api.delete(apiEndpoints.variations.delete(id))
-  },
-
-  async bulkUpdateStock(data: { outlet: string; updates: Array<{ variation_id: string; quantity: number; movement_type?: string; reason?: string }> }): Promise<{
-    success: number
-    errors: number
-    results: Array<{ variation_id: string; variation_name: string; old_quantity: number; new_quantity: number; difference: number }>
-    error_details?: Array<any>
-  }> {
-    return api.post(apiEndpoints.variations.bulkUpdateStock, data)
-  },
-}
+// Variation functions removed - UNITS ONLY ARCHITECTURE (no more ItemVariation model)
 
 function transformLocationStock(backendStock: any): LocationStock {
   return {
     id: String(backendStock.id),
     tenant: String(backendStock.tenant),
     variation: typeof backendStock.variation === 'object'
-      ? transformVariation(backendStock.variation)
+      ? backendStock.variation
       : String(backendStock.variation),
     outlet: typeof backendStock.outlet === 'object'
       ? { id: String(backendStock.outlet.id), name: backendStock.outlet.name }
@@ -560,6 +554,85 @@ export const locationStockService = {
     error_details?: Array<any>
   }> {
     return api.post(apiEndpoints.locationStock.bulkUpdate, data)
+  },
+}
+
+// Unit Service - consolidates unit CRUD operations
+export const unitService = {
+  /**
+   * List all units with optional filters
+   */
+  async list(filters?: { product?: string; is_active?: boolean }): Promise<ProductUnit[]> {
+    const params = new URLSearchParams()
+    if (filters?.product) params.append("product", filters.product)
+    if (filters?.is_active !== undefined) params.append("is_active", String(filters.is_active))
+
+    try {
+      const response = await api.get<any>(`${apiEndpoints.units.list}?${params.toString()}`)
+      const units = Array.isArray(response.results) ? response.results : Array.isArray(response) ? response : []
+      return units.map(transformUnit)
+    } catch (error: any) {
+      console.error("Failed to fetch units:", error)
+      throw error
+    }
+  },
+
+  /**
+   * Get a single unit by ID
+   */
+  async get(id: string): Promise<ProductUnit> {
+    try {
+      const response = await api.get<any>(apiEndpoints.units.get(id))
+      return transformUnit(response)
+    } catch (error: any) {
+      console.error("Failed to fetch unit:", error)
+      throw error
+    }
+  },
+
+  /**
+   * Create a new unit
+   */
+  async create(data: Partial<ProductUnit> & { product: string }): Promise<ProductUnit> {
+    const payload = {
+      product: data.product,
+      ...transformUnitToBackend(data),
+    }
+
+    try {
+      const result = await api.post<any>(apiEndpoints.units.create, payload)
+      return transformUnit(result)
+    } catch (error: any) {
+      console.error("Failed to create unit:", { payload, error: error.message })
+      throw error
+    }
+  },
+
+  /**
+   * Update an existing unit
+   */
+  async update(id: string, data: Partial<ProductUnit>): Promise<ProductUnit> {
+    const payload = transformUnitToBackend(data)
+
+    try {
+      const result = await api.patch<any>(apiEndpoints.units.update(id), payload)
+      return transformUnit(result)
+    } catch (error: any) {
+      console.error("Failed to update unit:", { id, payload, error: error.message })
+      throw error
+    }
+  },
+
+  /**
+   * Delete a unit
+   */
+  async delete(id: string): Promise<void> {
+    try {
+      await api.delete(apiEndpoints.units.delete(id))
+    } catch (error: any) {
+      console.error("Failed to delete unit:", { id, error: error.message })
+      throw error
+    }
   },
 }
 

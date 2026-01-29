@@ -69,6 +69,21 @@ export interface User {
   }
 }
 
+export interface ProductUnit {
+  id?: string | number
+  product?: string | number
+  unit_name: string // e.g., "Piece", "Dozen", "Carton"
+  conversion_factor: number // e.g., 1.0 for base, 12.0 for dozen
+  retail_price: number
+  wholesale_price?: number
+  is_active?: boolean
+  is_base_unit?: boolean
+  low_stock_threshold?: number
+  sort_order?: number
+  created_at?: string
+  updated_at?: string
+}
+
 export interface Product {
   id: string
   businessId: string
@@ -79,29 +94,49 @@ export interface Product {
   price: number
   retail_price?: number
   cost?: number
+  cost_price?: number
   categoryId?: string
   stock: number
   lowStockThreshold?: number
   is_low_stock?: boolean // Backend-calculated low stock flag
   unit?: string
-  variations?: Array<{
+  
+  // Units only - no variations (UNITS ONLY ARCHITECTURE)
+  selling_units?: ProductUnit[]
+  
+  // Stock & location info
+  location_stocks?: Array<{
     id: string | number
-    name: string
-    price: number
-    cost?: number
-    sku?: string
-    barcode?: string
-    track_inventory: boolean
-    low_stock_threshold: number
-    total_stock?: number
-    stock?: number
-    is_low_stock?: boolean
-    unit?: string
-    is_active?: boolean
+    outlet_id: string | number
+    outlet_name?: string
+    quantity: number
+    available_quantity?: number
   }>
+  batches?: Array<{
+    id: string | number
+    batch_number: string
+    quantity: number
+    expiry_date: string
+    cost_price?: number
+    created_at?: string
+  }>
+  
+  // Display fields
   image?: string
   isActive: boolean
   createdAt: string
+  
+  // Additional fields from backend
+  outlet?: { id: string; name: string }
+  outlet_id?: string
+  outlet_name?: string
+  category?: { id: string; name: string }
+  wholesale_price?: number
+  wholesalePrice?: number
+  wholesale_enabled?: boolean
+  wholesaleEnabled?: boolean
+  minimum_wholesale_quantity?: number
+  minimumWholesaleQuantity?: number
 }
 
 export interface Category {

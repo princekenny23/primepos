@@ -10,6 +10,7 @@ export interface Customer {
   phone?: string
   address?: string
   loyalty_points?: number
+  points?: number
   total_spent?: number
   last_visit?: string
   is_active?: boolean
@@ -29,6 +30,8 @@ export interface CustomerFilters {
   outlet?: string
   is_active?: boolean
   search?: string
+  tenant?: string
+  businessId?: string
 }
 
 export interface CreditSummary {
@@ -77,11 +80,13 @@ export interface CreditPayment {
 }
 
 export const customerService = {
-  async list(filters?: CustomerFilters): Promise<Customer[]> {
+  async list(filters?: CustomerFilters): Promise<Customer[] | { results: Customer[]; count?: number }> {
     const params = new URLSearchParams()
     if (filters?.outlet) params.append("outlet", filters.outlet)
     if (filters?.is_active !== undefined) params.append("is_active", String(filters.is_active))
     if (filters?.search) params.append("search", filters.search)
+    if (filters?.tenant) params.append("tenant", filters.tenant)
+    if (filters?.businessId) params.append("business", filters.businessId)
     
     const query = params.toString()
     const response = await api.get<any>(`${apiEndpoints.customers.list}${query ? `?${query}` : ""}`)
@@ -89,7 +94,7 @@ export const customerService = {
     if (Array.isArray(response)) {
       return response
     }
-    return response.results || []
+    return response
   },
 
   async get(id: string): Promise<Customer> {

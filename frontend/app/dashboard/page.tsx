@@ -87,7 +87,7 @@ export default function DashboardPage() {
       setTopItems(top)
       
       // Process low stock items
-      const lowStock = Array.isArray(lowStockData) ? lowStockData : (lowStockData.results || [])
+      const lowStock = Array.isArray(lowStockData) ? lowStockData : ((lowStockData as any)?.results || [])
       const processedLowStock = lowStock.map((p: any) => {
         const lowVariation = p.variations?.find((v: any) => 
           v.track_inventory && 

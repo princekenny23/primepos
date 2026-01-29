@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 from .models import Sale, SaleItem, Receipt, ReceiptTemplate
 from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer
 from .services import ReceiptService
-from apps.products.models import Product, ProductUnit, ItemVariation
+from apps.products.models import Product, ProductUnit
 from apps.inventory.models import StockMovement, LocationStock, Batch
 from apps.inventory.stock_helpers import get_available_stock, deduct_stock, add_stock
 from apps.tenants.permissions import TenantFilterMixin
@@ -173,11 +173,25 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         table_id = serializer.validated_data.pop('table_id', None)
         guests = serializer.validated_data.pop('guests', None)
         priority = serializer.validated_data.pop('priority', 'normal')
+        till_id = serializer.validated_data.pop('till', None)
         
         # Get outlet object (already validated in serializer)
         outlet_id = serializer.validated_data.pop('outlet')
         from apps.outlets.models import Outlet
         outlet = Outlet.objects.get(id=outlet_id, tenant=tenant)
+        
+        # Validate and get till if provided
+        till = None
+        if till_id:
+            from apps.outlets.models import Till
+            try:
+                till = Till.objects.get(id=till_id, outlet=outlet)
+            except Till.DoesNotExist:
+                logger.warning(f"Till {till_id} not found in outlet {outlet.id}")
+                return Response(
+                    {"detail": f"Till {till_id} does not belong to selected outlet"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         
         # Get shift object if provided (already validated in serializer)
         shift = None
@@ -216,6 +230,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             table=table,
             guests=guests,
             priority=priority,
+            till=till,
             **serializer.validated_data
         )
         
@@ -251,17 +266,8 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             except Product.DoesNotExist:
                 raise serializers.ValidationError(f"Item {idx + 1}: Product {product_id} not found or does not belong to your tenant/outlet")
             
-            # Get variation if provided
+            # UNITS ONLY ARCHITECTURE: No variations, use units instead
             variation = None
-            if variation_id:
-                try:
-                    variation = ItemVariation.objects.select_for_update().get(
-                        id=variation_id,
-                        product=product,
-                        is_active=True
-                    )
-                except ItemVariation.DoesNotExist:
-                    raise serializers.ValidationError(f"Item {idx + 1}: Variation {variation_id} not found or inactive")
             
             # Get unit if provided
             unit = None
@@ -280,43 +286,16 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 except ProductUnit.DoesNotExist:
                     raise serializers.ValidationError(f"Item {idx + 1}: Unit {unit_id} not found or inactive")
             
-            # Check stock availability
-            if variation and variation.track_inventory:
-                # Use batch-aware stock checking for variations
-                available_stock = get_available_stock(variation, outlet)
-                
-                if available_stock < quantity_in_base_units:
-                    raise serializers.ValidationError(
-                        f"Item {idx + 1}: Insufficient stock for {product.name} - {variation.name}. "
-                        f"Available: {available_stock} {product.unit}, Requested: {quantity_in_base_units} {product.unit}"
-                    )
-                
-                # Deduct from batches (FIFO expiry logic)
-                try:
-                    deduct_stock(
-                        variation=variation,
-                        outlet=outlet,
-                        quantity=quantity_in_base_units,
-                        user=request.user,
-                        reference_id=str(sale.id),
-                        reason=f"Sale {sale.receipt_number}"
-                    )
-                except ValueError as e:
-                    raise serializers.ValidationError(f"Item {idx + 1}: {str(e)}")
-            elif variation and not variation.track_inventory:
-                # Variation exists but inventory tracking is disabled (e.g., services)
-                logger.info(f"Skipping inventory deduction for {variation.name} (track_inventory=False)")
-            else:
-                # Fallback to product.stock (legacy - for products without variations)
-                if product.stock < quantity_in_base_units:
-                    raise serializers.ValidationError(
-                        f"Item {idx + 1}: Insufficient stock for {product.name}. "
-                        f"Available: {product.stock} {product.unit}, Requested: {quantity_in_base_units} {product.unit}"
-                    )
-                
-                # Deduct from product stock (legacy path)
-                product.stock -= quantity_in_base_units
-                product.save(update_fields=['stock'])
+            # Check stock availability and deduct from product stock (UNITS ONLY ARCHITECTURE)
+            if product.stock < quantity_in_base_units:
+                raise serializers.ValidationError(
+                    f"Item {idx + 1}: Insufficient stock for {product.name}. "
+                    f"Available: {product.stock} {product.unit}, Requested: {quantity_in_base_units} {product.unit}"
+                )
+            
+            # Deduct from product stock
+            product.stock -= quantity_in_base_units
+            product.save(update_fields=['stock'])
             
             # Calculate item total - round to 2 decimal places
             item_total = (price * Decimal(quantity)).quantize(Decimal('0.01'))
@@ -326,14 +305,13 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             item_notes = item_data.get('notes', '')
             kitchen_status = item_data.get('kitchen_status', 'pending')
             
-            # Create sale item
+            # Create sale item (UNITS ONLY ARCHITECTURE - no variations)
             sale_item = SaleItem.objects.create(
                 sale=sale,
                 product=product,
-                variation=variation,
                 unit=unit,
                 product_name=product.name,
-                variation_name=variation.name if variation else '',
+                variation_name='',  # No variations in UNITS ONLY
                 unit_name=unit_name,
                 quantity=quantity,
                 quantity_in_base_units=quantity_in_base_units,
@@ -343,20 +321,17 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 kitchen_status=kitchen_status
             )
             
-            # Record stock movement only if variation doesn't track inventory (legacy products)
-            if not variation or not variation.track_inventory:
-                StockMovement.objects.create(
-                    tenant=tenant,
-                    product=product,
-                    variation=variation,
-                    outlet=sale.outlet,
-                    user=request.user,
-                    movement_type='sale',
-                    quantity=quantity_in_base_units,
-                    reference_id=str(sale.id),
-                    reason=f"Sale {sale.receipt_number}"
-                )
-            # Note: If variation.track_inventory=True, StockMovement was already created in deduct_stock()
+            # Record stock movement (UNITS ONLY ARCHITECTURE - all inventory is tracked via units)
+            StockMovement.objects.create(
+                tenant=tenant,
+                product=product,
+                outlet=sale.outlet,
+                user=request.user,
+                movement_type='sale',
+                quantity=quantity_in_base_units,
+                reference_id=str(sale.id),
+                reason=f"Sale {sale.receipt_number}"
+            )
         
         # Calculate totals - round to 2 decimal places to match DecimalField precision
         tax = sale.tax or Decimal('0')
@@ -608,36 +583,22 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Get variation if provided
+            # UNITS ONLY ARCHITECTURE: use product/batch-aware stock checks
             variation = None
-            if variation_id:
-                try:
-                    variation = ItemVariation.objects.select_for_update().get(
-                        id=variation_id,
-                        product=product,
-                        is_active=True
-                    )
-                except ItemVariation.DoesNotExist:
-                    return Response(
-                        {"detail": f"Item {idx + 1}: Variation {variation_id} not found or inactive"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            # Check stock availability using batch-aware logic
-            if variation and variation.track_inventory:
-                available_stock = get_available_stock(variation, outlet)
-                if available_stock < quantity:
-                    return Response(
-                        {"detail": f"Item {idx + 1}: Insufficient stock for {product.name} - {variation.name}. Available: {available_stock}, Requested: {quantity}"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            elif not variation:
-                # Legacy: check product.stock
-                if product.stock < quantity:
-                    return Response(
-                        {"detail": f"Item {idx + 1}: Insufficient stock for {product.name}. Available: {product.stock}, Requested: {quantity}"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+            try:
+                available_stock = get_available_stock(product, outlet)
+            except Exception:
+                available_stock = 0
+
+            # Fallback to legacy product.stock if no batch stock present
+            if available_stock <= 0:
+                available_stock = product.stock
+
+            if available_stock < quantity:
+                return Response(
+                    {"detail": f"Item {idx + 1}: Insufficient stock for {product.name}. Available: {available_stock}, Requested: {quantity}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
             item_total = price * Decimal(quantity)
             total_subtotal += item_total
@@ -719,10 +680,10 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             )
             
             # Deduct stock using batch-aware logic
-            if variation and variation.track_inventory:
+            if product:
                 try:
                     deduct_stock(
-                        variation=variation,
+                        product=product,
                         outlet=outlet,
                         quantity=item_data['quantity'],
                         user=request.user,

@@ -228,10 +228,11 @@ export default function TaxReportsPage() {
       </div>
 
       {/* Modals */}
-      <ExportReportModal
+      <DataExchangeModal
         open={showExport}
         onOpenChange={setShowExport}
-        reportType="Tax Report"
+        type="export"
+        config={dataExchangeConfigs.reports}
       />
       <PrintReportModal
         open={showPrint}

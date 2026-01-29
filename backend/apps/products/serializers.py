@@ -1,5 +1,5 @@
 from rest_framework import serializers  # pyright: ignore[reportMissingImports]
-from .models import Product, Category, ItemVariation, ProductUnit
+from .models import Product, Category, ProductUnit
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -21,160 +21,92 @@ class CategorySerializer(serializers.ModelSerializer):
         return representation
 
 
-class ItemVariationSerializer(serializers.ModelSerializer):
-    """Item Variation serializer"""
-    total_stock = serializers.SerializerMethodField()
-    is_low_stock = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = ItemVariation
-        fields = (
-            'id', 'product', 'name', 'price', 'cost', 'sku', 'barcode',
-            'track_inventory', 'unit', 'low_stock_threshold', 'is_active',
-            'sort_order', 'total_stock', 'is_low_stock', 'created_at', 'updated_at'
-        )
-        read_only_fields = ('id', 'created_at', 'updated_at')
-        extra_kwargs = {
-            'sku': {'required': False, 'allow_blank': True},
-            'barcode': {'required': False, 'allow_blank': True},
-            'cost': {'required': False, 'allow_null': True},
-        }
-    
-    def get_total_stock(self, obj):
-        """Get total stock across all outlets"""
-        outlet = self.context.get('outlet')
-        return obj.get_total_stock(outlet=outlet)
-    
-    def get_is_low_stock(self, obj):
-        """Check if variation is low on stock"""
-        if not obj.track_inventory:
-            return False
-        outlet = self.context.get('outlet')
-        total_stock = obj.get_total_stock(outlet=outlet)
-        return obj.low_stock_threshold > 0 and total_stock <= obj.low_stock_threshold
-    
-    def validate_sku(self, value):
-        """Ensure SKU is unique per product (if provided)"""
-        if not value or (isinstance(value, str) and value.strip() == ""):
-            return None  # Return None instead of empty string
-        
-        product = self.initial_data.get('product') or (self.instance.product if self.instance else None)
-        if not product:
-            return value
-        
-        # Check if SKU exists for other variations of the same product
-        existing = ItemVariation.objects.filter(product=product, sku=value)
-        if self.instance:
-            existing = existing.exclude(pk=self.instance.pk)
-        
-        if existing.exists():
-            raise serializers.ValidationError("SKU already exists for another variation of this product")
-        
-        return value
-
-    def validate_barcode(self, value):
-        """Ensure barcode is unique across variations and products within tenant/outlet"""
-        # Allow blank input but persist as empty string (DB column is NOT NULL)
-        if not value or (isinstance(value, str) and value.strip() == ""):
-            return ""
-
-        request = self.context.get('request')
-        if not request:
-            return value
-
-        tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') and request.user.is_authenticated else None)
-        outlet = None
-        try:
-            outlet = getattr(request, 'outlet', None) or (request.query_params.get('outlet') if hasattr(request, 'query_params') else None)
-        except Exception:
-            outlet = None
-
-        barcode_val = str(value).strip()
-
-        # Check other variations
-        var_qs = ItemVariation.objects.filter(barcode__iexact=barcode_val, product__tenant=tenant)
-        if self.instance:
-            var_qs = var_qs.exclude(pk=self.instance.pk)
-        if outlet:
-            try:
-                var_qs = var_qs.filter(product__outlet=outlet)
-            except Exception:
-                pass
-        if var_qs.exists():
-            raise serializers.ValidationError("Barcode already exists for another variation in this tenant/outlet")
-
-        # Check products
-        prod_qs = Product.objects.filter(barcode__iexact=barcode_val, tenant=tenant)
-        if outlet:
-            try:
-                prod_qs = prod_qs.filter(outlet=outlet)
-            except Exception:
-                pass
-        if prod_qs.exists():
-            raise serializers.ValidationError("Barcode already exists for a product in this tenant/outlet")
-
-        return barcode_val
-
-
 class ProductUnitSerializer(serializers.ModelSerializer):
-    """Product Unit serializer for multi-unit selling"""
-    stock_in_unit = serializers.SerializerMethodField()
+    """Product Unit serializer - UNITS ONLY ARCHITECTURE
+    Each product is sold exclusively through units.
+    Base unit (conversion_factor=1.0) represents actual inventory in base form.
+    """
+    stock_in_base_units = serializers.SerializerMethodField()
+    is_base_unit = serializers.BooleanField(read_only=True)
     
     class Meta:
         model = ProductUnit
         fields = (
             'id', 'product', 'unit_name', 'conversion_factor', 'retail_price', 
-            'wholesale_price', 'is_active', 'sort_order', 'stock_in_unit', 
-            'created_at', 'updated_at'
+            'wholesale_price', 'is_active', 'is_base_unit', 'low_stock_threshold',
+            'sort_order', 'stock_in_base_units', 'created_at', 'updated_at'
         )
-        read_only_fields = ('id', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'created_at', 'updated_at', 'is_base_unit')
+        extra_kwargs = {
+            'conversion_factor': {'min_value': 1.0},
+        }
     
-    def get_stock_in_unit(self, obj):
-        """Get stock converted to this unit"""
-        outlet = self.context.get('outlet')
-        if outlet:
-            # Get stock from LocationStock if variation exists, else from product
-            if obj.product.variations.exists():
-                from apps.inventory.models import LocationStock
-                from django.db.models import Sum
-                variations = obj.product.variations.filter(is_active=True, track_inventory=True)
-                location_stocks = LocationStock.objects.filter(
-                    variation__in=variations,
-                    outlet=outlet
-                )
-                total_base_units = location_stocks.aggregate(total=Sum('quantity'))['total'] or 0
-            else:
-                total_base_units = obj.product.stock
+    def get_stock_in_base_units(self, obj):
+        """Get total stock in base units for this product"""
+        try:
+            from apps.inventory.stock_helpers import get_available_stock
             
-            # Convert to this unit
-            if obj.conversion_factor > 0:
-                return float(total_base_units / obj.conversion_factor)
+            outlet = self.context.get('outlet')
+            if outlet:
+                return get_available_stock(obj, outlet)
+            
+            # Get stock across all outlets
+            from apps.outlets.models import Outlet
+            outlets = Outlet.objects.filter(tenant=obj.product.tenant)
+            total = sum(get_available_stock(obj, outlet_obj) for outlet_obj in outlets)
+            return total
+        except Exception:
             return 0
-        return None
+    
+    def validate_unit_name(self, value):
+        """Ensure unit_name is not empty"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Unit name cannot be empty")
+        return value.strip()
+    
+    def validate_conversion_factor(self, value):
+        """Ensure conversion_factor is at least 1.0"""
+        if value < 1.0:
+            raise serializers.ValidationError("Conversion factor must be at least 1.0")
+        return value
 
 
 class ProductSerializer(serializers.ModelSerializer):
-    """Product serializer with variation support"""
+    """Product serializer - UNITS ONLY ARCHITECTURE
+    
+    Products have:
+    - Base info (name, sku, barcode, category)
+    - At least one ProductUnit with conversion_factor=1.0
+    - Optional additional units (dozen, carton, etc.)
+    - Pricing and stock tracked through units, not variations
+    """
     category = CategorySerializer(read_only=True)
-    category_id = serializers.IntegerField(
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=Category.objects.all(),
         source='category',
         write_only=True,
         required=False,
         allow_null=True
     )
     is_low_stock = serializers.SerializerMethodField()
-    # stock is writable for create/update, but calculated from LocationStock when reading
-    stock = serializers.IntegerField(required=False, allow_null=True, min_value=0, default=0)
-    variations = ItemVariationSerializer(many=True, read_only=True)
-    default_variation = ItemVariationSerializer(read_only=True)
+    # selling_units for reading
     selling_units = ProductUnitSerializer(many=True, read_only=True)
+    # selling_units_data for writing (accepts raw data)
+    selling_units_data = serializers.ListField(child=serializers.DictField(), write_only=True, required=False)
     
-    # Backward compatibility fields
+    # Legacy field for backward compatibility
     price = serializers.SerializerMethodField()
     cost_price = serializers.SerializerMethodField()
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Filter category queryset by tenant
+        request = self.context.get('request')
+        if request:
+            tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') else None)
+            if tenant and 'category_id' in self.fields:
+                self.fields['category_id'].queryset = Category.objects.filter(tenant=tenant)
+        
         # Make tenant and outlet read-only (set automatically from request context)
         if 'tenant' in self.fields:
             self.fields['tenant'].read_only = True
@@ -188,304 +120,158 @@ class ProductSerializer(serializers.ModelSerializer):
             'sku', 'barcode', 'retail_price', 'price', 'cost', 'cost_price', 
             'wholesale_price', 'wholesale_enabled', 'minimum_wholesale_quantity', 
             'stock', 'low_stock_threshold', 'unit', 'image', 'is_active', 
-            'is_low_stock', 'variations', 'default_variation', 'selling_units', 
+            'is_low_stock', 'selling_units', 'selling_units_data',
             'created_at', 'updated_at'
         )
-        read_only_fields = ('id', 'tenant', 'outlet', 'created_at', 'updated_at', 'price', 'variations', 'default_variation', 'selling_units')
+        read_only_fields = ('id', 'tenant', 'outlet', 'created_at', 'updated_at', 'price', 'cost_price', 'selling_units')
         extra_kwargs = {
             'sku': {'required': False, 'allow_blank': True},
+            'barcode': {'required': False, 'allow_blank': True},
+            'retail_price': {'required': False},  # Can come from units instead
             'wholesale_price': {'required': False, 'allow_null': True},
-            'minimum_wholesale_quantity': {'required': False},
+            'stock': {'required': False, 'allow_null': True, 'min_value': 0, 'default': 0},
         }
     
+    def get_is_low_stock(self, obj):
+        """Check if product has low stock"""
+        return obj.is_low_stock
+    
     def get_price(self, obj):
-        """Backward compat: return default variation price or retail_price"""
-        return obj.get_price()
+        """Get price from base unit (backward compatibility)"""
+        return obj.get_price('retail')
     
     def get_cost_price(self, obj):
-        """Backward compat: return default variation cost or cost"""
-        return obj.get_cost()
+        """Get cost from product model (backward compatibility)"""
+        return obj.cost
     
-    def to_representation(self, instance):
-        """Override to show calculated stock from LocationStock in response"""
-        representation = super().to_representation(instance)
-        # Replace stock with calculated value from LocationStock when reading
-        outlet = self.context.get('outlet')
-        representation['stock'] = instance.get_total_stock(outlet=outlet)
-        return representation
+    def validate(self, data):
+        """Validate that product configuration is valid"""
+        # Get selling_units_data if provided
+        selling_units_data = data.get('selling_units_data')
+        
+        if selling_units_data:
+            # Validate: at least one unit provided
+            if not selling_units_data or len(selling_units_data) == 0:
+                raise serializers.ValidationError("Product must have at least one unit")
+            
+            # Validate: at least one base unit (conversion_factor = 1.0)
+            base_units = [u for u in selling_units_data if u.get('conversion_factor') == 1.0]
+            if not base_units:
+                raise serializers.ValidationError("Product must have exactly one base unit (conversion_factor = 1.0)")
+            
+            # Validate: unique unit names
+            unit_names = [u.get('unit_name') for u in selling_units_data]
+            if len(unit_names) != len(set(unit_names)):
+                raise serializers.ValidationError("Unit names must be unique within product")
+            
+            # Validate: all units have prices
+            for unit in selling_units_data:
+                if not unit.get('retail_price') or unit.get('retail_price') <= 0:
+                    raise serializers.ValidationError(f"Unit '{unit.get('unit_name')}' must have retail_price > 0")
+        
+        return data
     
-    def get_is_low_stock(self, obj):
-        """Check if product is low stock by checking variations"""
-        outlet = self.context.get('outlet')
+    def create(self, validated_data):
+        """Create product with units"""
+        selling_units_data = validated_data.pop('selling_units_data', [])
         
-        # Check product-level threshold
-        if obj.low_stock_threshold > 0:
-            total_stock = obj.get_total_stock(outlet=outlet)
-            if total_stock <= obj.low_stock_threshold:
-                return True
+        # Create product
+        product = Product.objects.create(**validated_data)
         
-        # Check variation-level thresholds
-        variations = obj.variations.filter(is_active=True, track_inventory=True)
-        for variation in variations:
-            if variation.low_stock_threshold > 0:
-                var_stock = variation.get_total_stock(outlet=outlet)
-                if var_stock <= variation.low_stock_threshold:
-                    return True
+        # Create units if provided
+        if selling_units_data:
+            for unit_data in selling_units_data:
+                ProductUnit.objects.create(product=product, **unit_data)
         
-        return False
+        return product
+    
+    def update(self, instance, validated_data):
+        """Update product (note: units are updated separately)"""
+        selling_units_data = validated_data.pop('selling_units_data', None)
+        
+        # Update product fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Note: Unit updates should be done through ProductUnitSerializer
+        # This prevents accidental unit loss in product update
+        
+        return instance
     
     def validate_sku(self, value):
-        """Ensure SKU is unique per tenant (if provided)"""
+        """Ensure SKU is unique per product (if provided)"""
         if not value or (isinstance(value, str) and value.strip() == ""):
-            # SKU is optional, return None instead of empty string
             return None
-            
+        
+        # Check if SKU exists for another product in same tenant/outlet
+        request = self.context.get('request')
+        if not request:
+            return value
+        
+        tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') else None)
+        outlet = getattr(request, 'outlet', None) or (self.instance.outlet if self.instance else None)
+        
+        existing = Product.objects.filter(sku=value, tenant=tenant)
+        if outlet:
+            existing = existing.filter(outlet=outlet)
+        
         if self.instance:
-            # Update: check if SKU exists for other products in same tenant
-            if Product.objects.filter(tenant=self.instance.tenant, sku=value).exclude(pk=self.instance.pk).exists():
-                raise serializers.ValidationError("SKU already exists for this tenant")
-        else:
-            # Create: check if SKU exists
-            request = self.context.get('request')
-            if request:
-                tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') and request.user.is_authenticated else None)
-                if tenant and Product.objects.filter(tenant=tenant, sku=value).exists():
-                    raise serializers.ValidationError("SKU already exists for this tenant")
+            existing = existing.exclude(pk=self.instance.pk)
+        
+        if existing.exists():
+            raise serializers.ValidationError("SKU already exists for another product")
+        
         return value
-
+    
     def validate_barcode(self, value):
-        """Ensure barcode is unique across products and variations for the tenant/outlet"""
+        """Ensure barcode is unique per tenant/outlet"""
         if not value or (isinstance(value, str) and value.strip() == ""):
-            return None
-
-        request = self.context.get('request')
-        if not request:
-            return value
-
-        tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') and request.user.is_authenticated else None)
-        outlet = None
-        try:
-            outlet = getattr(request, 'outlet', None) or (request.query_params.get('outlet') if hasattr(request, 'query_params') else None)
-        except Exception:
-            outlet = None
-
-        # Normalize
-        barcode_val = str(value).strip()
-
-        # Check against other products
-        prod_qs = Product.objects.filter(tenant=tenant, barcode__iexact=barcode_val)
-        if self.instance:
-            prod_qs = prod_qs.exclude(pk=self.instance.pk)
-        if outlet:
-            try:
-                prod_qs = prod_qs.filter(outlet=outlet)
-            except Exception:
-                pass
-        if prod_qs.exists():
-            raise serializers.ValidationError("Barcode already exists for another product in this tenant/outlet")
-
-        # Check against variations
-        var_qs = ItemVariation.objects.filter(barcode__iexact=barcode_val, product__tenant=tenant)
-        if self.instance and hasattr(self.instance, 'id'):
-            var_qs = var_qs.exclude(pk=getattr(self.instance, 'id'))
-        if outlet:
-            try:
-                var_qs = var_qs.filter(product__outlet=outlet)
-            except Exception:
-                pass
-        if var_qs.exists():
-            raise serializers.ValidationError("Barcode already exists for a variation of another product in this tenant/outlet")
-
-        return barcode_val
-    
-    def generate_sku(self, tenant):
-        """Generate a unique SKU for the tenant"""
-        import re
-        
-        # Get tenant code - use first 3-5 uppercase letters/numbers from name
-        tenant_name = tenant.name.upper()
-        # Remove special characters and spaces, take first 3-5 chars
-        tenant_code = re.sub(r'[^A-Z0-9]', '', tenant_name)[:5]
-        if not tenant_code:
-            # Fallback to tenant ID if name has no valid characters
-            tenant_code = f"T{tenant.id}"
-        
-        # Get the last product number for this tenant
-        last_product = Product.objects.filter(tenant=tenant, sku__isnull=False).exclude(sku='').order_by('-id').first()
-        if last_product and last_product.sku:
-            # Try to extract number from existing SKU
-            try:
-                # Format: TENANT-PROD-0001 or TENANT-0001
-                parts = last_product.sku.split('-')
-                if len(parts) > 1:
-                    # Get the last part which should be the number
-                    last_num_str = parts[-1]
-                    last_num = int(last_num_str)
-                    next_num = last_num + 1
-                else:
-                    # If no dash, try to extract number from end
-                    match = re.search(r'(\d+)$', last_product.sku)
-                    if match:
-                        next_num = int(match.group(1)) + 1
-                    else:
-                        next_num = Product.objects.filter(tenant=tenant, sku__isnull=False).exclude(sku='').count() + 1
-            except (ValueError, IndexError, AttributeError):
-                next_num = Product.objects.filter(tenant=tenant, sku__isnull=False).exclude(sku='').count() + 1
-        else:
-            next_num = Product.objects.filter(tenant=tenant, sku__isnull=False).exclude(sku='').count() + 1
-        
-        # Generate SKU: TENANT-PROD-0001
-        sku = f"{tenant_code}-PROD-{next_num:04d}"
-        
-        # Ensure uniqueness
-        max_attempts = 1000
-        attempts = 0
-        while Product.objects.filter(tenant=tenant, sku=sku).exists() and attempts < max_attempts:
-            next_num += 1
-            sku = f"{tenant_code}-PROD-{next_num:04d}"
-            attempts += 1
-        
-        if attempts >= max_attempts:
-            # Fallback: use timestamp-based SKU
-            import time
-            sku = f"{tenant_code}-PROD-{int(time.time())}"
-        
-        return sku
-    
-    def validate_category_id(self, value):
-        """Ensure category exists and belongs to the same tenant"""
-        if value is None:
-            return value
+            return ""
         
         request = self.context.get('request')
         if not request:
-            raise serializers.ValidationError("Request context is missing.")
+            return value
         
-        tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') and request.user.is_authenticated else None)
-        if not tenant:
-            raise serializers.ValidationError("Unable to determine tenant. Please ensure you are authenticated.")
+        tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') else None)
+        outlet = getattr(request, 'outlet', None)
         
-        # Try to get the category
-        try:
-            category = Category.objects.get(pk=value)
-        except Category.DoesNotExist:
-            raise serializers.ValidationError(f"Category with ID {value} does not exist.")
+        existing = Product.objects.filter(barcode__iexact=str(value).strip(), tenant=tenant)
+        if outlet:
+            existing = existing.filter(outlet=outlet)
         
-        # Verify the category belongs to the tenant
-        if category.tenant != tenant:
-            raise serializers.ValidationError("Category does not belong to your tenant")
-        
-        return category  # Return the category object, not the ID
-    
-    def validate_wholesale_price(self, value):
-        """Validate wholesale price"""
-        if value is not None and value != '':
-            from decimal import Decimal
-            try:
-                # Convert to Decimal if it's a string
-                if isinstance(value, str):
-                    value = Decimal(value)
-                elif isinstance(value, (int, float)):
-                    value = Decimal(str(value))
-                
-                if value < Decimal('0.01'):
-                    raise serializers.ValidationError("Wholesale price must be greater than 0.01")
-            except (ValueError, TypeError):
-                raise serializers.ValidationError("Wholesale price must be a valid number")
-        elif value == '':
-            # Empty string should be converted to None
-            return None
-        return value
-    
-    def validate(self, attrs):
-        """Auto-generate SKU if not provided and ensure uniqueness. Handle backward compatibility for price field."""
-        # Handle backward compatibility: if 'price' is provided, map it to 'retail_price'
-        if 'price' in attrs and 'retail_price' not in attrs:
-            attrs['retail_price'] = attrs.pop('price')
-        
-        # Handle backward compatibility: if 'cost_price' is provided, map it to 'cost'
-        if 'cost_price' in attrs and 'cost' not in attrs:
-            attrs['cost'] = attrs.pop('cost_price')
-        
-        # Validate wholesale pricing logic
-        wholesale_enabled = attrs.get('wholesale_enabled', False)
-        # Check instance if updating
         if self.instance:
-            wholesale_enabled = attrs.get('wholesale_enabled', self.instance.wholesale_enabled)
+            existing = existing.exclude(pk=self.instance.pk)
         
-        # Handle wholesale_price - convert empty strings to None
-        wholesale_price = attrs.get('wholesale_price')
-        if wholesale_price == '' or wholesale_price is None:
-            wholesale_price = None
-            attrs['wholesale_price'] = None
+        if existing.exists():
+            raise serializers.ValidationError("Barcode already exists for another product")
         
-        if wholesale_enabled:
-            # If wholesale is enabled, wholesale_price should be provided
-            if wholesale_price is None:
-                # On update, check existing value
-                if self.instance:
-                    wholesale_price = self.instance.wholesale_price
-                else:
-                    wholesale_price = None
-            
-            if wholesale_price is None:
-                raise serializers.ValidationError({
-                    'wholesale_price': 'Wholesale price is required when wholesale is enabled.'
-                })
-            
-            # Ensure minimum_wholesale_quantity is at least 1
-            min_qty = attrs.get('minimum_wholesale_quantity', 1)
-            if self.instance and 'minimum_wholesale_quantity' not in attrs:
-                min_qty = self.instance.minimum_wholesale_quantity
-            
-            if min_qty < 1:
-                attrs['minimum_wholesale_quantity'] = 1
-        else:
-            # If wholesale is disabled, clear wholesale_price and reset minimum_wholesale_quantity
-            attrs['wholesale_enabled'] = False
-            attrs['wholesale_price'] = None
-            attrs['minimum_wholesale_quantity'] = 1
+        return str(value).strip()
+
+    def create(self, validated_data):
+        """Create product with units"""
+        selling_units_data = validated_data.pop('selling_units_data', [])
         
-        # Handle SKU - optional, validate uniqueness if provided
-        if not self.instance:
-            # On create: validate SKU if provided
-            sku_value = attrs.get('sku')
-            if sku_value:
-                # SKU provided - normalize and validate
-                if isinstance(sku_value, str):
-                    sku = sku_value.strip()
-                else:
-                    sku = str(sku_value).strip()
-                
-                # Only validate uniqueness if SKU is not empty
-                if sku:
-                    request = self.context.get('request')
-                    if request:
-                        tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') and request.user.is_authenticated else None)
-                        if tenant and Product.objects.filter(tenant=tenant, sku=sku).exists():
-                            raise serializers.ValidationError({'sku': 'SKU already exists for this tenant.'})
-                    attrs['sku'] = sku
-                else:
-                    # Empty string - set to None (NULL in database)
-                    attrs['sku'] = None
-            else:
-                # No SKU provided - set to None (NULL in database)
-                attrs['sku'] = None
-        else:
-            # On update: validate SKU if provided
-            if 'sku' in attrs:
-                sku_value = attrs.get('sku')
-                if sku_value:
-                    if isinstance(sku_value, str):
-                        sku = sku_value.strip()
-                    else:
-                        sku = str(sku_value).strip()
-                    
-                    # Only validate uniqueness if SKU is not empty
-                    if sku:
-                        if Product.objects.filter(tenant=self.instance.tenant, sku=sku).exclude(pk=self.instance.pk).exists():
-                            raise serializers.ValidationError({'sku': 'SKU already exists for this tenant.'})
-                        attrs['sku'] = sku
-                    else:
-                        attrs['sku'] = None
-        return attrs
+        # Create product
+        product = Product.objects.create(**validated_data)
+        
+        # Create units if provided
+        if selling_units_data:
+            for unit_data in selling_units_data:
+                ProductUnit.objects.create(product=product, **unit_data)
+        
+        return product
+    
+    def update(self, instance, validated_data):
+        """Update product (units are updated separately via ProductUnitSerializer)"""
+        selling_units_data = validated_data.pop('selling_units_data', None)
+        
+        # Update product fields - DRF handles foreign key conversion automatically
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        # Note: Unit updates should be done through ProductUnitSerializer
+        # This prevents accidental unit loss in product update
+        
+        return instance

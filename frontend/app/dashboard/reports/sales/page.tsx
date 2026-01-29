@@ -228,13 +228,12 @@ export default function SalesReportsPage() {
             </Table>
           </CardContent>
         </Card>
-      </div>
-
       {/* Modals */}
-      <ExportReportModal
+      <DataExchangeModal
         open={showExport}
         onOpenChange={setShowExport}
-        reportType="Sales Report"
+        type="export"
+        config={dataExchangeConfigs.reports}
       />
       <PrintReportModal
         open={showPrint}

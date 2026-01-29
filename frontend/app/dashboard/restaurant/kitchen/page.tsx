@@ -229,7 +229,7 @@ export default function KitchenPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {order.items.map((item, idx) => (
+                      {order.items.map((item: any, idx: number) => (
                         <div
                           key={idx}
                           className={`p-3 border rounded-lg ${

@@ -389,12 +389,20 @@ export const apiEndpoints = {
     delete: (id: string) => `/products/${id}/`,    lookup: "/products/lookup/",  },
   // Variations
   variations: {
-    list: "/products/variations/",
-    get: (id: string) => `/products/variations/${id}/`,
-    create: "/products/variations/",
-    update: (id: string) => `/products/variations/${id}/`,
-    delete: (id: string) => `/products/variations/${id}/`,
-    bulkUpdateStock: "/products/variations/bulk_update_stock/",
+    list: "/variations/",
+    get: (id: string) => `/variations/${id}/`,
+    create: "/variations/",
+    update: (id: string) => `/variations/${id}/`,
+    delete: (id: string) => `/variations/${id}/`,
+    bulkUpdateStock: "/variations/bulk_update_stock/",
+  },
+  // Product Units
+  units: {
+    list: "/units/",
+    get: (id: string) => `/units/${id}/`,
+    create: "/units/",
+    update: (id: string) => `/units/${id}/`,
+    delete: (id: string) => `/units/${id}/`,
   },
   // Location Stock
   locationStock: {

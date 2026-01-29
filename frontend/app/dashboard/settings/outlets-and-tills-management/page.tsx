@@ -77,9 +77,9 @@ export default function OutletsAndTillsManagementPage() {
     loadData()
   }, [currentBusiness?.id, loadOutlets])
 
-  // Load tills
+  // Load tills for current outlet
   const loadTills = useCallback(async () => {
-    if (!currentBusiness) {
+    if (!currentBusiness || !currentOutlet) {
       setTills([])
       setIsLoadingTills(false)
       return
@@ -87,7 +87,7 @@ export default function OutletsAndTillsManagementPage() {
     
     setIsLoadingTills(true)
     try {
-      const response = await tillService.list()
+      const response = await tillService.list({ outlet: String(currentOutlet.id) })
       const tillsData = Array.isArray(response) ? response : (response.results || [])
       setTills(tillsData)
     } catch (error) {
@@ -101,7 +101,7 @@ export default function OutletsAndTillsManagementPage() {
     } finally {
       setIsLoadingTills(false)
     }
-  }, [currentBusiness, toast])
+  }, [currentBusiness, currentOutlet, toast])
 
   useEffect(() => {
     loadTills()

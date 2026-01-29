@@ -19,7 +19,8 @@ import {
   Wallet
 } from "lucide-react"
 import { useState } from "react"
-import { ExportReportModal } from "@/components/modals/export-report-modal"
+import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
+import { dataExchangeConfigs } from "@/lib/utils/data-exchange-config"
 import { OptionCard, type OptionCardProps } from "@/components/shared/option-card"
 import { useI18n } from "@/contexts/i18n-context"
 
@@ -208,10 +209,11 @@ export default function ReportsPage() {
 
       {/* Export Modal */}
       {exportingReport && (
-        <ExportReportModal
+        <DataExchangeModal
           open={!!exportingReport}
           onOpenChange={(open) => !open && setExportingReport(null)}
-          reportType={reportCards.find(r => r.id === exportingReport)?.title || "Report"}
+          type="export"
+          config={dataExchangeConfigs.reports}
         />
       )}
     </DashboardLayout>

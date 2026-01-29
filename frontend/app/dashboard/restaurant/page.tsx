@@ -40,20 +40,7 @@ const restaurantOptions: (Omit<OptionCardProps, "iconSize">)[] = [
     href: "/dashboard/restaurant/menu",
     icon: BookOpen,
   },
-  {
-    id: "recipes",
-    title: "Recipes",
-    titleKey: "pos.restaurant.recipes",
-    href: "/dashboard/restaurant/recipes",
-    icon: UtensilsCrossed,
-  },
-  {
-    id: "reservations",
-    title: "Reservations",
-    titleKey: "pos.restaurant.reservations",
-    href: "/dashboard/restaurant/reservations",
-    icon: Calendar,
-  },
+
 ]
 
 export default function RestaurantPage() {

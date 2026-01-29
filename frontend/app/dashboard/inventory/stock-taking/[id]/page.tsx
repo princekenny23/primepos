@@ -33,7 +33,7 @@ import { ClipboardCheck, Search, Save, ArrowLeft, CheckCircle2, Zap, X } from "l
 import { useState, useEffect, useMemo } from "react"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { productService } from "@/lib/services/productService"
-import { AddEditProductModal } from "@/components/modals/add-edit-product-modal"
+import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 import { useRouter, useParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { inventoryService } from "@/lib/services/inventoryService"
@@ -760,7 +760,7 @@ export default function StockTakingDetailPage() {
       </Dialog>
 
       {/* Add/Edit Product Modal for scanned barcodes */}
-      <AddEditProductModal
+      <ProductModalTabs
         open={showAddProduct}
         onOpenChange={(open) => {
           setShowAddProduct(open)

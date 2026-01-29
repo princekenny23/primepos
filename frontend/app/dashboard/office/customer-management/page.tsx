@@ -80,7 +80,9 @@ export default function CustomerManagementPage() {
         outlet: outletFilter !== "all" ? outletFilter : undefined,
         is_active: true,
       })
-      setCustomers(response)
+      // Handle both array and paginated response formats
+      const customerList = Array.isArray(response) ? response : (response?.results || [])
+      setCustomers(customerList)
     } catch (error) {
       console.error("Failed to load customers:", error)
       toast({

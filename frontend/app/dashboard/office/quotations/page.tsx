@@ -65,7 +65,7 @@ import { useRouter } from "next/navigation"
 import { quotationService, type Quotation } from "@/lib/services/quotationService"
 import { useTenant } from "@/contexts/tenant-context"
 import { SelectProductModal } from "@/components/modals/select-product-modal"
-import { SelectCustomerModal } from "@/components/modals/select-customer-modal"
+import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 
 export default function QuotationsPage() {
   const { currentBusiness } = useBusinessStore()
@@ -977,11 +977,10 @@ export default function QuotationsPage() {
               outletId={currentOutlet?.id ? String(currentOutlet.id) : undefined}
             />
 
-            <SelectCustomerModal
+            <CustomerSelectModal
               open={showCustomerSelector}
               onOpenChange={setShowCustomerSelector}
               onSelect={onSelectCustomer}
-              outletId={currentOutlet?.id ? String(currentOutlet.id) : undefined}
             />
           </DialogContent>
         </Dialog>

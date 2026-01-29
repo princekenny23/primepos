@@ -9,9 +9,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SalesChart } from "@/components/dashboard/sales-chart"
 import { RefreshCw, FileSpreadsheet, Printer } from "lucide-react"
-import { ExportReportModal } from "@/components/modals/export-report-modal"
+import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
 import { PrintReportModal } from "@/components/modals/print-report-modal"
 import { ReportSettingsModal } from "@/components/modals/report-settings-modal"
+import { dataExchangeConfigs } from "@/lib/utils/data-exchange-config"
 import { useI18n } from "@/contexts/i18n-context"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
@@ -226,10 +227,11 @@ export default function ProfitLossReportsPage() {
       </PageLayout>
 
       {/* Modals */}
-      <ExportReportModal
+      <DataExchangeModal
         open={showExport}
         onOpenChange={setShowExport}
-        reportType={t("reports.menu.profit_loss")}
+        type="export"
+        config={dataExchangeConfigs.reports}
       />
       <PrintReportModal
         open={showPrint}

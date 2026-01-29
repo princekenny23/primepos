@@ -1,13 +1,11 @@
 from rest_framework import serializers  # pyright: ignore[reportMissingImports]
 from .models import StockMovement, StockTake, StockTakeItem, LocationStock, Batch
-from apps.products.serializers import ProductSerializer, ItemVariationSerializer
-from apps.products.models import Product, ItemVariation
+from apps.products.serializers import ProductSerializer
+from apps.products.models import Product
 
 
 class BatchSerializer(serializers.ModelSerializer):
-    """Batch serializer with expiry tracking"""
-    variation = ItemVariationSerializer(read_only=True)
-    variation_id = serializers.PrimaryKeyRelatedField(write_only=True, source='variation', queryset=ItemVariation.objects.all())
+    """Batch serializer with expiry tracking - UNITS ONLY ARCHITECTURE"""
     outlet_name = serializers.CharField(source='outlet.name', read_only=True)
     product_name = serializers.SerializerMethodField()
     is_expired = serializers.SerializerMethodField()
@@ -15,8 +13,8 @@ class BatchSerializer(serializers.ModelSerializer):
     days_until_expiry = serializers.ReadOnlyField()
     
     def get_product_name(self, obj):
-        """Get product name from variation"""
-        return obj.variation.product.name if obj.variation else "Unknown"
+        """Get product name from batch"""
+        return obj.product.name if obj.product else "Unknown"
     
     def get_is_expired(self, obj):
         """Check if batch is expired"""
@@ -28,7 +26,7 @@ class BatchSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Batch
-        fields = ('id', 'tenant', 'variation', 'variation_id', 'outlet', 'outlet_name', 
+        fields = ('id', 'tenant', 'product', 'product_id', 'outlet', 'outlet_name', 
                   'batch_number', 'expiry_date', 'quantity', 'sellable_quantity', 
                   'cost_price', 'product_name', 'is_expired', 'days_until_expiry',
                   'created_at', 'updated_at')
@@ -42,10 +40,10 @@ class StockMovementSerializer(serializers.ModelSerializer):
     batch_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='batch', queryset=Batch.objects.all())
     product = ProductSerializer(read_only=True)
     product_name = serializers.SerializerMethodField()
-    variation = ItemVariationSerializer(read_only=True)
+    # REMOVED: variation = ItemVariationSerializer(read_only=True)
     variation_name = serializers.SerializerMethodField()
     product_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='product', queryset=Product.objects.all())
-    variation_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='variation', queryset=ItemVariation.objects.all())
+    # REMOVED: variation_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='variation', queryset=ItemVariation.objects.all())
     user_name = serializers.SerializerMethodField()
     outlet_name = serializers.SerializerMethodField()
     
@@ -79,37 +77,30 @@ class StockMovementSerializer(serializers.ModelSerializer):
         instance = getattr(self, 'instance', None)
 
         product = attrs.get('product') or (instance.product if instance else None)
-        variation = attrs.get('variation') or (instance.variation if instance else None)
-
-        if not product and not variation:
-            raise serializers.ValidationError("Either product or variation must be set")
-
-        if product and variation:
-           raise serializers.ValidationError("Cannot set both product and variation")
-
-        if variation and not product:
-           attrs['product'] = variation.product
+        
+        # UNITS ONLY ARCHITECTURE: No variation support
+        if not product:
+            raise serializers.ValidationError("product is required")
 
         return attrs
-
 
     
     class Meta:
         model = StockMovement
         fields = ('id', 'tenant', 'batch', 'batch_id', 'product', 'product_id', 'product_name', 
-                  'variation', 'variation_id', 'variation_name', 'outlet', 'outlet_name', 'user', 'user_name', 
+                  'outlet', 'outlet_name', 'user', 'user_name', 
                   'movement_type', 'quantity', 'reason', 'reference_id', 'created_at')
-        read_only_fields = ('id', 'created_at', 'product_name', 'variation_name', 'user_name', 'outlet_name')
+        read_only_fields = ('id', 'created_at', 'product_name', 'user_name', 'outlet_name')
 
 
 class StockTakeItemSerializer(serializers.ModelSerializer):
     """Stock take item serializer with variation support"""
     product = ProductSerializer(read_only=True)
     product_name = serializers.SerializerMethodField()
-    variation = ItemVariationSerializer(read_only=True)
+    # REMOVED: variation = ItemVariationSerializer(read_only=True)
     variation_name = serializers.SerializerMethodField()
     product_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='product', queryset=Product.objects.all())
-    variation_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='variation', queryset=ItemVariation.objects.all())
+    # REMOVED: variation_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='variation', queryset=ItemVariation.objects.all())
     
     def get_product_name(self, obj):
         """Get product name from variation or product"""
@@ -154,8 +145,8 @@ class StockTakeItemSerializer(serializers.ModelSerializer):
 
 class LocationStockSerializer(serializers.ModelSerializer):
     """Location stock serializer"""
-    variation = ItemVariationSerializer(read_only=True)
-    variation_id = serializers.PrimaryKeyRelatedField(write_only=True, source='variation', queryset=ItemVariation.objects.all())
+    # REMOVED: variation = ItemVariationSerializer(read_only=True)
+    # REMOVED: variation_id = serializers.PrimaryKeyRelatedField(write_only=True, source='variation', queryset=ItemVariation.objects.all())
     outlet_name = serializers.CharField(source='outlet.name', read_only=True)
     product_name = serializers.SerializerMethodField()
     

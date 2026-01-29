@@ -47,7 +47,7 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
                 </div>
                 <div className="w-full">
                   <p className="font-medium text-sm line-clamp-2">{product.name}</p>
-                  <p className="text-xs text-muted-foreground mt-1">MWK {product.price.toFixed(2)}</p>
+                  <p className="text-xs text-muted-foreground mt-1">MWK {(product.price || 0).toFixed(2)}</p>
                   <p className="text-xs text-muted-foreground">Stock: {product.stock}</p>
                 </div>
                 <Button size="sm" className="w-full" onClick={(e) => {

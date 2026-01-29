@@ -16,6 +16,9 @@ export interface SaleFilters {
   start_date?: string
   end_date?: string
   page?: number
+  tenant?: string
+  businessId?: string
+  limit?: number
 }
 
 export interface CreateSaleData {
@@ -91,6 +94,9 @@ export const saleService = {
     if (filters?.start_date) params.append("start_date", filters.start_date)
     if (filters?.end_date) params.append("end_date", filters.end_date)
     if (filters?.page) params.append("page", String(filters.page))
+    if (filters?.tenant) params.append("tenant", filters.tenant)
+    if (filters?.businessId) params.append("business", filters.businessId)
+    if (filters?.limit) params.append("limit", String(filters.limit))
     
     const query = params.toString()
     const response = await api.get<any>(`${apiEndpoints.sales.list}${query ? `?${query}` : ""}`)

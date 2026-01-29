@@ -23,16 +23,30 @@ import {
 } from "@/components/ui/alert-dialog"
 import { usePOSStore } from "@/stores/posStore"
 import { useBusinessStore } from "@/stores/businessStore"
-import { productService, categoryService, variationService } from "@/lib/services/productService"
+import { productService, categoryService } from "@/lib/services/productService"
 import { formatCurrency } from "@/lib/utils/currency"
 import { DiscountModal } from "@/components/modals/discount-modal"
 import { SaleDiscountModal, type SaleDiscount } from "@/components/modals/sale-discount-modal"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import { SelectUnitModal } from "@/components/modals/select-unit-modal"
-import { SelectVariationModal } from "@/components/modals/select-variation-modal"
-import { AddEditProductModal } from "@/components/modals/add-edit-product-modal"
+import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { MoreVertical, Trash2 } from "lucide-react"
 import { useShift } from "@/contexts/shift-context"
 import { saleService } from "@/lib/services/saleService"
 import { useToast } from "@/components/ui/use-toast"
@@ -41,6 +55,8 @@ import type { Customer } from "@/lib/services/customerService"
 import type { Product } from "@/lib/types"
 import { useI18n } from "@/contexts/i18n-context"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
+import { ProductGrid } from "@/components/pos/product-grid-enhanced"
+import { CartItem as CartItemDisplay, CartSummary } from "@/components/pos/cart-item"
 // Printing helper removed - reverted to receipt preview flow
 
 type SaleType = "retail" | "wholesale"
@@ -78,7 +94,7 @@ export function RetailPOS() {
   const [productsError, setProductsError] = useState<string | null>(null)
   const [showUnitSelector, setShowUnitSelector] = useState(false)
   const [selectedProductForUnit, setSelectedProductForUnit] = useState<any>(null)
-  const [showVariationModal, setShowVariationModal] = useState(false)
+  const [showUnitModal, setShowUnitModal] = useState(false)
   const [selectedProductForVariation, setSelectedProductForVariation] = useState<any>(null)
   // Add product modal for creating product from barcode lookup
   const [showAddProductModal, setShowAddProductModal] = useState(false)
@@ -95,6 +111,8 @@ export function RetailPOS() {
   
   // Focus search on mount and after actions
   const searchInputRef = useRef<HTMLInputElement>(null)
+
+  
 
   // Debounce search term for performance with bulk data
   useEffect(() => {
@@ -178,45 +196,20 @@ export function RetailPOS() {
     if (!term) return
 
     try {
-      const { products: matchedProducts, variations: matchedVariations } = await productService.lookup(term)
+      const { products: matchedProducts } = await productService.lookup(term)
 
-      // Exact one variation -> add to cart directly
-      if (matchedVariations && matchedVariations.length === 1) {
-        const v = matchedVariations[0]
-        const productName = typeof v.product === 'object' ? v.product.name : ''
-        const productId = typeof v.product === 'object' ? v.product.id : v.product
-        addToCart({
-          id: `cart_${Date.now()}_${Math.random()}`,
-          productId: String(productId),
-          variationId: v.id,
-          name: `${productName ? productName + ' - ' : ''}${v.name}`,
-          price: parseFloat(String(v.price || 0)),
-          quantity: 1,
-          saleType: saleType,
-        })
-
-        toast({ title: "Added to cart", description: `${productName} - ${v.name} added via barcode` })
-        return
-      }
-
-      // Multiple variations -> allow selecting from list
-      if (matchedVariations && matchedVariations.length > 1) {
-        setSelectedProductForVariation({ id: null, name: `Barcode: ${term}`, variations: matchedVariations })
-        setShowVariationModal(true)
-        return
-      }
-
-      // Single product match (no variations) -> add to cart or open variation modal if variations exist
+      // Single product match -> add to cart or open unit modal if multiple units exist
       if (matchedProducts && matchedProducts.length === 1) {
         const p = matchedProducts[0]
-        // If product has variations, open variation modal
-        if (p.variations && p.variations.length > 0) {
+        // If product has multiple units, open unit modal
+        const units = p.selling_units || []
+        if (units.length > 1) {
           setSelectedProductForVariation(p)
-          setShowVariationModal(true)
+          setShowUnitModal(true)
           return
         }
 
-        // No variations - add product directly
+        // Single unit - add product directly
         const price = getProductPrice(p)
         addToCart({
           id: `cart_${Date.now()}_${Math.random()}`,
@@ -271,6 +264,30 @@ export function RetailPOS() {
   // Calculate final total
   const cartTotal = cartSubtotal - discountAmount
 
+  const cartDisplayItems = cart.map((item) => {
+    const product = (products as any[]).find((p) => String(p.id) === String(item.productId)) || {
+      id: item.productId,
+      name: item.name,
+      retail_price: item.price,
+      price: item.price,
+      units: [],
+      variations: [],
+    }
+    const variation = product?.variations?.find((v: any) => String(v.id) === String(item.variationId))
+    const units = (product as any).units || (product as any).selling_units || []
+    const unit = units.find((u: any) => String(u.id) === String(item.unitId))
+
+    return {
+      id: item.id,
+      product,
+      variation,
+      unit,
+      quantity: item.quantity,
+      price: item.price,
+      total: item.total,
+    }
+  })
+
   // Get price based on sale type
   const getProductPrice = (product: any): number => {
     if (saleType === "wholesale") {
@@ -279,23 +296,39 @@ export function RetailPOS() {
     return product.price || 0
   }
 
-  const handleAddToCart = async (product: any) => {
-    // Check if product has variations
-    try {
-      const variations = await variationService.list({ product: product.id, is_active: true })
-      
-      if (variations.length > 0) {
-        setSelectedProductForVariation(product)
-        setShowVariationModal(true)
-        return
-      }
-    } catch (error) {
-      console.error("Failed to check variations:", error)
-    }
+  const addCartWithDetails = (product: any, variation?: any, unit?: any, quantity = 1) => {
+    const basePrice = unit?.retail_price ?? unit?.price ?? variation?.price ?? product.retail_price ?? product.price ?? getProductPrice(product)
+    const displayNameParts = [product.name]
+    if (variation?.name) displayNameParts.push(`- ${variation.name}`)
+    if (unit?.unit_name) displayNameParts.push(`(${unit.unit_name})`)
+    const displayName = displayNameParts.join(" ")
 
-    // Check if product has selling units
-    const sellingUnits = (product as any).selling_units || []
+    addToCart({
+      id: `cart_${Date.now()}_${Math.random()}`,
+      productId: String(product.id),
+      name: displayName,
+      price: basePrice,
+      quantity: quantity || 1,
+      saleType: saleType,
+      variationId: variation?.id ? String(variation.id) : undefined,
+      unitId: unit?.id ? String(unit.id) : undefined,
+    })
+  }
+
+  const handleProductGridAdd = (product: any, variation?: any, unit?: any, quantity = 1) => {
+    addCartWithDetails(product, variation, unit, quantity)
+  }
+
+  const handleAddToCart = async (product: any) => {
+    // Check if product has multiple selling units
+    const sellingUnits = (product as any).units || (product as any).selling_units || []
     const activeUnits = sellingUnits.filter((u: any) => u.is_active !== false)
+    
+    if (activeUnits.length > 1) {
+      setSelectedProductForVariation(product)
+      setShowUnitModal(true)
+      return
+    }
     
     if (activeUnits.length > 0) {
       // Show unit selector popup
@@ -305,71 +338,25 @@ export function RetailPOS() {
     }
 
     // No variations or units - add directly to cart
-    const price = getProductPrice(product)
-    addToCart({
-      id: `cart_${Date.now()}_${Math.random()}`,
-      productId: String(product.id),
-      name: product.name,
-      price: price,
-      quantity: 1,
-      saleType: saleType,
-    })
+    addCartWithDetails(product, undefined, undefined, 1)
   }
 
   const handleUnitSelected = (unit: ProductUnit | null) => {
-    if (!selectedProductForUnit) return
+    if (!selectedProductForVariation) return
 
-    // If unit is null, use base unit
+    // If unit is null, use base unit (conversion_factor = 1.0)
     if (!unit) {
-      const price = getProductPrice(selectedProductForUnit)
-      addToCart({
-        id: `cart_${Date.now()}_${Math.random()}`,
-        productId: String(selectedProductForUnit.id),
-        name: selectedProductForUnit.name,
-        price: price,
-        quantity: 1,
-        saleType: saleType,
-      })
-      setSelectedProductForUnit(null)
-      setShowUnitSelector(false)
+      addCartWithDetails(selectedProductForVariation, undefined, undefined, 1)
+      setSelectedProductForVariation(null)
+      setShowUnitModal(false)
       return
     }
 
     // Use selected unit
-    const price = saleType === "wholesale" && unit.wholesale_price
-      ? parseFloat(String(unit.wholesale_price))
-      : parseFloat(String(unit.retail_price))
-
-    const displayName = `${selectedProductForUnit.name} (${unit.unit_name})`
-
-    addToCart({
-      id: `cart_${Date.now()}_${Math.random()}`,
-      productId: String(selectedProductForUnit.id),
-      name: displayName,
-      price: price,
-      quantity: 1,
-      saleType: saleType,
-    })
-
-    setSelectedProductForUnit(null)
-    setShowUnitSelector(false)
-  }
-
-  const handleVariationSelected = (variation: any) => {
-    if (!selectedProductForVariation) return
-
-    const price = variation.price || getProductPrice(selectedProductForVariation)
-    addToCart({
-      id: `cart_${Date.now()}_${Math.random()}`,
-      productId: String(selectedProductForVariation.id),
-      name: `${selectedProductForVariation.name} - ${variation.name}`,
-      price: price,
-      quantity: 1,
-      saleType: saleType,
-    })
+    addCartWithDetails(selectedProductForVariation, undefined, unit, 1)
 
     setSelectedProductForVariation(null)
-    setShowVariationModal(false)
+    setShowUnitModal(false)
   }
 
   const handleQuantityChange = (itemId: string, change: number) => {
@@ -606,44 +593,7 @@ export function RetailPOS() {
             </TabsList>
           </Tabs>
         </div>
-        <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleReturn}
-            className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-          >
-            Return
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={handleRefund}
-            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-          >
-            Refund
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleHoldSale}>
-            Hold
-          </Button>
-          <Button 
-            variant={saleDiscount ? "default" : "outline"} 
-            size="sm" 
-            onClick={() => setShowSaleDiscount(true)}
-          >
-            {saleDiscount ? "Discount Applied" : "Apply Discount"}
-          </Button>
-          {cart.length > 0 && (
-            <Button variant="outline" size="sm" onClick={clearCart}>
-              Clear
-            </Button>
-          )}
-          {activeShift && (
-            <Button variant="outline" size="sm" onClick={() => setShowCloseRegister(true)}>
-              Close
-            </Button>
-          )}
-        </div>
+
       </div>
 
       <div className="flex-1 flex overflow-hidden">
@@ -667,13 +617,11 @@ export function RetailPOS() {
                   }
                 }}
                 onFocus={() => {
+                  // Only show search dropdown if user has typed search term
                   if (searchTerm.length >= 2 && searchResults.length > 0) {
                     setShowSearchDropdown(true)
-                    setShowQuickSelectDropdown(false)
-                  } else if (searchTerm.length === 0) {
-                    setShowQuickSelectDropdown(true)
-                    setShowSearchDropdown(false)
                   }
+                  setShowQuickSelectDropdown(false)
                 }}
                 onBlur={() => {
                   // Delay to allow click on dropdown items
@@ -683,10 +631,9 @@ export function RetailPOS() {
                   }, 200)
                 }}
                 onClick={() => {
-                  if (searchTerm.length === 0) {
-                    setShowQuickSelectDropdown(true)
-                    setShowSearchDropdown(false)
-                  }
+                  // Don't auto-show dropdowns on click, only show when searching
+                  setShowQuickSelectDropdown(false)
+                  setShowSearchDropdown(false)
                 }}
                 autoFocus
                 onKeyDown={async (e) => {
@@ -697,61 +644,23 @@ export function RetailPOS() {
 
                     if (barcodeLike) {
                       try {
-                        const { products: matchedProducts, variations: matchedVariations } = await productService.lookup(term)
+                        const { products: matchedProducts } = await productService.lookup(term)
 
-                        // Exact one variation -> add to cart directly
-                        if (matchedVariations && matchedVariations.length === 1) {
-                          const v = matchedVariations[0]
-                          const productName = typeof v.product === 'object' ? v.product.name : ''
-                          const productId = typeof v.product === 'object' ? v.product.id : v.product
-                          addToCart({
-                            id: `cart_${Date.now()}_${Math.random()}`,
-                            productId: String(productId),
-                            variationId: v.id,
-                            name: `${productName ? productName + ' - ' : ''}${v.name}`,
-                            price: parseFloat(String(v.price || 0)),
-                            quantity: 1,
-                            saleType: saleType,
-                          })
-
-                          toast({ title: "Added to cart", description: `${productName} - ${v.name} added via barcode` })
-                          setSearchTerm("")
-                          setShowSearchDropdown(false)
-                          return
-                        }
-
-                        // Multiple variations -> allow selecting from list
-                        if (matchedVariations && matchedVariations.length > 1) {
-                          // Use select variation modal - provide product shape with variations
-                          setSelectedProductForVariation({ id: null, name: `Barcode: ${term}`, variations: matchedVariations })
-                          setShowVariationModal(true)
-                          setSearchTerm("")
-                          setShowSearchDropdown(false)
-                          return
-                        }
-
-                        // Single product match (no variations) -> add to cart or open variation modal if variations exist
+                        // Single product match -> add to cart or open unit modal if multiple units exist
                         if (matchedProducts && matchedProducts.length === 1) {
                           const p = matchedProducts[0]
-                          // If product has variations, open variation modal
-                          if (p.variations && p.variations.length > 0) {
+                          const units = p.selling_units || []
+                          if (units.length > 1) {
                             setSelectedProductForVariation(p)
-                            setShowVariationModal(true)
+                            setShowUnitModal(true)
                             setSearchTerm("")
                             setShowSearchDropdown(false)
                             return
                           }
-
-                          // No variations - add product directly
+                          
+                          // Single unit - add product directly
                           const price = getProductPrice(p)
-                          addToCart({
-                            id: `cart_${Date.now()}_${Math.random()}`,
-                            productId: String(p.id),
-                            name: p.name,
-                            price: price,
-                            quantity: 1,
-                            saleType: saleType,
-                          })
+                          addCartWithDetails(p, undefined, undefined, 1)
                           toast({ title: "Added to cart", description: `${p.name} added via barcode` })
                           setSearchTerm("")
                           setShowSearchDropdown(false)
@@ -1017,12 +926,20 @@ export function RetailPOS() {
           {/* Category Filter - Compact */}
           {categories.length > 1 && (
             <div className="px-3 py-2 border-b bg-muted/30 flex gap-1 flex-wrap">
-              {categories.slice(0, 8).map((category) => (
+              <Button
+                variant={selectedCategory === "all" ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-xs px-3"
+                onClick={() => setSelectedCategory("all")}
+              >
+                All
+              </Button>
+              {categories.map((category) => (
                 <Button
                   key={category}
                   variant={selectedCategory === category ? "default" : "outline"}
                   size="sm"
-                  className="h-7 text-xs"
+                  className="h-7 text-xs px-4 min-w-fit"
                   onClick={() => setSelectedCategory(category)}
                 >
                   {category}
@@ -1031,7 +948,7 @@ export function RetailPOS() {
             </div>
           )}
 
-          {/* Products Grid - Text Only Cards */}
+          {/* Products Grid - Enhanced */}
           <div className="flex-1 overflow-y-auto p-4">
             {isLoadingProducts ? (
               <div className="p-8 text-center text-muted-foreground">Loading products...</div>
@@ -1040,124 +957,37 @@ export function RetailPOS() {
             ) : filteredProducts.length === 0 ? (
               <div className="p-8 text-center text-muted-foreground">No products found</div>
             ) : (
-              <div className="grid grid-cols-4 gap-3">
-                {filteredProducts.map((product: any) => {
-                  const price = getProductPrice(product)
-                  const sellingUnits = product.selling_units || []
-                  const activeUnits = sellingUnits.filter((u: any) => u.is_active !== false)
-                  const hasUnits = activeUnits.length > 0
-                  
-                  const handleUnitSelect = (unitId: string) => {
-                    if (unitId === "base") {
-                      // Use base unit
-                      const price = getProductPrice(product)
-                      addToCart({
-                        id: `cart_${Date.now()}_${Math.random()}`,
-                        productId: String(product.id),
-                        name: product.name,
-                        price: price,
-                        quantity: 1,
-                        saleType: saleType,
-                      })
-                    } else {
-                      // Find selected unit
-                      const selectedUnit = activeUnits.find((u: any) => String(u.id) === unitId)
-                      if (selectedUnit) {
-                        const unitPrice = saleType === "wholesale" && selectedUnit.wholesale_price
-                          ? parseFloat(String(selectedUnit.wholesale_price))
-                          : parseFloat(String(selectedUnit.retail_price))
-                        const displayName = `${product.name} (${selectedUnit.unit_name})`
-                        addToCart({
-                          id: `cart_${Date.now()}_${Math.random()}`,
-                          productId: String(product.id),
-                          name: displayName,
-                          price: unitPrice,
-                          quantity: 1,
-                          saleType: saleType,
-                        })
-                      }
-                    }
-                  }
-                  
-                  return (
-                    <div
-                      key={product.id}
-                      className="bg-blue-500 hover:bg-blue-600 border border-blue-500 rounded-lg p-4 text-center transition-all duration-150 shadow-sm hover:shadow-md min-h-[120px] flex flex-col justify-center items-center text-white"
-                    >
-                      <div className="font-medium text-sm text-white mb-2 line-clamp-2">
-                        {product.name}
-                      </div>
-                      {hasUnits ? (
-                        <Select onValueChange={handleUnitSelect}>
-                          <SelectTrigger className="w-full bg-white/10 hover:bg-white/20 border-white/30 text-white text-xs h-8 mb-2">
-                            <SelectValue placeholder="Select Unit" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="base">
-                              Base Unit - {formatCurrency(price, currentBusiness)}
-                            </SelectItem>
-                            {activeUnits.map((unit: any) => {
-                              const unitPrice = saleType === "wholesale" && unit.wholesale_price
-                                ? parseFloat(String(unit.wholesale_price))
-                                : parseFloat(String(unit.retail_price))
-                              return (
-                                <SelectItem key={unit.id} value={String(unit.id)}>
-                                  {unit.unit_name} - {formatCurrency(unitPrice, currentBusiness)}
-                                </SelectItem>
-                              )
-                            })}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <>
-                          <div className="font-bold text-base text-white">
-                            {formatCurrency(price, currentBusiness)}
-                          </div>
-                          <button
-                            className="mt-2 w-full bg-white/20 hover:bg-white/30 rounded px-2 py-1 text-xs font-medium transition-colors"
-                            onClick={() => handleAddToCart(product)}
-                          >
-                            Add to Cart
-                          </button>
-                        </>
-                      )}
-                      {product.stock !== undefined && product.stock <= 10 && (
-                        <div className="text-xs text-red-200 mt-1 font-medium">
-                          Low Stock
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+              <ProductGrid
+                products={filteredProducts as any}
+                onAddToCart={(
+                  product,
+                  unit,
+                  quantity
+                ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
+              />
             )}
           </div>
         </div>
 
-        {/* Cart Panel - Compact */}
-        <div className="w-80 border-l bg-card flex flex-col">
+        {/* Cart Panel - Table Based */}
+        <div className="w-96 border-l bg-card flex flex-col">
           {/* Cart Header */}
           <div className="p-3 border-b">
             <div className="flex items-center justify-between mb-2">
               <div className="font-semibold">Cart ({cartItemCount})</div>
-              {cart.length > 0 && (
-                <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={clearCart}>
-                  Clear
-                </Button>
-              )}
             </div>
             
             {/* Customer Selection */}
             {selectedCustomer ? (
               <div className="flex items-center justify-between p-2 bg-muted rounded text-xs">
-                <span className="truncate">{selectedCustomer.name}</span>
+                <span className="truncate font-medium">{selectedCustomer.name}</span>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-5 px-2 text-xs"
                   onClick={() => setSelectedCustomer(null)}
                 >
-                  Remove
+                  Change
                 </Button>
               </div>
             ) : (
@@ -1167,107 +997,144 @@ export function RetailPOS() {
                 className="w-full h-7 text-xs"
                 onClick={() => setShowCustomerSelect(true)}
               >
-                Add Customer
+                Select Customer
               </Button>
             )}
           </div>
 
-          {/* Cart Items */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {/* Cart Items Table */}
+          <div className="flex-1 overflow-y-auto border-b">
             {cart.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground text-sm">
+              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 Cart is empty
               </div>
             ) : (
-              cart.map((item) => (
-                <div key={item.id} className="p-2 border rounded bg-background">
-                  <div className="flex items-start justify-between mb-1">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{item.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatCurrency(item.price, currentBusiness)} each
-                      </div>
-                    </div>
-                    <div className="ml-2 text-right">
-                      <div className="text-sm font-bold">{formatCurrency(item.total, currentBusiness)}</div>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between mt-2">
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-xs"
-                        onClick={() => handleQuantityChange(item.id, -1)}
-                      >
-                        -
-                      </Button>
-                      <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 w-6 p-0 text-xs"
-                        onClick={() => handleQuantityChange(item.id, 1)}
-                      >
-                        +
-                      </Button>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-xs text-destructive"
-                      onClick={() => removeFromCart(item.id)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              ))
+              <Table>
+                <TableHeader className="sticky top-0 bg-muted/50">
+                  <TableRow className="border-b">
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold">Product</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-16">Price</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-12">Qty</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-20">Subtotal</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-center w-8"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {cartDisplayItems.map((item) => (
+                    <TableRow key={item.id} className="border-b hover:bg-muted/40 h-10">
+                      <TableCell className="px-2 py-1 text-xs font-medium truncate">{item.product.name}</TableCell>
+                      <TableCell className="px-2 py-1 text-xs text-right">{formatCurrency(item.price, currentBusiness)}</TableCell>
+                      <TableCell className="px-2 py-1 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-5 w-5 p-0"
+                            onClick={() => updateCartItem(item.id, { quantity: item.quantity - 1 })}
+                            disabled={item.quantity <= 1}
+                          >
+                            −
+                          </Button>
+                          <span className="text-xs font-medium w-6 text-center">{item.quantity}</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-5 w-5 p-0"
+                            onClick={() => updateCartItem(item.id, { quantity: item.quantity + 1 })}
+                          >
+                            +
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-xs text-right font-semibold">{formatCurrency(item.total, currentBusiness)}</TableCell>
+                      <TableCell className="px-2 py-1 text-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-5 w-5 p-0"
+                          onClick={() => removeFromCart(item.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
           </div>
 
-          {/* Payment Footer */}
+          {/* Summary & Payment Footer */}
           {cart.length > 0 && (
-            <div className="border-t p-3 bg-muted/30">
-              <div className="space-y-2 mb-3">
-                <div className="flex items-center justify-between text-sm">
+            <div className="p-3 bg-muted/30 space-y-3">
+              {/* Summary Grid */}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="flex justify-between">
                   <span className="text-muted-foreground">Subtotal:</span>
-                  <span>{formatCurrency(cartSubtotal, currentBusiness)}</span>
+                  <span className="font-medium">{formatCurrency(cartSubtotal, currentBusiness)}</span>
                 </div>
                 {saleDiscount && discountAmount > 0 && (
-                  <>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Discount:</span>
-                      <span className="text-green-600 dark:text-green-400 font-medium">
-                        -{formatCurrency(discountAmount, currentBusiness)}
-                      </span>
-                    </div>
-                    {saleDiscount.reason && (
-                      <div className="text-xs text-muted-foreground italic">
-                        Reason: {saleDiscount.reason}
-                      </div>
-                    )}
-                  </>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Discount:</span>
+                    <span className="font-medium text-red-600">-{formatCurrency(discountAmount, currentBusiness)}</span>
+                  </div>
                 )}
-                <div className="border-t pt-2 flex items-center justify-between">
-                  <span className="text-lg font-bold">Total:</span>
-                  <span className="text-lg font-bold">{formatCurrency(cartTotal, currentBusiness)}</span>
+                <div className="col-span-2 flex justify-between font-semibold text-sm border-t pt-2">
+                  <span>Total:</span>
+                  <span>{formatCurrency(cartTotal, currentBusiness)}</span>
                 </div>
               </div>
-              <Button
-                className="w-full"
-                size="lg"
-                onClick={handleCheckout}
-                disabled={isProcessingPayment || cart.length === 0}
-              >
-                {isProcessingPayment ? (
-                  <>
-                    <span className="mr-2">Processing...</span>
-                  </>
-                ) : (
-                  `Process ${saleType === "wholesale" ? "Wholesale" : "Retail"} Payment`
-                )}
-              </Button>
+
+              {/* Action Buttons */}
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  size="sm"
+                  onClick={handleCheckout}
+                  disabled={isProcessingPayment}
+                >
+                  {isProcessingPayment ? "Processing..." : "PAY"}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="px-2">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem onClick={() => setShowSaleDiscount(true)}>
+                      Discount
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      // Handle Return
+                      toast({ title: "Return", description: "Feature coming soon" })
+                    }}>
+                      Return
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      // Handle Refund
+                      toast({ title: "Refund", description: "Feature coming soon" })
+                    }}>
+                      Refund
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      // Handle Hold Sale
+                      toast({ title: "Hold Sale", description: "Feature coming soon" })
+                    }}>
+                      Hold Sale
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setShowCloseRegister(true)}>
+                      Close Register
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={clearCart}
+                      className="text-red-600"
+                    >
+                      Clear Cart
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
           )}
         </div>
@@ -1314,20 +1181,19 @@ export function RetailPOS() {
         />
       )}
 
-      {/* Variation Selection Modal */}
+      {/* Unit Selection Modal */}
       {selectedProductForVariation && (
-        <SelectVariationModal
-          open={showVariationModal}
+        <SelectUnitModal
+          open={showUnitModal}
           onOpenChange={(open) => {
-            setShowVariationModal(open)
+            setShowUnitModal(open)
             if (!open) {
               setSelectedProductForVariation(null)
             }
           }}
-          productId={selectedProductForVariation.id}
-          productName={selectedProductForVariation.name}
-          onSelect={handleVariationSelected}
+          product={selectedProductForVariation}
           saleType={saleType}
+          onSelect={handleUnitSelected}
         />
       )}
       
@@ -1369,7 +1235,7 @@ export function RetailPOS() {
       />
 
       {/* Add/Edit Product Modal used when barcode lookup returns no result */}
-      <AddEditProductModal
+      <ProductModalTabs
         open={showAddProductModal}
         onOpenChange={(open) => {
           setShowAddProductModal(open)

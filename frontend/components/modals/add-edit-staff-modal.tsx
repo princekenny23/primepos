@@ -419,6 +419,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                         <input
                           type="checkbox"
                           id={`outlet-${outlet.id}`}
+                          aria-label={`Assign to outlet ${outlet.name}`}
                           checked={formData.outlet_ids.includes(String(outlet.id))}
                           onChange={() => handleOutletToggle(String(outlet.id))}
                           className="h-4 w-4 rounded border-gray-300"

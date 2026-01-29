@@ -23,13 +23,14 @@ import { useAuthStore } from "@/stores/authStore"
 import { notificationService, type Notification } from "@/lib/services/notificationService"
 
 interface UsePollingNotificationsOptions {
-  interval?: number // Poll interval in milliseconds (default: 5000 = 5 seconds)
-  enabled?: boolean // Whether polling is enabled (default: true)
+  interval?: number // Poll interval in milliseconds (default: 60000 = 60 seconds)
+  enabled?: boolean // Whether polling is enabled (default: false to prevent dashboard instability)
 }
 
 export function usePollingNotifications(options: UsePollingNotificationsOptions = {}) {
   const { user } = useAuthStore()
-  const { interval = 5000, enabled = true } = options
+  // FIXED: Changed from 5 seconds to 60 seconds, disabled by default to prevent dashboard flickering
+  const { interval = 60000, enabled = false } = options
   const [unreadCount, setUnreadCount] = useState(0)
   const [latestNotification, setLatestNotification] = useState<Notification | null>(null)
   const [isPolling, setIsPolling] = useState(false)

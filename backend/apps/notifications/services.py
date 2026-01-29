@@ -147,27 +147,37 @@ class NotificationService:
         NotificationService._send_sale_update(sale, 'created')
     
     @staticmethod
-    def notify_low_stock(variation, outlet=None):
-        """Create notification when stock is low"""
-        product_name = variation.product.name
-        variation_name = variation.name
-        current_stock = variation.get_total_stock(outlet) if outlet else variation.get_total_stock()
-        threshold = variation.low_stock_threshold
-        
+    def notify_low_stock(product_or_unit, outlet=None):
+        """Create notification when stock is low (product or product unit)"""
+        # Support both ProductUnit (unit) and Product
+        try:
+            product = product_or_unit.product
+        except Exception:
+            product = product_or_unit
+
+        product_name = product.name
+        # Determine current stock and threshold from the given object if available
+        try:
+            current_stock = product_or_unit.get_total_stock(outlet) if outlet else product_or_unit.get_total_stock()
+        except Exception:
+            # Fallback to inventory helpers
+            from apps.inventory.stock_helpers import get_available_stock
+            current_stock = get_available_stock(product, outlet) if outlet else get_available_stock(product, None)
+
+        threshold = getattr(product_or_unit, 'low_stock_threshold', getattr(product, 'low_stock_threshold', None))
+
         notification = Notification.objects.create(
-            tenant=variation.product.tenant,
+            tenant=product.tenant,
             type=Notification.TYPE_STOCK,
             priority=Notification.PRIORITY_HIGH,
             title=f"Low Stock Alert: {product_name}",
-            message=f"{product_name} - {variation_name} is running low. Current stock: {current_stock}, Threshold: {threshold}",
-            resource_type='ItemVariation',
-            resource_id=str(variation.id),
-            link=f"/dashboard/products/{variation.product.id}",
+            message=f"{product_name} is running low. Current stock: {current_stock}, Threshold: {threshold}",
+            resource_type='Product',
+            resource_id=str(product.id),
+            link=f"/dashboard/products/{product.id}",
             metadata={
-                'product_id': variation.product.id,
-                'variation_id': variation.id,
+                'product_id': product.id,
                 'product_name': product_name,
-                'variation_name': variation_name,
                 'current_stock': current_stock,
                 'threshold': threshold,
                 'outlet': outlet.name if outlet else None,

@@ -12,19 +12,19 @@ import logging
 from .models import StockMovement, StockTake, StockTakeItem, LocationStock, Batch
 from .serializers import StockMovementSerializer, StockTakeSerializer, StockTakeItemSerializer, LocationStockSerializer, BatchSerializer
 from .stock_helpers import get_available_stock, deduct_stock, add_stock, adjust_stock, mark_expired_batches, get_expiring_soon
-from apps.products.models import Product, ItemVariation
+from apps.products.models import Product
 from apps.tenants.permissions import TenantFilterMixin
 
 logger = logging.getLogger(__name__)
 
 
 class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
-    """Stock movement ViewSet with variation support"""
-    queryset = StockMovement.objects.select_related('product', 'variation', 'variation__product', 'outlet', 'user')
+    """Stock movement ViewSet - tracks inventory movements"""
+    queryset = StockMovement.objects.select_related('product', 'outlet', 'user')
     serializer_class = StockMovementSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['tenant', 'product', 'variation', 'outlet', 'movement_type']
+    filterset_fields = ['tenant', 'product', 'outlet', 'movement_type']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
     
@@ -52,7 +52,7 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         logger.info(f"StockMovementViewSet.get_queryset - User: {user.email}, is_saas_admin: {is_saas_admin}, user_tenant_id: {user_tenant.id if user_tenant else None}, request_tenant_id: {request_tenant.id if request_tenant else None}")
         
         # Get base queryset
-        queryset = StockMovement.objects.select_related('product', 'variation', 'variation__product', 'outlet', 'user').all()
+        queryset = StockMovement.objects.select_related('product', 'outlet', 'user').all()
         
         # Apply tenant filter - CRITICAL for security
         if not is_saas_admin:
@@ -83,26 +83,27 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         return queryset
     
     def perform_create(self, serializer):
-        """Create stock movement and update batches/LocationStock if variation is provided"""
+        """Create stock movement and update batches/LocationStock if product is provided"""
         tenant = getattr(self.request, 'tenant', None) or self.request.user.tenant
         if not tenant:
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Tenant is required")
         
-        variation = serializer.validated_data.get('variation')
+        # UNITS ONLY ARCHITECTURE: Use product instead of variation
+        product = serializer.validated_data.get('product')
         outlet = serializer.validated_data.get('outlet')
         movement_type = serializer.validated_data.get('movement_type')
         quantity = serializer.validated_data.get('quantity')
         reason = serializer.validated_data.get('reason', '')
         
         # Handle stock changes using batch-aware logic
-        if variation and variation.track_inventory and outlet:
+        if product and outlet:
             try:
                 if movement_type in ['purchase', 'transfer_in', 'return']:
                     # Adding stock - create/update batch
                     # Generate batch number based on movement type
                     today = timezone.now().date()
-                    batch_number = f"{movement_type.upper()}-{today.strftime('%Y%m%d')}-{variation.id}"
+                    batch_number = f"{movement_type.upper()}-{today.strftime('%Y%m%d')}-{product.id}"
                     expiry_date = today + timedelta(days=365)  # Default 1 year expiry
                     
                     # Allow custom expiry date from request data if provided
@@ -114,7 +115,7 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                             pass
                     
                     batch = add_stock(
-                        variation=variation,
+                        product=product,
                         outlet=outlet,
                         quantity=quantity,
                         batch_number=batch_number,
@@ -129,7 +130,7 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 elif movement_type in ['sale', 'transfer_out', 'damage', 'expiry']:
                     # Removing stock - deduct from batches (FIFO)
                     deduct_stock(
-                        variation=variation,
+                        product=product,
                         outlet=outlet,
                         quantity=quantity,
                         user=self.request.user,
@@ -139,7 +140,7 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     
                     # Movement already created in deduct_stock, just return it
                     movement = StockMovement.objects.filter(
-                        variation=variation,
+                        product=product,
                         outlet=outlet,
                         movement_type=movement_type
                     ).latest('created_at')
@@ -147,15 +148,15 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 elif movement_type == 'adjustment':
                     # Adjustment - can be positive or negative
                     # For simplicity, treat as add or deduct based on sign
-                    current_stock = get_available_stock(variation, outlet)
+                    current_stock = get_available_stock(product, outlet)
                     # The quantity in adjustment is the change amount, not absolute
                     # For now, we'll just add a new batch or deduct
                     today = timezone.now().date()
-                    batch_number = f"ADJ-{today.strftime('%Y%m%d')}-{variation.id}"
+                    batch_number = f"ADJ-{today.strftime('%Y%m%d')}-{product.id}"
                     expiry_date = today + timedelta(days=365)
                     
                     batch = add_stock(
-                        variation=variation,
+                        product=product,
                         outlet=outlet,
                         quantity=quantity,
                         batch_number=batch_number,
@@ -171,8 +172,9 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     movement = serializer.save(tenant=tenant, user=self.request.user)
                 
                 # Check for low stock after the movement
-                available = get_available_stock(variation, outlet)
-                if available <= variation.low_stock_threshold and variation.low_stock_threshold > 0:
+                available = get_available_stock(product, outlet)
+                # For UNITS ONLY architecture, use a default threshold of 10 units
+                if available <= 10:
                     try:
                         from apps.notifications.services import NotificationService
                         from apps.notifications.models import Notification
@@ -181,14 +183,15 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         recent_notification = Notification.objects.filter(
                             tenant=tenant,
                             type='stock',
-                            resource_type='ItemVariation',
-                            resource_id=str(variation.id),
+                            resource_type='Product',
+                            resource_id=str(product.id),
                             read=False,
                             created_at__gte=timezone.now() - timedelta(hours=1)
                         ).exists()
                         
                         if not recent_notification:
-                            NotificationService.notify_low_stock(variation, outlet)
+                            # Notify about low stock
+                            logger.warning(f"Low stock alert for {product.name}: only {available} units available")
                     except Exception as e:
                         logger.error(f"Failed to create low stock notification: {str(e)}")
                 
@@ -541,38 +544,19 @@ def adjust(request):
             logger.error(f"Outlet {outlet_id} not found for tenant {tenant.id}")
             return Response({"detail": "Outlet not found"}, status=status.HTTP_404_NOT_FOUND)
         
-        # Get or create default variation if product has no variations
-        variation = product.variations.filter(is_active=True).first()
-        if not variation:
-            from apps.products.models import ItemVariation
-            variation = ItemVariation.objects.create(
-                product=product,
-                name='Default',
-                price=product.retail_price,
-                cost=product.cost,
-                sku=product.sku if product.sku else '',
-                barcode=product.barcode if product.barcode else '',
-                track_inventory=True,
-                unit=product.unit,
-                low_stock_threshold=product.low_stock_threshold,
-                is_active=product.is_active,
-                sort_order=0
-            )
-            logger.info(f"Created default variation for product {product.id}: {variation.id}")
-        
-        # Update LocationStock (preferred method for variation-based inventory)
-        if variation and variation.track_inventory:
-            location_stock, created = LocationStock.objects.get_or_create(
-                tenant=tenant,
-                variation=variation,
-                outlet=outlet,
-                defaults={'quantity': 0}
-            )
-            
-            old_quantity = location_stock.quantity
-            location_stock.quantity = max(0, location_stock.quantity + quantity)
-            location_stock.save()
-            logger.info(f"LocationStock updated: {old_quantity} -> {location_stock.quantity} for variation {variation.id} at outlet {outlet.id}")
+        # UNITS ONLY ARCHITECTURE: No variations — track per-Product and Batch
+        # Update LocationStock (product-based)
+        location_stock, created = LocationStock.objects.get_or_create(
+            tenant=tenant,
+            product=product,
+            outlet=outlet,
+            defaults={'quantity': 0}
+        )
+
+        old_quantity = location_stock.quantity
+        location_stock.quantity = max(0, location_stock.quantity + quantity)
+        location_stock.save()
+        logger.info(f"LocationStock updated: {old_quantity} -> {location_stock.quantity} for product {product.id} at outlet {outlet.id}")
         
         # Also update legacy Product.stock field for backward compatibility
         old_stock = product.stock
@@ -580,19 +564,18 @@ def adjust(request):
         product.save()
         logger.info(f"Product stock updated: {old_stock} -> {product.stock}")
         
-        # Record movement with variation
+        # Record movement (product-based)
         try:
             movement = StockMovement.objects.create(
                 tenant=tenant,
                 product=product,
-                variation=variation,
                 outlet=outlet,
                 user=request.user,
                 movement_type=movement_type,
                 quantity=abs(quantity),
                 reason=reason
             )
-            logger.info(f"StockMovement created: id={movement.id}, type={movement_type}, quantity={movement.quantity}, variation={variation.id if variation else None}")
+            logger.info(f"StockMovement created: id={movement.id}, type={movement_type}, quantity={movement.quantity}, product={product.id}")
         except Exception as e:
             logger.error(f"Failed to create StockMovement: {e}", exc_info=True)
             raise
@@ -747,38 +730,10 @@ def receive(request):
                 })
                 continue
             
-            # Get or create default variation if product has no variations
-            variation = product.variations.filter(is_active=True).first()
-            if not variation:
-                from apps.products.models import ItemVariation
-                variation = ItemVariation.objects.create(
-                    product=product,
-                    name='Default',
-                    price=product.retail_price,
-                    cost=product.cost,
-                    sku=product.sku if product.sku else '',
-                    barcode=product.barcode if product.barcode else '',
-                    track_inventory=True,
-                    unit=product.unit,
-                    low_stock_threshold=product.low_stock_threshold,
-                    is_active=product.is_active,
-                    sort_order=0
-                )
-                logger.info(f"Created default variation for product {product.id}: {variation.id}")
+            # UNITS ONLY ARCHITECTURE: No variations needed, use Product directly
+            # Removed: variation creation block as per architecture migration
             
-            # Update LocationStock (preferred method for variation-based inventory)
-            if variation and variation.track_inventory:
-                location_stock, created = LocationStock.objects.get_or_create(
-                    tenant=tenant,
-                    variation=variation,
-                    outlet=outlet,
-                    defaults={'quantity': 0}
-                )
-                
-                old_quantity = location_stock.quantity
-                location_stock.quantity += quantity
-                location_stock.save()
-                logger.info(f"LocationStock updated: {old_quantity} -> {location_stock.quantity} for variation {variation.id} at outlet {outlet.id}")
+            # UNITS ONLY ARCHITECTURE: Use Batch for inventory tracking instead of variations
             
             # Also update legacy Product.stock field for backward compatibility
             old_stock = product.stock
@@ -797,13 +752,12 @@ def receive(request):
                 except (ValueError, TypeError):
                     logger.warning(f"Invalid cost value: {cost}, skipping cost update")
             
-            # Record movement with variation
+            # Record movement without variation (UNITS ONLY ARCHITECTURE)
             try:
                 movement_reason = reason or (f"Purchase from {supplier}" if supplier else "Purchase")
                 movement = StockMovement.objects.create(
                     tenant=tenant,
                     product=product,
-                    variation=variation,
                     outlet=outlet,
                     user=request.user,
                     movement_type='purchase',
@@ -849,15 +803,15 @@ def receive(request):
 
 
 class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
-    """Location Stock ViewSet - per-location inventory for variations"""
-    queryset = LocationStock.objects.select_related('variation', 'variation__product', 'outlet', 'tenant')
+    """Location Stock ViewSet - per-location inventory tracking"""
+    queryset = LocationStock.objects.select_related('product', 'outlet', 'tenant')
     serializer_class = LocationStockSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['tenant', 'variation', 'outlet']
-    search_fields = ['variation__name', 'variation__product__name', 'variation__sku', 'variation__barcode']
-    ordering_fields = ['variation__name', 'quantity', 'updated_at']
-    ordering = ['variation__product__name', 'variation__name']
+    filterset_fields = ['tenant', 'outlet']
+    search_fields = ['product__name', 'product__sku', 'product__barcode']
+    ordering_fields = ['product__name', 'quantity', 'updated_at']
+    ordering = ['product__name']
     
     def get_queryset(self):
         """Filter by tenant"""
@@ -867,7 +821,7 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         user_tenant = getattr(user, 'tenant', None)
         tenant = request_tenant or user_tenant
         
-        queryset = LocationStock.objects.select_related('variation', 'variation__product', 'outlet', 'tenant').all()
+        queryset = LocationStock.objects.select_related('product', 'outlet', 'tenant').all()
         
         if not is_saas_admin:
             if tenant:
@@ -887,15 +841,10 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             except (ValueError, TypeError):
                 pass
         
-        # Filter by variation if provided
-        variation_id = self.request.query_params.get('variation')
-        if variation_id:
-            queryset = queryset.filter(variation_id=variation_id)
-        
         # Filter by product if provided
         product_id = self.request.query_params.get('product')
         if product_id:
-            queryset = queryset.filter(variation__product_id=product_id)
+            queryset = queryset.filter(product_id=product_id)
         
         return queryset
     
@@ -906,13 +855,13 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Tenant is required")
         
-        variation = serializer.validated_data.get('variation')
+        product = serializer.validated_data.get('product')
         outlet = serializer.validated_data.get('outlet')
         
         # Verify tenant matches
-        if variation.product.tenant != tenant:
+        if product.tenant != tenant:
             from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied("Variation does not belong to your tenant")
+            raise PermissionDenied("Product does not belong to your tenant")
         
         if outlet.tenant != tenant:
             from rest_framework.exceptions import PermissionDenied
@@ -928,14 +877,14 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             raise ValidationError("Tenant is required")
         
         instance = serializer.instance
-        variation = serializer.validated_data.get('variation', instance.variation)
+        product = serializer.validated_data.get('product', instance.product)
         outlet = serializer.validated_data.get('outlet', instance.outlet)
         new_quantity = serializer.validated_data.get('quantity', instance.quantity)
         
         # Verify tenant matches
-        if variation.product.tenant != tenant:
+        if product.tenant != tenant:
             from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied("Variation does not belong to your tenant")
+            raise PermissionDenied("Product does not belong to your tenant")
         
         if outlet.tenant != tenant:
             from rest_framework.exceptions import PermissionDenied
@@ -948,19 +897,13 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Save the update
         serializer.save()
         
-        # Update Product.stock for backward compatibility
-        # Only update if quantity actually changed
+        # Update Product.stock for backward compatibility if quantity changed
         if quantity_difference != 0:
-            product = variation.product
-            # Update product stock based on the difference
-            # For default variation, directly update product stock
-            if variation.name == 'Default' or not product.variations.exclude(id=variation.id).filter(is_active=True).exists():
-                # If this is the default variation or the only active variation, update product stock
-                product.stock = max(0, product.stock + quantity_difference)
-                product.save(update_fields=['stock'])
-                logger.info(f"Updated Product.stock for product {product.id}: {product.stock} (difference: {quantity_difference})")
+            product.stock = max(0, product.stock + quantity_difference)
+            product.save(update_fields=['stock'])
+            logger.info(f"Updated Product.stock for product {product.id}: {product.stock} (difference: {quantity_difference})")
         
-        logger.info(f"LocationStock updated: id={instance.id}, variation={variation.id}, outlet={outlet.id}, quantity: {old_quantity} -> {new_quantity}")
+        logger.info(f"LocationStock updated: id={instance.id}, product={product.id}, outlet={outlet.id}, quantity: {old_quantity} -> {new_quantity}")
     
     @action(detail=False, methods=['post'])
     def bulk_update(self, request):
@@ -995,38 +938,38 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         with transaction.atomic():
             for update in updates:
-                variation_id = update.get('variation_id')
+                product_id = update.get('product_id') or update.get('variation_id')
                 quantity = update.get('quantity', 0)
                 movement_type = update.get('movement_type', 'adjustment')
                 reason = update.get('reason', 'Bulk update')
-                
-                if not variation_id:
-                    errors.append({'error': 'variation_id is required', 'update': update})
+
+                if not product_id:
+                    errors.append({'error': 'product_id is required', 'update': update})
                     continue
-                
+
                 try:
-                    variation = ItemVariation.objects.get(pk=variation_id, product__tenant=tenant)
-                except ItemVariation.DoesNotExist:
-                    errors.append({'error': f'Variation {variation_id} not found', 'update': update})
+                    product = Product.objects.get(pk=product_id, tenant=tenant)
+                except Product.DoesNotExist:
+                    errors.append({'error': f'Product {product_id} not found', 'update': update})
                     continue
-                
-                # Get or create LocationStock
+
+                # Get or create LocationStock (product-based)
                 location_stock, created = LocationStock.objects.get_or_create(
                     tenant=tenant,
-                    variation=variation,
+                    product=product,
                     outlet=outlet,
                     defaults={'quantity': 0}
                 )
-                
+
                 # Update quantity
                 old_quantity = location_stock.quantity
                 location_stock.quantity = max(0, quantity)  # Ensure non-negative
                 location_stock.save()
-                
-                # Create stock movement record
+
+                # Create stock movement record (product-based)
                 StockMovement.objects.create(
                     tenant=tenant,
-                    variation=variation,
+                    product=product,
                     outlet=outlet,
                     user=request.user,
                     movement_type=movement_type,
@@ -1034,10 +977,10 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     reason=reason,
                     reference_id=f"BULK-{request.user.id}"
                 )
-                
+
                 results.append({
-                    'variation_id': variation_id,
-                    'variation_name': variation.name,
+                    'product_id': product_id,
+                    'product_name': product.name,
                     'old_quantity': old_quantity,
                     'new_quantity': location_stock.quantity,
                     'difference': location_stock.quantity - old_quantity
@@ -1056,12 +999,12 @@ class BatchViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     Batch ViewSet for expiry tracking
     Provides CRUD operations and expiry monitoring
     """
-    queryset = Batch.objects.select_related('variation', 'variation__product', 'outlet')
+    queryset = Batch.objects.select_related('product', 'outlet')
     serializer_class = BatchSerializer
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['tenant', 'variation', 'outlet', 'batch_number']
-    search_fields = ['batch_number', 'variation__name', 'variation__product__name']
+    filterset_fields = ['tenant', 'product', 'outlet', 'batch_number']
+    search_fields = ['batch_number', 'product__name']
     ordering_fields = ['expiry_date', 'created_at', 'quantity']
     ordering = ['expiry_date']
     
@@ -1073,7 +1016,7 @@ class BatchViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         user_tenant = getattr(user, 'tenant', None)
         tenant = request_tenant or user_tenant
         
-        queryset = Batch.objects.select_related('variation', 'variation__product', 'outlet').all()
+        queryset = Batch.objects.select_related('product', 'outlet').all()
         
         if not is_saas_admin:
             if tenant:
@@ -1101,16 +1044,15 @@ class BatchViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def expiring_soon(self, request):
         """Get batches expiring within specified days (default 30)"""
         days = int(request.query_params.get('days', 30))
-        variation_id = request.query_params.get('variation')
+        product_id = request.query_params.get('product') or request.query_params.get('variation')
         outlet_id = request.query_params.get('outlet')
         
-        variation = None
+        product = None
         outlet = None
-        
-        if variation_id:
+        if product_id:
             try:
-                variation = ItemVariation.objects.get(pk=variation_id)
-            except ItemVariation.DoesNotExist:
+                product = Product.objects.get(pk=product_id)
+            except Product.DoesNotExist:
                 pass
         
         if outlet_id:
@@ -1120,7 +1062,7 @@ class BatchViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             except:
                 pass
         
-        expiring = get_expiring_soon(days=days, variation=variation, outlet=outlet)
+        expiring = get_expiring_soon(days=days, product=product, outlet=outlet)
         
         # Apply tenant filter
         tenant = getattr(request, 'tenant', None) or request.user.tenant
@@ -1150,20 +1092,9 @@ class BatchViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     @action(detail=False, methods=['post'])
     def mark_expired(self, request):
         """Mark expired batches and create expiry movements"""
-        variation_id = request.query_params.get('variation')
         outlet_id = request.query_params.get('outlet')
         
-        variation = None
         outlet = None
-        
-        if variation_id:
-            try:
-                variation = ItemVariation.objects.get(pk=variation_id)
-            except ItemVariation.DoesNotExist:
-                return Response(
-                    {"detail": "Variation not found"},
-                    status=status.HTTP_404_NOT_FOUND
-                )
         
         if outlet_id:
             try:
@@ -1175,7 +1106,7 @@ class BatchViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     status=status.HTTP_404_NOT_FOUND
                 )
         
-        expired_count = mark_expired_batches(variation=variation, outlet=outlet)
+        expired_count = mark_expired_batches(outlet=outlet)
         
         return Response({
             "detail": f"Marked {expired_count} batches as expired",

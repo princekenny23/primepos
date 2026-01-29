@@ -313,13 +313,12 @@ export default function MultiOutletReportsPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
-
       {/* Modals */}
-      <ExportReportModal
+      <DataExchangeModal
         open={showExport}
         onOpenChange={setShowExport}
-        reportType="Multi-Outlet Report"
+        type="export"
+        config={dataExchangeConfigs.reports}
       />
       <PrintReportModal
         open={showPrint}

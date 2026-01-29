@@ -37,25 +37,7 @@ import { useShift } from "@/contexts/shift-context"
 export default function OrdersPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const { currentBusiness, currentOutlet } = useBusinessStore()
-  
-  // Redirect if not restaurant business
-  useEffect(() => {
-    if (currentBusiness && currentBusiness.type !== "restaurant") {
-      router.push("/dashboard")
-    }
-  }, [currentBusiness, router])
-  
-  // Show loading while checking business type
-  if (!currentBusiness || currentBusiness.type !== "restaurant") {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </DashboardLayout>
-    )
-  }
+  const { currentBusiness, currentOutlet, currentTill } = useBusinessStore()
   const { currentOutlet: tenantOutlet } = useTenant()
   const { activeShift } = useShift()
   const [searchTerm, setSearchTerm] = useState("")
@@ -74,13 +56,27 @@ export default function OrdersPage() {
       return
     }
     
+    if (!currentOutlet?.id) {
+      toast({
+        title: "Error",
+        description: "Please select an outlet first",
+        variant: "destructive",
+      })
+      setIsLoading(false)
+      return
+    }
+    
     setIsLoading(true)
     try {
       if (useReal) {
         // Use KOT model instead of Sale directly
-        const filters: any = {}
-        if (currentOutlet?.id) {
-          filters.outlet = currentOutlet.id.toString()
+        const filters: any = {
+          outlet: currentOutlet.id.toString()
+        }
+        
+        // Optionally filter by till if selected
+        if (currentTill?.id) {
+          filters.till = currentTill.id.toString()
         }
         
         const response = await kitchenService.list(filters)
@@ -94,6 +90,8 @@ export default function OrdersPage() {
           saleId: kot.sale?.id,
           table: kot.table?.number || "N/A",
           tableId: kot.table?.id,
+          till: kot.till?.name || "N/A",
+          tillId: kot.till?.id,
           guests: kot.sale?.guests || kot.items?.length || 0,
           items: kot.items || [],
           itemsCount: kot.items?.length || 0,
@@ -261,13 +259,30 @@ export default function OrdersPage() {
            (order.kotStatus === 'ready' || order.kotStatus === 'served')
   }
 
+  // Redirect if not restaurant business
+  useEffect(() => {
+    if (currentBusiness && currentBusiness.type !== "restaurant") {
+      router.push("/dashboard")
+    }
+  }, [currentBusiness, router])
+
+  // Show loading while checking business type
+  if (!currentBusiness || currentBusiness.type !== "restaurant") {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-64">
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
   return (
     <DashboardLayout>
       <PageLayout
         title="Restaurant Orders"
         description="Manage orders, track service, and process payments"
       >
-
         {/* Stats Cards */}
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
@@ -437,7 +452,7 @@ export default function OrdersPage() {
             </Tabs>
           </CardContent>
         </Card>
-      </div>
+      </PageLayout>
 
       {/* Order Details Modal */}
       <Dialog open={showDetails} onOpenChange={setShowDetails}>
@@ -554,7 +569,6 @@ export default function OrdersPage() {
       </Dialog>
 
       {/* Payment Modal removed - new payment system will be implemented */}
-      </PageLayout>
     </DashboardLayout>
   )
 }

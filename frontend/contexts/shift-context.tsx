@@ -48,17 +48,27 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   const [shiftHistory, setShiftHistory] = useState<Shift[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
+  // Track which outlet we've loaded shifts for to prevent duplicate loads
+  const loadedOutletRef = React.useRef<string | null>(null)
+
   // Load active shift and history on mount - only reload when outlet ID changes
   useEffect(() => {
     if (!currentOutlet?.id) {
       setActiveShiftState(null)
       setShiftHistory([])
       setIsLoading(false)
+      loadedOutletRef.current = null
+      return
+    }
+
+    // FIXED: Skip if we've already loaded for this outlet
+    if (loadedOutletRef.current === currentOutlet.id) {
       return
     }
 
     const loadShifts = async () => {
       setIsLoading(true)
+      loadedOutletRef.current = currentOutlet.id
       try {
         if (useRealAPI()) {
           // Use real API

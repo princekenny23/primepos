@@ -18,8 +18,9 @@ import { useTenant } from "@/contexts/tenant-context"
 interface SelectVariationModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  productId: string
+  productId?: string | number | null
   productName: string
+  variations?: ItemVariation[]
   onSelect: (variation: ItemVariation) => void
   saleType?: "retail" | "wholesale"
 }
@@ -29,6 +30,7 @@ export function SelectVariationModal({
   onOpenChange,
   productId,
   productName,
+  variations: providedVariations,
   onSelect,
   saleType = "retail",
 }: SelectVariationModalProps) {
@@ -38,12 +40,27 @@ export function SelectVariationModal({
   const [selectedVariation, setSelectedVariation] = useState<ItemVariation | null>(null)
 
   useEffect(() => {
-    if (open && productId) {
+    if (!open) {
+      setSelectedVariation(null)
+      return
+    }
+
+    // If variations are provided, use them directly
+    if (providedVariations && providedVariations.length > 0) {
+      setIsLoading(false)
+      setVariations(providedVariations)
+      setSelectedVariation(providedVariations.length === 1 ? providedVariations[0] : null)
+      return
+    }
+
+    // Otherwise fetch by productId when available
+    if (productId) {
       loadVariations()
     } else {
+      setVariations([])
       setSelectedVariation(null)
     }
-  }, [open, productId])
+  }, [open, productId, providedVariations])
 
   const loadVariations = async () => {
     setIsLoading(true)

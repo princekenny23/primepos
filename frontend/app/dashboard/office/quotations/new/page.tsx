@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/table"
 import { quotationService, type QuotationItem } from "@/lib/services/quotationService"
 import { ProductSelectionOrchestrator, type ProductSelectionResult } from "@/components/modals/product-selection-orchestrator"
-import { SelectCustomerModal } from "@/components/modals/select-customer-modal"
+import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import type { Product } from "@/lib/types"
 import type { Customer } from "@/lib/services/customerService"
 
@@ -719,11 +719,10 @@ export default function NewQuotationPage() {
           saleType="retail"
         />
 
-        <SelectCustomerModal
+        <CustomerSelectModal
           open={showCustomerSelector}
           onOpenChange={setShowCustomerSelector}
           onSelect={handleSelectCustomer}
-          outletId={currentOutlet?.id ? String(currentOutlet.id) : undefined}
         />
       </PageLayout>
       </div>

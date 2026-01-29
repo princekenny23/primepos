@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     'channels',
     
     # Local apps
+    'apps.health',
     'apps.accounts',
     'apps.tenants',
     'apps.outlets',
@@ -50,6 +51,7 @@ INSTALLED_APPS = [
     'apps.notifications',
     'apps.expenses',
     'apps.quotations',
+    'apps.bar',
     'apps.admin.apps.AdminConfig',  # Use explicit config to avoid label conflict
 ]
 

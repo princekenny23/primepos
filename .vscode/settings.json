@@ -55,6 +55,16 @@
     "**/.venv"
   ],
   
+  // Python analysis - suppress Django import warnings
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingImports": "none",
+    "reportMissingModuleSource": "none"
+  },
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/backend",
+    "${workspaceFolder}/backend/env/Lib/site-packages"
+  ],
+  
   // TypeScript/JavaScript language server settings (only scan frontend)
   "javascript.preferences.includePackageJsonAutoImports": "on",
   "typescript.preferences.includePackageJsonAutoImports": "on",

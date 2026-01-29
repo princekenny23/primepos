@@ -37,6 +37,7 @@ class Sale(models.Model):
     outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='sales')
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='sales')
     shift = models.ForeignKey('shifts.Shift', on_delete=models.SET_NULL, null=True, blank=True, related_name='sales')
+    till = models.ForeignKey('outlets.Till', on_delete=models.SET_NULL, null=True, blank=True, related_name='sales', help_text="Till/POS terminal used for this sale")
     customer = models.ForeignKey('customers.Customer', on_delete=models.SET_NULL, null=True, blank=True, related_name='purchases')
     
     # Restaurant-specific fields
@@ -151,7 +152,6 @@ class SaleItem(models.Model):
     
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items', help_text="Deprecated: Use variation instead. Kept for backward compatibility.")
-    variation = models.ForeignKey('products.ItemVariation', on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items', help_text="Item variation sold (preferred)")
     unit = models.ForeignKey('products.ProductUnit', on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items', help_text="Product unit used for this sale (e.g., piece, dozen, box)")
     product_name = models.CharField(max_length=255)  # Store name in case product/variation is deleted
     variation_name = models.CharField(max_length=255, blank=True, help_text="Variation name snapshot")
@@ -175,23 +175,17 @@ class SaleItem(models.Model):
         indexes = [
             models.Index(fields=['sale']),
             models.Index(fields=['product']),
-            models.Index(fields=['variation']),
             models.Index(fields=['unit']),
         ]
 
     def save(self, *args, **kwargs):
-        """Auto-set product and names from variation/unit if needed"""
-        if self.variation and not self.product:
-            self.product = self.variation.product
+        """Auto-set product and names from unit if needed (UNITS ONLY ARCHITECTURE - no variations)"""
+        # Ensure product is set from unit if not already
         if self.unit and not self.product:
             self.product = self.unit.product
         
-        if self.variation:
-            if not self.product_name:
-                self.product_name = self.variation.product.name
-            if not self.variation_name:
-                self.variation_name = self.variation.name
-        elif self.product and not self.product_name:
+        # Set product name from product if not already set
+        if self.product and not self.product_name:
             self.product_name = self.product.name
         
         # Store unit name snapshot

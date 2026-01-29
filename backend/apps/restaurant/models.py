@@ -52,6 +52,7 @@ class KitchenOrderTicket(models.Model):
     
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='kitchen_tickets')
     outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='kitchen_tickets', null=True, blank=True)
+    till = models.ForeignKey('outlets.Till', on_delete=models.SET_NULL, null=True, blank=True, related_name='kitchen_orders', help_text="Till/POS terminal that created this order")
     sale = models.ForeignKey('sales.Sale', on_delete=models.CASCADE, related_name='kitchen_tickets')
     table = models.ForeignKey(Table, on_delete=models.SET_NULL, null=True, blank=True, related_name='kitchen_orders')
     
@@ -85,3 +86,71 @@ class KitchenOrderTicket(models.Model):
     def __str__(self):
         return f"KOT-{self.kot_number} - Table {self.table.number if self.table else 'N/A'}"
 
+
+
+class RestaurantOrder(models.Model):
+    "Restaurant Order model for persistent order session tracking"
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='restaurant_orders')
+    outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='restaurant_orders')
+    till = models.ForeignKey('outlets.Till', on_delete=models.SET_NULL, null=True, blank=True, related_name='restaurant_orders')
+    shift = models.ForeignKey('shifts.Shift', on_delete=models.SET_NULL, null=True, blank=True, related_name='restaurant_orders')
+    
+    customer = models.ForeignKey('customers.Customer', on_delete=models.SET_NULL, null=True, blank=True, related_name='restaurant_orders')
+    customer_name = models.CharField(max_length=255)
+    
+    table = models.ForeignKey(Table, on_delete=models.SET_NULL, null=True, blank=True, related_name='restaurant_orders')
+    
+    order_number = models.CharField(max_length=50, unique=True, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    order_type = models.CharField(max_length=20, choices=[
+        ('dine_in', 'Dine In'),
+        ('takeout', 'Takeout'),
+        ('delivery', 'Delivery'),
+    ], default='dine_in')
+    
+    subtotal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    tax = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    discount_type = models.CharField(max_length=20, choices=[('percentage', 'Percentage'), ('amount', 'Amount')], null=True, blank=True)
+    discount_reason = models.CharField(max_length=255, blank=True)
+    total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    
+    payment_method = models.CharField(max_length=20, choices=[
+        ('cash', 'Cash'),
+        ('card', 'Card'),
+        ('mobile', 'Mobile Money'),
+        ('credit', 'Credit/On Account'),
+    ], null=True, blank=True)
+    
+    sale = models.OneToOneField('sales.Sale', on_delete=models.SET_NULL, null=True, blank=True, related_name='restaurant_order')
+    
+    notes = models.TextField(blank=True)
+    guests = models.PositiveIntegerField(null=True, blank=True)
+    priority = models.CharField(max_length=20, choices=[('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')], default='normal')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        db_table = 'restaurant_restaurantorder'
+        verbose_name = 'Restaurant Order'
+        verbose_name_plural = 'Restaurant Orders'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant']),
+            models.Index(fields=['outlet']),
+            models.Index(fields=['table']),
+            models.Index(fields=['status']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        table_info = f"Table {self.table.number}" if self.table else self.order_type.replace('_', ' ').title()
+        return f"Order #{self.order_number} - {self.customer_name} ({table_info})"

@@ -34,11 +34,11 @@ import {
 } from "@/components/ui/dropdown-menu"
 import Link from "next/link"
 import { useState, useEffect, useCallback, useMemo } from "react"
-import { AddEditProductModal } from "@/components/modals/add-edit-product-modal"
-import { ImportProductsModal } from "@/components/modals/import-products-modal"
+import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
+import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
+import { dataExchangeConfigs } from "@/lib/utils/data-exchange-config"
 import { productService, categoryService } from "@/lib/services/productService"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
-import { apiEndpoints } from "@/lib/api"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useToast } from "@/components/ui/use-toast"
 import {
@@ -52,9 +52,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { useI18n } from "@/contexts/i18n-context"
+import { useTenant } from "@/contexts/tenant-context"
 
 export default function ProductsPage() {
   const { t } = useI18n()
+  const { outlets } = useTenant()
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
@@ -77,7 +79,7 @@ export default function ProductsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isAutoRefreshing, setIsAutoRefreshing] = useState(false)
-  const [isExporting, setIsExporting] = useState(false)
+  const [showExport, setShowExport] = useState(false)
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [productToDelete, setProductToDelete] = useState<any>(null)
@@ -407,166 +409,11 @@ export default function ProductsPage() {
     }
   }
 
-  const handleExportProducts = async () => {
-    if (!currentBusiness) {
-      toast({
-        title: "Error",
-        description: "No business selected.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (products.length === 0) {
-      toast({
-        title: "No Products",
-        description: "There are no products to export.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsExporting(true)
-    try {
-      const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
-      const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
-      
-      // Construct the URL - ensure proper path joining
-      const exportUrl = `${API_BASE_URL}${apiEndpoints.products.list.replace(/\/$/, '')}/bulk-export/?format=xlsx`
-      console.log("Exporting products from:", exportUrl)
-      
-      // Call the backend export endpoint
-      const response = await fetch(exportUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-        // Don't set Content-Type for GET requests with file downloads
-      })
-
-      if (!response.ok) {
-        // Try to get error message from response
-        let errorMessage = `Failed to export products (${response.status})`
-        const contentType = response.headers.get('content-type')
-        
-        // Clone the response to read it without consuming the body
-        const clonedResponse = response.clone()
-        
-        try {
-          if (contentType && contentType.includes('application/json')) {
-            const errorData = await clonedResponse.json()
-            errorMessage = errorData.error || errorData.message || errorMessage
-          } else {
-            const text = await clonedResponse.text()
-            try {
-              const errorData = JSON.parse(text)
-              errorMessage = errorData.error || errorData.message || errorMessage
-            } catch {
-              errorMessage = text || response.statusText || errorMessage
-            }
-          }
-        } catch {
-          errorMessage = response.statusText || errorMessage
-        }
-        throw new Error(errorMessage)
-      }
-
-      // Check if response is actually a file
-      const contentType = response.headers.get('content-type')
-      if (contentType && contentType.includes('application/json')) {
-        // Might be an error response in JSON format
-        const errorData = await response.json()
-        throw new Error(errorData.error || errorData.message || 'Invalid response from server')
-      }
-
-      // Get the blob from response
-      const blob = await response.blob()
-      
-      // Create download link
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '')
-      link.download = `products_export_${timestamp}.xlsx`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
-
-      toast({
-        title: "Export Successful",
-        description: "Products have been exported to Excel file.",
-      })
-    } catch (error: any) {
-      console.error("Failed to export products:", error)
-      console.error("Error details:", {
-        message: error.message,
-        stack: error.stack,
-      })
-      toast({
-        title: "Export Failed",
-        description: error.message || "Failed to export products. Please try again.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsExporting(false)
-    }
-  }
-
   return (
     <DashboardLayout>
       <PageLayout
         title="Products"
         description={`Manage your product catalog${isAutoRefreshing ? ' (Updating...)' : ''}` }
-        actions={
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleRefresh}
-              disabled={isRefreshing || isLoading}
-              className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
-            >
-              <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing  ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleExportProducts}
-              disabled={isExporting || isLoading || products.length === 0}
-              className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
-            >
-              <Download className={`mr-2 h-4 w-4 ${isExporting ? "animate-pulse" : ""}`} />
-              {isExporting ? "Exporting..." : "Export"}
-            </Button>
-            <Link href="/dashboard/inventory/products/categories">
-              <Button 
-                variant="outline"
-                className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
-              >
-                <Folder className="mr-2 h-4 w-4" />
-                Categories
-              </Button>
-            </Link>
-            <Button 
-              variant="outline" 
-              onClick={() => setShowImport(true)}
-              className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Import
-            </Button>
-            <Button 
-              onClick={() => {
-                setSelectedProduct(null)
-                setShowAddProduct(true)
-              }}
-              className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add Product
-            </Button>
-          </div>
-        }
         noPadding={true}
       >
         {/* Tabs Navigation */}
@@ -576,6 +423,44 @@ export default function ProductsPage() {
             activeTab={activeTab}
             onTabChange={setActiveTab}
           >
+
+            {/* Button Toolbar */}
+            <div className="px-6 py-3 border-b border-gray-300 flex gap-3">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                    <Upload className="mr-2 h-4 w-4" />
+                    Import / Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => setShowImport(true)}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Import Products
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowExport(true)} disabled={products.length === 0}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export Products
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Link href="/dashboard/inventory/products/categories">
+                <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                  <Folder className="mr-2 h-4 w-4" />
+                  Categories
+                </Button>
+              </Link>
+              <Button 
+                onClick={() => {
+                  setSelectedProduct(null)
+                  setShowAddProduct(true)
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Product
+              </Button>
+            </div>
 
             {/* Filters */}
             <div className="px-6 py-4 border-b border-gray-300">
@@ -669,6 +554,12 @@ export default function ProductsPage() {
                   const categoryName = product.category?.name || (product.categoryId ? categories.find(c => c.id === product.categoryId)?.name : "N/A")
                   const businessFields = parseBusinessFields(product)
                   
+                  // Get outlet name from product or lookup in outlets context
+                  const outletName = product.outlet?.name || product.outlet_name || 
+                    (product.outlet_id ? outlets?.find(o => String(o.id) === String(product.outlet_id))?.name : null) ||
+                    (product.outlet ? outlets?.find(o => String(o.id) === String(product.outlet))?.name : null) ||
+                    "N/A"
+                  
                   return (
                     <TableRow key={product.id}>
                       <TableCell>
@@ -681,7 +572,7 @@ export default function ProductsPage() {
                       </TableCell>
                       <TableCell>{product.sku || "N/A"}</TableCell>
                       <TableCell>{categoryName}</TableCell>
-                      <TableCell>{product.outlet?.name || product.outlet_name || "N/A"}</TableCell>
+                      <TableCell>{outletName}</TableCell>
                       <TableCell>{currentBusiness?.currencySymbol || "MWK"} {product.cost ? product.cost.toFixed(2) : "0.00"}</TableCell>
                       <TableCell>
                         {currentBusiness?.currencySymbol || "MWK"} {(product.retail_price || product.price || 0).toFixed(2)}
@@ -819,6 +710,12 @@ export default function ProductsPage() {
                           ? parseFloat(product.lowStockThreshold) 
                           : (product.lowStockThreshold || 0)
                         
+                        // Get outlet name from product or lookup in outlets context
+                        const outletName = product.outlet?.name || product.outlet_name || 
+                          (product.outlet_id ? outlets?.find(o => String(o.id) === String(product.outlet_id))?.name : null) ||
+                          (product.outlet ? outlets?.find(o => String(o.id) === String(product.outlet))?.name : null) ||
+                          "N/A"
+                        
                         return (
                           <TableRow key={product.id}>
                             <TableCell>
@@ -831,7 +728,7 @@ export default function ProductsPage() {
                             </TableCell>
                             <TableCell>{product.sku || "N/A"}</TableCell>
                             <TableCell>{categoryName}</TableCell>
-                            <TableCell>{product.outlet?.name || product.outlet_name || "N/A"}</TableCell>
+                            <TableCell>{outletName}</TableCell>
                             <TableCell className={status === "out-of-stock" ? "text-red-600 font-semibold" : "text-orange-600 font-semibold"}>
                               {stock}
                             </TableCell>
@@ -1003,7 +900,7 @@ export default function ProductsPage() {
       </PageLayout>
 
       {/* Modals */}
-      <AddEditProductModal
+      <ProductModalTabs
         open={showAddProduct}
         onOpenChange={(open) => {
           setShowAddProduct(open)
@@ -1022,12 +919,25 @@ export default function ProductsPage() {
           await handleProductSaved()
         }}
       />
-      <ImportProductsModal
+      <DataExchangeModal
         open={showImport}
         onOpenChange={setShowImport}
+        type="import"
+        config={dataExchangeConfigs.products}
+        outlets={outlets}
+        categories={categories}
         onSuccess={() => {
-          handleProductSaved() // Reload products after successful import
+          handleProductSaved()
         }}
+      />
+
+      <DataExchangeModal
+        open={showExport}
+        onOpenChange={setShowExport}
+        type="export"
+        config={dataExchangeConfigs.products}
+        outlets={outlets}
+        categories={categories}
       />
 
       {/* Order Product Modal */}

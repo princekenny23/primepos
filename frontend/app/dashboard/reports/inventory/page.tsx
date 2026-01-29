@@ -240,13 +240,12 @@ export default function InventoryReportsPage() {
             </Table>
           </CardContent>
         </Card>
-      </div>
-
       {/* Modals */}
-      <ExportReportModal
+      <DataExchangeModal
         open={showExport}
         onOpenChange={setShowExport}
-        reportType="Inventory & Stock Report"
+        type="export"
+        config={dataExchangeConfigs.reports}
       />
       <PrintReportModal
         open={showPrint}

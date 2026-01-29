@@ -1,5 +1,32 @@
 services:
   - type: web
+    name: primepos-backend
+    env: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt && python manage.py migrate && python manage.py collectstatic --noinput
+    startCommand: gunicorn primepos.wsgi:application --bind 0.0.0.0:$PORT
+    healthCheckPath: /health/
+    healthCheckInterval: 30
+    healthCheckTimeout: 5
+    healthCheckInitialDelay: 10
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: primepos.settings.production
+      - key: PORT
+        value: 10000
+      - key: SECRET_KEY
+        sync: false
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+
+  - type: web
     name: primepos-frontend
     env: node
     plan: free
@@ -11,9 +38,15 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000
+        value: 10001
       - key: NEXT_PUBLIC_API_URL
         sync: false
       - key: NEXT_PUBLIC_API_BASE_URL
         sync: false
 
+databases:
+  - name: primepos-db
+    databaseName: primepos_prod
+    user: primepos_user
+    plan: free
+    ipWhitelistEntry: "0.0.0.0/0"

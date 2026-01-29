@@ -32,7 +32,7 @@ interface AddEditCustomerModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   customer?: Customer | null
-  onSuccess?: () => void
+  onSuccess?: (customer?: Customer) => void
 }
 
 export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }: AddEditCustomerModalProps) {
@@ -64,7 +64,7 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
           email: customer.email || "",
           phone: customer.phone || "",
           address: customer.address || "",
-          outlet_id: customer.outlet_id || customer.outlet || "",
+          outlet_id: String(customer.outlet_id || customer.outlet || ""),
           credit_enabled: customer.credit_enabled || false,
           credit_limit: customer.credit_limit?.toString() || "",
           payment_terms_days: customer.payment_terms_days?.toString() || "30",
@@ -137,16 +137,18 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
         is_active: true,
       }
 
+      let savedCustomer: Customer | undefined
+
       if (customer) {
         // Update existing customer
-        await customerService.update(customer.id, customerData)
+        savedCustomer = await customerService.update(customer.id, customerData)
         toast({
           title: "Customer Updated",
           description: "Customer has been updated successfully.",
         })
       } else {
         // Create new customer
-        await customerService.create(customerData)
+        savedCustomer = await customerService.create(customerData)
         toast({
           title: "Customer Added",
           description: "Customer has been added successfully.",
@@ -155,7 +157,7 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
 
       onOpenChange(false)
       if (onSuccess) {
-        onSuccess()
+        onSuccess(savedCustomer)
       }
     } catch (error: any) {
       console.error("Failed to save customer:", error)

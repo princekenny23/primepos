@@ -51,8 +51,10 @@ export const usePOSStore = create<POSState>()(
       
       addToCart: (item) => {
         const existingItem = get().cart.find(
-          (cartItem) => cartItem.productId === item.productId && 
-                       JSON.stringify(cartItem.modifiers) === JSON.stringify(item.modifiers)
+          (cartItem) => cartItem.productId === item.productId &&
+            cartItem.variationId === item.variationId &&
+            cartItem.unitId === item.unitId &&
+            JSON.stringify(cartItem.modifiers) === JSON.stringify(item.modifiers)
         )
         
         if (existingItem) {

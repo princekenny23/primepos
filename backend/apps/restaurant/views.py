@@ -5,8 +5,8 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
-from .models import Table, KitchenOrderTicket
-from .serializers import TableSerializer, KitchenOrderTicketSerializer
+from .models import Table, KitchenOrderTicket, RestaurantOrder
+from .serializers import TableSerializer, KitchenOrderTicketSerializer, RestaurantOrderSerializer
 from apps.tenants.permissions import TenantFilterMixin
 
 
@@ -198,11 +198,15 @@ class KitchenOrderTicketViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             except Table.DoesNotExist:
                 pass
         
+        # Get till from sale (inherit from sale if not provided)
+        till = sale.till if hasattr(sale, 'till') else None
+        
         serializer.save(
             tenant=tenant,
             outlet=outlet,
             sale=sale,
             table=table,
+            till=till,
             kot_number=kot_number
         )
     
@@ -317,3 +321,126 @@ class KitchenOrderTicketViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
+
+class RestaurantOrderViewSet(viewsets.ModelViewSet, TenantFilterMixin):
+    """Restaurant Order ViewSet for managing persistent order sessions"""
+    queryset = RestaurantOrder.objects.select_related('tenant', 'outlet', 'customer', 'table', 'sale', 'till')
+    serializer_class = RestaurantOrderSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['outlet', 'status', 'table', 'order_type', 'customer']
+    search_fields = ['order_number', 'customer_name']
+    ordering_fields = ['created_at', 'order_number', 'total']
+    ordering = ['-created_at']
+    
+    def get_queryset(self):
+        """Filter orders by tenant"""
+        user = self.request.user
+        if not hasattr(user, '_tenant_loaded'):
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            try:
+                user = User.objects.select_related('tenant').get(pk=user.pk)
+                self.request.user = user
+                user._tenant_loaded = True
+            except User.DoesNotExist:
+                pass
+        
+        is_saas_admin = getattr(user, 'is_saas_admin', False)
+        request_tenant = getattr(self.request, 'tenant', None)
+        user_tenant = getattr(user, 'tenant', None)
+        tenant = request_tenant or user_tenant
+        
+        queryset = RestaurantOrder.objects.select_related('tenant', 'outlet', 'customer', 'table', 'sale', 'till')
+        
+        if not is_saas_admin:
+            if tenant:
+                queryset = queryset.filter(tenant=tenant)
+            else:
+                return queryset.none()
+        
+        return queryset
+    
+    def perform_create(self, serializer):
+        """Set tenant when creating order"""
+        tenant = getattr(self.request, 'tenant', None) or self.request.user.tenant
+        outlet = getattr(self.request, 'outlet', None)
+        till = getattr(self.request, 'till', None)
+        
+        if not tenant:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("Tenant is required")
+        
+        serializer.save(tenant=tenant, outlet=outlet, till=till)
+    
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """Mark order as completed"""
+        order = self.get_object()
+        
+        if order.status == 'completed':
+            return Response(
+                {"detail": "Order is already completed"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        order.status = 'completed'
+        order.completed_at = timezone.now()
+        order.save()
+        
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """Cancel order"""
+        order = self.get_object()
+        
+        if order.status == 'completed':
+            return Response(
+                {"detail": "Cannot cancel completed order"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        order.status = 'cancelled'
+        order.save()
+        
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'])
+    def add_items(self, request, pk=None):
+        """Add items to an existing order"""
+        order = self.get_object()
+        
+        if order.status != 'pending':
+            return Response(
+                {"detail": "Can only add items to pending orders"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # This would typically add items to the associated Sale
+        # Implementation depends on your SaleItem structure
+        serializer = self.get_serializer(order)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def pending(self, request):
+        """Get all pending orders"""
+        queryset = self.get_queryset().filter(status='pending')
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def by_table(self, request):
+        """Get orders for a specific table"""
+        table_id = request.query_params.get('table_id')
+        if not table_id:
+            return Response(
+                {"detail": "table_id query parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        queryset = self.get_queryset().filter(table_id=table_id, status='pending')
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)

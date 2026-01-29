@@ -26,6 +26,7 @@ def root_view(request):
 urlpatterns = [
     path('', root_view, name='root'),
     path('admin/', admin.site.urls),
+    path('', include('apps.health.urls')),
     path('api/v1/', api_root, name='api-root'),
     path('api/v1/', include('apps.accounts.urls')),
     path('api/v1/', include('apps.tenants.urls')),
@@ -45,6 +46,7 @@ urlpatterns = [
     path('api/v1/', include('apps.expenses.urls')),
     path('api/v1/', include('apps.admin.urls')),
     path('api/v1/', include('apps.quotations.urls')),
+    path('api/v1/bar/', include('apps.bar.urls')),
     
 ]
 

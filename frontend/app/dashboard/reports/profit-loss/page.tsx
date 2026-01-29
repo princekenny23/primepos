@@ -41,14 +41,13 @@ export default function ProfitLossReportsPage() {
             saleService.list({ tenant: currentBusiness.id, outlet: currentOutlet?.id, status: "completed", limit: 1000 }),
             expenseService.list({ tenant: currentBusiness.id, outlet: currentOutlet?.id }),
           ])
+
+          const sales = Array.isArray(salesData) ? salesData : salesData.results || []
+          const expenses = expensesData.results || []
           
           if (plReport) {
             setPlData(plReport)
           } else {
-            // Calculate from sales and expenses
-            const sales = Array.isArray(salesData) ? salesData : salesData.results || []
-            const expenses = expensesData.results || []
-            
             const revenue = sales.reduce((sum: number, s: any) => sum + (s.total || 0), 0)
             const totalExpenses = expenses.reduce((sum: number, e: any) => sum + (e.amount || 0), 0)
             // Estimate COGS as 60% of revenue (can be improved with actual product costs)
@@ -251,13 +250,12 @@ export default function ProfitLossReportsPage() {
             <SalesChart data={monthlyData} />
           </CardContent>
         </Card>
-      </div>
-
       {/* Modals */}
-      <ExportReportModal
+      <DataExchangeModal
         open={showExport}
         onOpenChange={setShowExport}
-        reportType="Profit & Loss Report"
+        type="export"
+        config={dataExchangeConfigs.reports}
       />
       <PrintReportModal
         open={showPrint}

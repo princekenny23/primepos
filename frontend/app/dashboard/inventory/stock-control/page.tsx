@@ -30,6 +30,9 @@ import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { useI18n } from "@/contexts/i18n-context"
+import { productService } from "@/lib/services/productService"
+import { StockDisplayGrid } from "@/components/stock/stock-display"
+import type { Product } from "@/lib/types"
 
 export default function StockControlPage() {
   const router = useRouter()
@@ -43,12 +46,15 @@ export default function StockControlPage() {
   const [transfers, setTransfers] = useState<any[]>([])
   const [receiving, setReceiving] = useState<any[]>([])
   const [returns, setReturns] = useState<Return[]>([])
+  const [stockProducts, setStockProducts] = useState<Product[]>([])
 
   // Loading states
   const [isLoadingAdjustments, setIsLoadingAdjustments] = useState(true)
   const [isLoadingTransfers, setIsLoadingTransfers] = useState(true)
   const [isLoadingReceiving, setIsLoadingReceiving] = useState(true)
   const [isLoadingReturns, setIsLoadingReturns] = useState(true)
+  const [isLoadingStock, setIsLoadingStock] = useState(true)
+  const [stockError, setStockError] = useState<string | null>(null)
 
   // Load adjustments
   const loadAdjustments = useCallback(async () => {
@@ -205,6 +211,28 @@ export default function StockControlPage() {
     }
   }, [currentBusiness, outlets, useReal])
 
+  const loadStockOverview = useCallback(async () => {
+    if (!currentBusiness) {
+      setStockProducts([])
+      setIsLoadingStock(false)
+      return
+    }
+
+    setIsLoadingStock(true)
+    setStockError(null)
+    try {
+      const response = await productService.list({ is_active: true })
+      const items = response.results || []
+      setStockProducts(items.slice(0, 6))
+    } catch (error) {
+      console.error("Failed to load stock overview:", error)
+      setStockProducts([])
+      setStockError("Could not load stock overview")
+    } finally {
+      setIsLoadingStock(false)
+    }
+  }, [currentBusiness])
+
   // Load returns
   const loadReturns = useCallback(async () => {
     if (!currentBusiness || !currentOutlet) {
@@ -233,7 +261,8 @@ export default function StockControlPage() {
     loadTransfers()
     loadReceiving()
     loadReturns()
-  }, [loadAdjustments, loadTransfers, loadReceiving, loadReturns])
+    loadStockOverview()
+  }, [loadAdjustments, loadTransfers, loadReceiving, loadReturns, loadStockOverview])
 
   const tabs: TabConfig[] = [
     {
@@ -284,6 +313,19 @@ export default function StockControlPage() {
         description={t("inventory.stock_control_description")}
         actions={<PageRefreshButton />}
       >
+        <div className="mb-6 space-y-3">
+          <h3 className="text-lg font-semibold text-gray-900">Stock Overview</h3>
+          {isLoadingStock ? (
+            <div className="text-sm text-muted-foreground">Loading stock...</div>
+          ) : stockError ? (
+            <div className="text-sm text-destructive">{stockError}</div>
+          ) : stockProducts.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No products available.</div>
+          ) : (
+            <StockDisplayGrid products={stockProducts} />
+          )}
+        </div>
+
         <FilterableTabs
           tabs={tabs}
           activeTab={activeTab}

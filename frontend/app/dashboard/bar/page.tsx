@@ -2,20 +2,12 @@
 
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { 
-  Wine,
   CreditCard,
-  FlaskConical,
+  Table2,
 } from "lucide-react"
 import { OptionCard, type OptionCardProps } from "@/components/shared/option-card"
 
 const barOptions: (Omit<OptionCardProps, "iconSize">)[] = [
-  {
-    id: "drinks",
-    title: "Drinks Menu",
-    titleKey: "pos.bar.drinks",
-    href: "/dashboard/bar/drinks",
-    icon: Wine,
-  },
   {
     id: "tabs",
     title: "Bar Tabs",
@@ -24,11 +16,11 @@ const barOptions: (Omit<OptionCardProps, "iconSize">)[] = [
     icon: CreditCard,
   },
   {
-    id: "recipes",
-    title: "Mix Recipes",
-    titleKey: "pos.bar.recipes",
-    href: "/dashboard/bar/recipes",
-    icon: FlaskConical,
+    id: "tables",
+    title: "Bar Tables",
+    titleKey: "pos.bar.tables",
+    href: "/dashboard/bar/tables",
+    icon: Table2,
   },
 ]
 

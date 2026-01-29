@@ -50,6 +50,7 @@ class SaleSerializer(serializers.ModelSerializer):
     outlet = serializers.IntegerField(write_only=True, required=True)
     shift = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     customer = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    till = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     table_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     guests = serializers.IntegerField(required=False, allow_null=True)
     priority = serializers.ChoiceField(choices=[('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')], required=False, default='normal')
@@ -59,12 +60,13 @@ class SaleSerializer(serializers.ModelSerializer):
     user_detail = serializers.SerializerMethodField(read_only=True)
     shift_detail = serializers.SerializerMethodField(read_only=True)
     customer_detail = serializers.SerializerMethodField(read_only=True)
+    till_detail = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Sale
         fields = (
             'id', 'tenant', 'outlet', 'outlet_detail', 'user', 'user_detail', 
-            'shift', 'shift_detail', 'customer', 'customer_detail', 'receipt_number',
+            'shift', 'shift_detail', 'customer', 'customer_detail', 'till', 'till_detail', 'receipt_number',
             'subtotal', 'tax', 'discount', 'total', 'payment_method', 'status',
             'cash_received', 'change_given',
             'due_date', 'amount_paid', 'payment_status',
@@ -117,6 +119,16 @@ class SaleSerializer(serializers.ModelSerializer):
                 'name': obj.customer.name,
                 'email': obj.customer.email or '',
                 'phone': obj.customer.phone or '',
+            }
+        return None
+    
+    def get_till_detail(self, obj):
+        """Return till details as nested object"""
+        if obj.till:
+            return {
+                'id': str(obj.till.id),
+                'name': obj.till.name,
+                'outlet_id': str(obj.till.outlet.id) if obj.till.outlet else None,
             }
         return None
     

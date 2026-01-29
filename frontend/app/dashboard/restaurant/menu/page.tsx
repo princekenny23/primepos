@@ -64,7 +64,6 @@ export default function MenuPage() {
     try {
       if (useReal) {
         const response = await productService.list({ 
-          businessId: currentBusiness.id, 
           is_active: true 
         })
         const products = Array.isArray(response) ? response : response.results || []

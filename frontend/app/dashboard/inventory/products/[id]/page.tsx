@@ -18,8 +18,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ViewProductHistoryModal } from "@/components/modals/view-product-history-modal"
-import { ManageVariationsModal } from "@/components/modals/manage-variations-modal"
-import { AddEditProductModal } from "@/components/modals/add-edit-product-modal"
+import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 import { useState, useEffect } from "react"
 import { productService, variationService, type ItemVariation } from "@/lib/services/productService"
 import { saleService } from "@/lib/services/saleService"
@@ -36,8 +35,8 @@ export default function ProductDetailPage() {
   const [stockHistory, setStockHistory] = useState<any[]>([])
   const [salesHistory, setSalesHistory] = useState<any[]>([])
   const [variations, setVariations] = useState<ItemVariation[]>([])
-  const [showVariationsModal, setShowVariationsModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
+  const [startVariationsSection, setStartVariationsSection] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
@@ -240,7 +239,7 @@ export default function ProductDetailPage() {
                       Manage different variations of this product (sizes, colors, pack sizes, etc.)
                     </CardDescription>
                   </div>
-                  <Button onClick={() => setShowVariationsModal(true)}>
+                  <Button onClick={() => { setStartVariationsSection(true); setShowEditModal(true) }}>
                     <Package className="mr-2 h-4 w-4" />
                     Manage Variations
                   </Button>
@@ -251,7 +250,7 @@ export default function ProductDetailPage() {
                   <div className="text-center py-8 border rounded-lg">
                     <Package className="h-12 w-12 mx-auto mb-2 text-muted-foreground opacity-50" />
                     <p className="text-muted-foreground mb-4">No variations yet</p>
-                    <Button onClick={() => setShowVariationsModal(true)} variant="outline">
+                    <Button onClick={() => { setStartVariationsSection(true); setShowEditModal(true) }} variant="outline">
                       Create First Variation
                     </Button>
                   </div>
@@ -427,20 +426,16 @@ export default function ProductDetailPage() {
         productId={productId}
         productName={product.name}
       />
-      <ManageVariationsModal
-        open={showVariationsModal}
-        onOpenChange={setShowVariationsModal}
-        productId={productId}
-        productName={product.name}
-        onVariationsUpdated={() => {
-          // Reload variations
-          variationService.list({ product: productId }).then(setVariations)
-        }}
-      />
-      <AddEditProductModal
+      <ProductModalTabs
         open={showEditModal}
-        onOpenChange={setShowEditModal}
+        onOpenChange={(open) => {
+          setShowEditModal(open)
+          if (!open) {
+            setStartVariationsSection(false)
+          }
+        }}
         product={product}
+        initialTab={startVariationsSection ? "variations" : "basic"}
         onProductSaved={async () => {
           // Reload product data after update
           try {
