@@ -27,7 +27,6 @@ class Migration(migrations.Migration):
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('outlet', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='batches', to='outlets.outlet')),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='batches', to='tenants.tenant')),
-                ('variation', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='batches', to='products.itemvariation')),
             ],
             options={
                 'verbose_name': 'Batch',
@@ -41,24 +40,12 @@ class Migration(migrations.Migration):
             name='batch',
             field=models.ForeignKey(blank=True, help_text='Batch this movement belongs to', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='movements', to='inventory.batch'),
         ),
-        migrations.AddConstraint(
-            model_name='batch',
-            constraint=models.UniqueConstraint(fields=('variation', 'outlet', 'batch_number'), name='unique_batch_variation_outlet'),
-        ),
         migrations.AddIndex(
             model_name='batch',
             index=models.Index(fields=['tenant'], name='inventory_b_tenant_idx'),
         ),
         migrations.AddIndex(
             model_name='batch',
-            index=models.Index(fields=['variation', 'outlet'], name='inventory_b_var_outlet_idx'),
-        ),
-        migrations.AddIndex(
-            model_name='batch',
             index=models.Index(fields=['expiry_date'], name='inventory_b_expiry_idx'),
-        ),
-        migrations.AddIndex(
-            model_name='batch',
-            index=models.Index(fields=['variation', 'outlet', 'expiry_date'], name='inventory_b_var_out_exp_idx'),
         ),
     ]
