@@ -54,10 +54,6 @@ class Migration(migrations.Migration):
         # Remove old unique constraints (from migration 0004)
         migrations.RemoveConstraint(
             model_name='purchaseorderitem',
-            name='unique_po_variation',
-        ),
-        migrations.RemoveConstraint(
-            model_name='purchaseorderitem',
             name='unique_po_product',
         ),
         
