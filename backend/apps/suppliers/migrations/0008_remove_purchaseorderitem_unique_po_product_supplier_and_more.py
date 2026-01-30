@@ -16,10 +16,6 @@ class Migration(migrations.Migration):
         ),
         migrations.RemoveConstraint(
             model_name='purchaseorderitem',
-            name='unique_po_variation_no_supplier',
-        ),
-        migrations.RemoveConstraint(
-            model_name='purchaseorderitem',
             name='unique_po_product_no_supplier',
         ),
         migrations.RenameIndex(
@@ -39,14 +35,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='purchaseorderitem',
-            constraint=models.UniqueConstraint(condition=models.Q(('product__isnull', False), ('variation__isnull', True)), fields=('purchase_order', 'product', 'supplier'), name='unique_po_product_supplier'),
+            constraint=models.UniqueConstraint(condition=models.Q(('product__isnull', False)), fields=('purchase_order', 'product', 'supplier'), name='unique_po_product_supplier'),
         ),
         migrations.AddConstraint(
             model_name='purchaseorderitem',
-            constraint=models.UniqueConstraint(condition=models.Q(('supplier__isnull', True), ('variation__isnull', False)), fields=('purchase_order', 'variation'), name='unique_po_variation_no_supplier'),
-        ),
-        migrations.AddConstraint(
-            model_name='purchaseorderitem',
-            constraint=models.UniqueConstraint(condition=models.Q(('product__isnull', False), ('supplier__isnull', True), ('variation__isnull', True)), fields=('purchase_order', 'product'), name='unique_po_product_no_supplier'),
+            constraint=models.UniqueConstraint(condition=models.Q(('product__isnull', False), ('supplier__isnull', True)), fields=('purchase_order', 'product'), name='unique_po_product_no_supplier'),
         ),
     ]

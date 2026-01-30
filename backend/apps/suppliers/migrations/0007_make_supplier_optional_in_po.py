@@ -61,19 +61,11 @@ class Migration(migrations.Migration):
             name='unique_po_product',
         ),
         
-        # Add new constraints that allow same product/variation with different suppliers
+        # Add new constraints that allow same product with different suppliers
         migrations.AddConstraint(
             model_name='purchaseorderitem',
             constraint=models.UniqueConstraint(
-                condition=models.Q(('variation__isnull', False)),
-                fields=('purchase_order', 'variation', 'supplier'),
-                name='unique_po_variation_supplier'
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name='purchaseorderitem',
-            constraint=models.UniqueConstraint(
-                condition=models.Q(('variation__isnull', True), ('product__isnull', False)),
+                condition=models.Q(('product__isnull', False)),
                 fields=('purchase_order', 'product', 'supplier'),
                 name='unique_po_product_supplier'
             ),
@@ -81,15 +73,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name='purchaseorderitem',
             constraint=models.UniqueConstraint(
-                condition=models.Q(('variation__isnull', False), ('supplier__isnull', True)),
-                fields=('purchase_order', 'variation'),
-                name='unique_po_variation_no_supplier'
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name='purchaseorderitem',
-            constraint=models.UniqueConstraint(
-                condition=models.Q(('variation__isnull', True), ('product__isnull', False), ('supplier__isnull', True)),
+                condition=models.Q(('product__isnull', False), ('supplier__isnull', True)),
                 fields=('purchase_order', 'product'),
                 name='unique_po_product_no_supplier'
             ),
