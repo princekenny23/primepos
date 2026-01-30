@@ -13,10 +13,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveConstraint(
-            model_name='batch',
-            name='unique_batch_variation_outlet',
-        ),
         migrations.RenameIndex(
             model_name='batch',
             new_name='inventory_b_tenant__9caa42_idx',
@@ -24,26 +20,12 @@ class Migration(migrations.Migration):
         ),
         migrations.RenameIndex(
             model_name='batch',
-            new_name='inventory_b_variati_ea7ea7_idx',
-            old_name='inventory_b_var_outlet_idx',
-        ),
-        migrations.RenameIndex(
-            model_name='batch',
             new_name='inventory_b_expiry__96c551_idx',
             old_name='inventory_b_expiry_idx',
-        ),
-        migrations.RenameIndex(
-            model_name='batch',
-            new_name='inventory_b_variati_1eecd5_idx',
-            old_name='inventory_b_var_out_exp_idx',
         ),
         migrations.AlterField(
             model_name='locationstock',
             name='quantity',
             field=models.IntegerField(default=0, help_text='Current stock quantity at this location (legacy - prefer using get_available_quantity())', validators=[django.core.validators.MinValueValidator(0)]),
-        ),
-        migrations.AlterUniqueTogether(
-            name='batch',
-            unique_together={('variation', 'outlet', 'batch_number')},
         ),
     ]

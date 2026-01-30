@@ -1,7 +1,6 @@
-# Generated migration to remove variation field from Batch after ItemVariation deletion
+# Generated migration - no-op since batch variation was never created in the new architecture
 
-from django.db import migrations, models
-import django.db.models.deletion
+from django.db import migrations
 
 
 class Migration(migrations.Migration):
@@ -11,24 +10,4 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AlterUniqueTogether(
-            name='batch',
-            unique_together=set(),
-        ),
-        migrations.RemoveField(
-            model_name='batch',
-            name='variation',
-        ),
-        migrations.AlterUniqueTogether(
-            name='batch',
-            unique_together={('product', 'outlet', 'batch_number')},
-        ),
-        migrations.RemoveIndex(
-            model_name='batch',
-            name='inventory_b_variati_ea7ea7_idx',
-        ),
-        migrations.RemoveIndex(
-            model_name='batch',
-            name='inventory_b_variati_1eecd5_idx',
-        ),
     ]
