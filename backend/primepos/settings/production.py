@@ -2,6 +2,8 @@
 Production settings
 """
 from .base import *
+import os
+from decouple import config
 
 DEBUG = False
 
@@ -12,6 +14,10 @@ CSRF_COOKIE_SECURE = True
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
+
+# Hosts and CORS
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1').split(',')
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000').split(',')
 
 # Static files
 STATIC_ROOT = '/var/www/primepos/staticfiles/'
