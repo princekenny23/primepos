@@ -51,12 +51,6 @@ class Migration(migrations.Migration):
             ),
         ),
         
-        # Remove old unique constraints (from migration 0004)
-        migrations.RemoveConstraint(
-            model_name='purchaseorderitem',
-            name='unique_po_product',
-        ),
-        
         # Add new constraints that allow same product with different suppliers
         migrations.AddConstraint(
             model_name='purchaseorderitem',
