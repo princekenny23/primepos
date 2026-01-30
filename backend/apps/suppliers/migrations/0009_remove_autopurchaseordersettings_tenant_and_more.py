@@ -27,10 +27,7 @@ class Migration(migrations.Migration):
             model_name='purchaseorderitem',
             name='supplier',
         ),
-        migrations.RemoveField(
-            model_name='purchaseorderitem',
-            name='variation',
-        ),
+
         migrations.AlterUniqueTogether(
             name='purchasereturnitem',
             unique_together=None,
