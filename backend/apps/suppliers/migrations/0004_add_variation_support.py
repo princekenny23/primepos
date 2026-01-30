@@ -16,11 +16,6 @@ class Migration(migrations.Migration):
             name='purchaseorderitem',
             unique_together=set(),
         ),
-        migrations.AddField(
-            model_name='purchaseorderitem',
-            name='variation',
-            field=models.ForeignKey(blank=True, help_text='Item variation for this PO item (preferred)', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='purchase_order_items', to='products.itemvariation'),
-        ),
         migrations.AlterField(
             model_name='purchaseorderitem',
             name='product',

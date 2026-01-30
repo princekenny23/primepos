@@ -28,14 +28,13 @@ class Migration(migrations.Migration):
                 ('supplier', models.ForeignKey(blank=True, help_text='Related supplier (if applicable)', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='auto_po_audit_logs', to='suppliers.supplier')),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='auto_po_audit_logs', to='tenants.tenant')),
                 ('triggered_by', models.ForeignKey(blank=True, help_text='User who triggered the action (null for automatic)', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='auto_po_audit_logs', to=settings.AUTH_USER_MODEL)),
-                ('variation', models.ForeignKey(blank=True, help_text='Related variation (if applicable)', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='auto_po_audit_logs', to='products.itemvariation')),
             ],
             options={
                 'verbose_name': 'Auto-PO Audit Log',
                 'verbose_name_plural': 'Auto-PO Audit Logs',
                 'db_table': 'suppliers_autopoauditlog',
                 'ordering': ['-created_at'],
-                'indexes': [models.Index(fields=['tenant'], name='suppliers_a_tenant__cf199d_idx'), models.Index(fields=['purchase_order'], name='suppliers_a_purchas_ee015d_idx'), models.Index(fields=['product'], name='suppliers_a_product_2a34d2_idx'), models.Index(fields=['variation'], name='suppliers_a_variati_b5fa55_idx'), models.Index(fields=['supplier'], name='suppliers_a_supplie_c66680_idx'), models.Index(fields=['action_type'], name='suppliers_a_action__d0415f_idx'), models.Index(fields=['created_at'], name='suppliers_a_created_257b31_idx')],
+                'indexes': [models.Index(fields=['tenant'], name='suppliers_a_tenant__cf199d_idx'), models.Index(fields=['purchase_order'], name='suppliers_a_purchas_ee015d_idx'), models.Index(fields=['product'], name='suppliers_a_product_2a34d2_idx'), models.Index(fields=['supplier'], name='suppliers_a_supplie_c66680_idx'), models.Index(fields=['action_type'], name='suppliers_a_action__d0415f_idx'), models.Index(fields=['created_at'], name='suppliers_a_created_257b31_idx')],
             },
         ),
     ]

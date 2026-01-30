@@ -32,16 +32,6 @@ class Migration(migrations.Migration):
             name='stocktakeitem',
             unique_together=set(),
         ),
-        migrations.AddField(
-            model_name='stockmovement',
-            name='variation',
-            field=models.ForeignKey(blank=True, help_text='Item variation for this movement (preferred)', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='stock_movements', to='products.itemvariation'),
-        ),
-        migrations.AddField(
-            model_name='stocktakeitem',
-            name='variation',
-            field=models.ForeignKey(blank=True, help_text='Item variation for this stock take (preferred)', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='stock_take_items', to='products.itemvariation'),
-        ),
         migrations.AlterField(
             model_name='stockmovement',
             name='product',
@@ -51,22 +41,6 @@ class Migration(migrations.Migration):
             model_name='stocktakeitem',
             name='product',
             field=models.ForeignKey(blank=True, help_text='Deprecated: Use variation instead. Kept for backward compatibility.', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='stock_take_items', to='products.product'),
-        ),
-        migrations.AddIndex(
-            model_name='stockmovement',
-            index=models.Index(fields=['variation'], name='inventory_s_variati_312169_idx'),
-        ),
-        migrations.AddIndex(
-            model_name='stocktakeitem',
-            index=models.Index(fields=['variation'], name='inventory_s_variati_4ad843_idx'),
-        ),
-        migrations.AddConstraint(
-            model_name='stocktakeitem',
-            constraint=models.UniqueConstraint(condition=models.Q(('variation__isnull', False)), fields=('stock_take', 'variation'), name='unique_stocktake_variation'),
-        ),
-        migrations.AddConstraint(
-            model_name='stocktakeitem',
-            constraint=models.UniqueConstraint(condition=models.Q(('product__isnull', False), ('variation__isnull', True)), fields=('stock_take', 'product'), name='unique_stocktake_product'),
         ),
         migrations.AddField(
             model_name='locationstock',
@@ -78,29 +52,12 @@ class Migration(migrations.Migration):
             name='tenant',
             field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='location_stocks', to='tenants.tenant'),
         ),
-        migrations.AddField(
-            model_name='locationstock',
-            name='variation',
-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='location_stocks', to='products.itemvariation'),
-        ),
-        migrations.AddIndex(
-            model_name='locationstock',
-            index=models.Index(fields=['variation', 'outlet'], name='inventory_l_variati_401c0e_idx'),
-        ),
         migrations.AddIndex(
             model_name='locationstock',
             index=models.Index(fields=['outlet'], name='inventory_l_outlet__9c16bf_idx'),
         ),
         migrations.AddIndex(
             model_name='locationstock',
-            index=models.Index(fields=['variation'], name='inventory_l_variati_967a4c_idx'),
-        ),
-        migrations.AddIndex(
-            model_name='locationstock',
             index=models.Index(fields=['tenant'], name='inventory_l_tenant__a11b01_idx'),
-        ),
-        migrations.AlterUniqueTogether(
-            name='locationstock',
-            unique_together={('variation', 'outlet')},
         ),
     ]

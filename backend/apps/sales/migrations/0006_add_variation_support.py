@@ -14,11 +14,6 @@ class Migration(migrations.Migration):
     operations = [
         migrations.AddField(
             model_name='saleitem',
-            name='variation',
-            field=models.ForeignKey(blank=True, help_text='Item variation sold (preferred)', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='sale_items', to='products.itemvariation'),
-        ),
-        migrations.AddField(
-            model_name='saleitem',
             name='variation_name',
             field=models.CharField(blank=True, help_text='Variation name snapshot', max_length=255),
         ),
