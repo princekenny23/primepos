@@ -21,16 +21,4 @@ class Migration(migrations.Migration):
             name='product',
             field=models.ForeignKey(blank=True, help_text='Deprecated: Use variation instead. Kept for backward compatibility.', null=True, on_delete=django.db.models.deletion.CASCADE, related_name='purchase_order_items', to='products.product'),
         ),
-        migrations.AddIndex(
-            model_name='purchaseorderitem',
-            index=models.Index(fields=['variation'], name='suppliers_p_variati_8df48d_idx'),
-        ),
-        migrations.AddConstraint(
-            model_name='purchaseorderitem',
-            constraint=models.UniqueConstraint(condition=models.Q(('variation__isnull', False)), fields=('purchase_order', 'variation'), name='unique_po_variation'),
-        ),
-        migrations.AddConstraint(
-            model_name='purchaseorderitem',
-            constraint=models.UniqueConstraint(condition=models.Q(('product__isnull', False), ('variation__isnull', True)), fields=('purchase_order', 'product'), name='unique_po_product'),
-        ),
     ]
