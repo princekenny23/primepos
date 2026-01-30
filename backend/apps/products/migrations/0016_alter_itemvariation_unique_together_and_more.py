@@ -14,14 +14,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AlterUniqueTogether(
-            name='itemvariation',
-            unique_together=None,
-        ),
-        migrations.RemoveField(
-            model_name='itemvariation',
-            name='product',
-        ),
         migrations.RemoveIndex(
             model_name='productunit',
             name='products_pr_unit_na_ab0b33_idx',
