@@ -53,10 +53,6 @@ class Migration(migrations.Migration):
             name='locationstock',
             unique_together=set(),
         ),
-        migrations.RemoveField(
-            model_name='stockmovement',
-            name='variation',
-        ),
         migrations.AddField(
             model_name='locationstock',
             name='product',
@@ -88,10 +84,6 @@ class Migration(migrations.Migration):
         ),
         migrations.RemoveField(
             model_name='locationstock',
-            name='variation',
-        ),
-        migrations.RemoveField(
-            model_name='stocktakeitem',
             name='variation',
         ),
     ]

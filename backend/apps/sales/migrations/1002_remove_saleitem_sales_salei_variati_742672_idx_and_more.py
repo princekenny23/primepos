@@ -14,8 +14,4 @@ class Migration(migrations.Migration):
             model_name='saleitem',
             name='sales_salei_variati_742672_idx',
         ),
-        migrations.RemoveField(
-            model_name='saleitem',
-            name='variation',
-        ),
     ]
