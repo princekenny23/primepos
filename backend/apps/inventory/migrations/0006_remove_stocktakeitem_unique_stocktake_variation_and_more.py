@@ -78,12 +78,4 @@ class Migration(migrations.Migration):
             model_name='locationstock',
             index=models.Index(fields=['product'], name='inventory_l_product_136835_idx'),
         ),
-        migrations.RemoveField(
-            model_name='batch',
-            name='variation',
-        ),
-        migrations.RemoveField(
-            model_name='locationstock',
-            name='variation',
-        ),
     ]
