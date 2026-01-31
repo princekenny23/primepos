@@ -309,7 +309,6 @@ export class ApiClient {
             errorMsg = `API Request failed: ${error.message}`
           }
         }
-        }
         
         console.error("Request error:", {
           endpoint: url,

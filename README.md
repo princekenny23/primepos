@@ -631,8 +631,10 @@ cd frontend
 # Install dependencies
 npm install
 
-# The repository includes .env.local for local development
-# It's already configured to use http://localhost:8000/api/v1
+# Create .env.local from the example file
+cp .env.local.example .env.local
+
+# The .env.local file is configured to use http://localhost:8000/api/v1
 # You can verify the contents:
 cat .env.local
 
