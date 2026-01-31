@@ -712,7 +712,7 @@ CORS_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000']
 | "CORS error" | Check `CORS_ALLOWED_ORIGINS` includes your frontend URL |
 | "404 Not Found" | Verify API URL ends with `/api/v1` (no trailing slash on base URL) |
 | Frontend shows old URL | Delete `.next` folder and restart: `rm -rf .next && npm run dev` |
-| "Port already in use" | Kill process: `lsof -ti:8000 \| xargs kill -9` (backend) or `lsof -ti:3000 \| xargs kill -9` (frontend) |
+| "Port already in use" | Kill process: `lsof -ti:8000 | xargs kill -9` (backend) or `lsof -ti:3000 | xargs kill -9` (frontend) |
 
 **5. Test API Endpoints**
 ```bash

@@ -36,6 +36,8 @@ export class ApiClient {
   private baseURL: string
   private timeout: number
   private attemptedFallback: boolean = false
+  private lastFallbackAttempt: number = 0
+  private readonly fallbackRetryInterval = 60000 // Retry primary URL after 60 seconds
 
   constructor(baseURL: string = apiConfig.baseURL, timeout: number = apiConfig.timeout) {
     this.baseURL = baseURL
@@ -254,6 +256,14 @@ export class ApiClient {
         
         // Network errors (Failed to fetch) - Try fallback in development
         if (error.message === "Failed to fetch" || error.name === "TypeError") {
+          // Check if enough time has passed to retry primary URL
+          const now = Date.now()
+          if (this.attemptedFallback && (now - this.lastFallbackAttempt) > this.fallbackRetryInterval) {
+            console.log("🔄 Retry interval elapsed, resetting to primary URL...")
+            this.attemptedFallback = false
+            this.baseURL = apiConfig.baseURL
+          }
+          
           // In development, try fallback to localhost if primary URL failed
           if (
             process.env.NODE_ENV === "development" &&
@@ -263,6 +273,7 @@ export class ApiClient {
           ) {
             console.warn("⚠️ Primary backend URL failed, attempting fallback to localhost...")
             this.attemptedFallback = true
+            this.lastFallbackAttempt = Date.now()
             this.baseURL = apiConfig.fallbackURL
             
             try {
