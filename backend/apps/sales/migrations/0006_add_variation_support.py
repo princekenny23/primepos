@@ -22,8 +22,4 @@ class Migration(migrations.Migration):
             name='product',
             field=models.ForeignKey(blank=True, help_text='Deprecated: Use variation instead. Kept for backward compatibility.', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='sale_items', to='products.product'),
         ),
-        migrations.AddIndex(
-            model_name='saleitem',
-            index=models.Index(fields=['variation'], name='sales_salei_variati_742672_idx'),
-        ),
     ]

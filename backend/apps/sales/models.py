@@ -151,10 +151,9 @@ class SaleItem(models.Model):
     ]
     
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name='items')
-    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items', help_text="Deprecated: Use variation instead. Kept for backward compatibility.")
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items', help_text="Product sold")
     unit = models.ForeignKey('products.ProductUnit', on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items', help_text="Product unit used for this sale (e.g., piece, dozen, box)")
-    product_name = models.CharField(max_length=255)  # Store name in case product/variation is deleted
-    variation_name = models.CharField(max_length=255, blank=True, help_text="Variation name snapshot")
+    product_name = models.CharField(max_length=255)  # Store name in case product is deleted
     unit_name = models.CharField(max_length=50, blank=True, help_text="Unit name snapshot (e.g., 'piece', 'dozen')")
     quantity = models.IntegerField(validators=[MinValueValidator(1)], help_text="Quantity sold in the selected unit")
     quantity_in_base_units = models.IntegerField(validators=[MinValueValidator(1)], default=1, help_text="Quantity in base units (for inventory deduction)")
@@ -179,7 +178,7 @@ class SaleItem(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        """Auto-set product and names from unit if needed (UNITS ONLY ARCHITECTURE - no variations)"""
+        """Auto-set product and names from unit if needed"""
         # Ensure product is set from unit if not already
         if self.unit and not self.product:
             self.product = self.unit.product
@@ -203,8 +202,8 @@ class SaleItem(models.Model):
 
     def __str__(self):
         display_name = f"{self.product_name}"
-        if self.variation_name:
-            display_name += f" - {self.variation_name}"
+        if self.unit_name:
+            display_name += f" ({self.unit_name})"
         return f"{display_name} x{self.quantity}"
 
 
