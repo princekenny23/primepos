@@ -5,8 +5,8 @@
  * Update NEXT_PUBLIC_API_URL in your .env file to point to your backend.
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://primepos-5mf6.onrender.com/api/v1"
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://primepos-5mf6.onrender.com/api/v1"
 
 export const apiConfig = {
   baseURL: API_BASE_URL,
