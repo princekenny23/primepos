@@ -631,9 +631,15 @@ cd frontend
 # Install dependencies
 npm install
 
-# Create .env.local with:
+# The repository includes .env.local for local development
+# It's already configured to use http://localhost:8000/api/v1
+# You can verify the contents:
+cat .env.local
+
+# Should contain:
 # NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 # NEXT_PUBLIC_USE_REAL_API=true
+# NEXT_PUBLIC_APP_NAME=PrimePOS
 
 # Run development server
 npm run dev
@@ -662,8 +668,70 @@ python manage.py migrate
 
 ### **Verify Setup**
 - Backend: Navigate to http://localhost:8000/api/v1/ → Should see API listing
+- Backend Health: Navigate to http://localhost:8000/health/ → Should return `{"status": "ok"}`
 - Frontend: Navigate to http://localhost:3000 → Should see login page
 - Try creating a test tenant and user through admin panel
+
+### **Backend Connection Troubleshooting**
+
+If the frontend shows "Unable to connect to the server", follow these steps:
+
+**1. Verify Backend is Running**
+```bash
+# Check if backend server is running
+curl http://localhost:8000/health/
+
+# Expected response:
+# {"status": "ok"}
+```
+
+**2. Check Environment Configuration**
+```bash
+# Frontend should have .env.local:
+cd frontend
+cat .env.local
+
+# Should contain:
+# NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+# NEXT_PUBLIC_USE_REAL_API=true
+```
+
+**3. Verify CORS Settings**
+The backend CORS settings in `backend/primepos/settings/base.py` should include localhost:
+```python
+CORS_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000']
+```
+
+**4. Common Issues & Solutions**
+
+| Issue | Solution |
+|-------|----------|
+| "Connection refused" | Start backend: `cd backend && python manage.py runserver` |
+| "CORS error" | Check `CORS_ALLOWED_ORIGINS` includes your frontend URL |
+| "404 Not Found" | Verify API URL ends with `/api/v1` (no trailing slash on base URL) |
+| Frontend shows old URL | Delete `.next` folder and restart: `rm -rf .next && npm run dev` |
+| "Port already in use" | Kill process: `lsof -ti:8000 \| xargs kill -9` (backend) or `lsof -ti:3000 \| xargs kill -9` (frontend) |
+
+**5. Test API Endpoints**
+```bash
+# Test health endpoint
+curl http://localhost:8000/health/
+
+# Test API root
+curl http://localhost:8000/api/v1/
+
+# Test auth endpoint (should return 401 without auth)
+curl http://localhost:8000/api/v1/auth/me/
+```
+
+**6. Environment-Specific URLs**
+
+The application uses different environment files:
+
+- **Development**: `.env.local` → Uses `http://localhost:8000/api/v1`
+- **Production**: `.env.production` → Uses your deployed backend URL
+
+The `.env.local` file takes precedence during development, so you can safely test with local backend while keeping production settings in `.env.production`.
 
 ---
 

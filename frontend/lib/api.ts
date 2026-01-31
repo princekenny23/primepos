@@ -3,24 +3,39 @@
  * 
  * This file provides utilities for making API calls.
  * Update NEXT_PUBLIC_API_URL in your .env file to point to your backend.
+ * 
+ * For local development: Create .env.local with NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+ * For production: Update .env.production with your production backend URL
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://primepos-5mf6.onrender.com/api/v1"
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://primepos-5mf6.onrender.com/api/v1"
 
+// Log the API configuration on startup (only in development)
+if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
+  console.log("🔧 API Configuration:", {
+    baseURL: API_BASE_URL,
+    environment: process.env.NODE_ENV,
+    useRealAPI: process.env.NEXT_PUBLIC_USE_REAL_API,
+  })
+}
+
 export const apiConfig = {
   baseURL: API_BASE_URL,
   base: API_BASE,
   timeout: 30000, // 30 seconds
+  fallbackURL: "http://localhost:8000/api/v1", // Fallback to local backend
 }
 
 /**
  * API Client for making HTTP requests
  * Ready for backend integration
+ * Supports automatic fallback to localhost in development when primary URL fails
  */
 export class ApiClient {
   private baseURL: string
   private timeout: number
+  private attemptedFallback: boolean = false
 
   constructor(baseURL: string = apiConfig.baseURL, timeout: number = apiConfig.timeout) {
     this.baseURL = baseURL
@@ -237,13 +252,36 @@ export class ApiClient {
         // Handle specific error types
         let errorMsg = ""
         
-        // Network errors (Failed to fetch)
+        // Network errors (Failed to fetch) - Try fallback in development
         if (error.message === "Failed to fetch" || error.name === "TypeError") {
+          // In development, try fallback to localhost if primary URL failed
+          if (
+            process.env.NODE_ENV === "development" &&
+            !this.attemptedFallback &&
+            this.baseURL !== apiConfig.fallbackURL &&
+            typeof window !== "undefined"
+          ) {
+            console.warn("⚠️ Primary backend URL failed, attempting fallback to localhost...")
+            this.attemptedFallback = true
+            this.baseURL = apiConfig.fallbackURL
+            
+            try {
+              // Retry the request with fallback URL
+              return await this.request<T>(endpoint, options, retry)
+            } catch (fallbackError) {
+              console.error("❌ Fallback to localhost also failed")
+              // Continue to show error message below
+            }
+          }
+          
           errorMsg = "Unable to connect to the server. Please check if the backend server is running and accessible."
           console.error("Network error - Backend may be down:", {
             endpoint: url,
             baseURL: this.baseURL,
             message: "Check if backend server is running at " + this.baseURL,
+            troubleshooting: process.env.NODE_ENV === "development" 
+              ? "Run: cd backend && python manage.py runserver"
+              : "Verify production backend is deployed and accessible",
           })
         }
         // Timeout errors
@@ -270,6 +308,7 @@ export class ApiClient {
           } else {
             errorMsg = `API Request failed: ${error.message}`
           }
+        }
         }
         
         console.error("Request error:", {
