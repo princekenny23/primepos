@@ -227,8 +227,6 @@ class ReceiptService:
         
         for item in sale.items.all():
             item_name = item.product_name
-            if item.variation_name:
-                item_name += f"\n({item.variation_name})"
             if item.unit_name:
                 item_name += f" {item.unit_name}"
             

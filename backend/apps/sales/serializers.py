@@ -10,7 +10,6 @@ class SaleItemSerializer(serializers.ModelSerializer):
     # Use minimal product representation instead of full ProductSerializer for performance
     product = serializers.SerializerMethodField()
     product_id = serializers.IntegerField(write_only=True, required=False)
-    variation_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     unit_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     unit_name = serializers.CharField(read_only=True)
     quantity_in_base_units = serializers.IntegerField(read_only=True)
@@ -18,12 +17,12 @@ class SaleItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = SaleItem
         fields = (
-            'id', 'product', 'product_id', 'variation_id', 'unit_id', 
-            'product_name', 'variation_name', 'unit_name', 
+            'id', 'product', 'product_id', 'unit_id', 
+            'product_name', 'unit_name', 
             'quantity', 'quantity_in_base_units', 'price', 'total', 
             'kitchen_status', 'notes', 'prepared_at', 'created_at'
         )
-        read_only_fields = ('id', 'product', 'product_name', 'variation_name', 'unit_name', 'quantity_in_base_units', 'prepared_at', 'created_at')
+        read_only_fields = ('id', 'product', 'product_name', 'unit_name', 'quantity_in_base_units', 'prepared_at', 'created_at')
     
     def get_product(self, obj):
         """Return minimal product data for performance"""
