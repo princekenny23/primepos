@@ -73,7 +73,7 @@ class StockMovement(models.Model):
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='stock_movements')
     batch = models.ForeignKey(Batch, on_delete=models.SET_NULL, null=True, blank=True, related_name='movements', help_text="Batch this movement belongs to")
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_movements', null=True, blank=True, help_text="Deprecated: Use variation instead. Kept for backward compatibility.")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_movements', null=True, blank=True, help_text="Product affected by this movement")
     outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='stock_movements')
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='stock_movements')
     
@@ -219,7 +219,7 @@ class LocationStock(models.Model):
 class StockTakeItem(models.Model):
     """Stock take line item"""
     stock_take = models.ForeignKey(StockTake, on_delete=models.CASCADE, related_name='items')
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_take_items', null=True, blank=True, help_text="Deprecated: Use variation instead. Kept for backward compatibility.")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_take_items', null=True, blank=True, help_text="Product in this stock take count")
     expected_quantity = models.IntegerField(validators=[MinValueValidator(0)])
     counted_quantity = models.IntegerField(validators=[MinValueValidator(0)])
     difference = models.IntegerField(default=0)
