@@ -6,7 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sales', '1002_remove_saleitem_sales_salei_variati_742672_idx_and_more'),
+        ('sales', '1001_remove_sale_sales_till_idx'),
     ]
 
     operations = [
