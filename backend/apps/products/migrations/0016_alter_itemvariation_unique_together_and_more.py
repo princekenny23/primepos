@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sales', '1002_remove_saleitem_sales_salei_variati_742672_idx_and_more'),
+        ('sales', '1001_remove_sale_sales_till_idx'),
         ('inventory', '0006_remove_stocktakeitem_unique_stocktake_variation_and_more'),
         ('products', '0015_alter_itemvariation_cost_alter_itemvariation_price_and_more'),
     ]
