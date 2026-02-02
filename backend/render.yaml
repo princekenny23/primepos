@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     region: oregon
-    buildCommand: pip install --upgrade pip setuptools && pip install -r requirements.txt && python manage.py collectstatic --noinput
+    buildCommand: IS_BUILD_PHASE=true pip install --upgrade pip setuptools && pip install -r requirements.txt && python manage.py collectstatic --noinput
     startCommand: python manage.py migrate && gunicorn primepos.wsgi:application --bind 0.0.0.0:$PORT
     healthCheckPath: /health/
     healthCheckInterval: 30
