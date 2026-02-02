@@ -90,27 +90,35 @@ TEMPLATES = [
 WSGI_APPLICATION = 'primepos.wsgi.application'
 
 # Database
-# Try to use DATABASE_URL environment variable (Render, Heroku, etc.)
-# Fall back to individual DB_* variables for local development
-if config('DATABASE_URL', default=None):
+# Support Supabase, Render, and local PostgreSQL
+DATABASE_URL = config('DATABASE_URL', default=None)
+
+if DATABASE_URL:
     DATABASES = {
         'default': dj_database_url.config(
-            default=config('DATABASE_URL'),
+            default=DATABASE_URL,
             conn_max_age=600,
             conn_health_checks=True,
         )
     }
+    
+    # Enable SSL for Supabase (required)
+    if 'supabase.co' in DATABASE_URL:
+        DATABASES['default']['OPTIONS'] = {
+            'sslmode': 'require',
+        }
 else:
+    # Local development fallback
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
-            'NAME': config('DB_NAME', default='primepos_db'),
+            'NAME': config('DB_NAME', default='primepos'),
             'USER': config('DB_USER', default='postgres'),
-            'PASSWORD': config('DB_PASSWORD', default='postgres'),
+            'PASSWORD': config('DB_PASSWORD', default='kwitonda'),
             'HOST': config('DB_HOST', default='localhost'),
             'PORT': config('DB_PORT', default='5432'),
         }
-}
+    }
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -243,4 +251,16 @@ LOGGING = {
         },
     },
 }
+
+# Supabase Configuration
+SUPABASE_URL = config('SUPABASE_URL', default='')
+SUPABASE_ANON_KEY = config('SUPABASE_ANON_KEY', default='')
+SUPABASE_SERVICE_KEY = config('SUPABASE_SERVICE_KEY', default='')
+
+# Enable Supabase real-time if configured
+SUPABASE_REALTIME_ENABLED = bool(SUPABASE_URL and SUPABASE_ANON_KEY)
+
+# Log when using Supabase
+if 'supabase.co' in DATABASE_URL or 'supabase' in DATABASE_URL.lower():
+    print("[SUPABASE] Connected to Supabase PostgreSQL database")
 
