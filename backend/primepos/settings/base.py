@@ -93,7 +93,11 @@ WSGI_APPLICATION = 'primepos.wsgi.application'
 # Support Supabase, Render, and local PostgreSQL
 DATABASE_URL = config('DATABASE_URL', default=None)
 
-if DATABASE_URL:
+# During build (collectstatic), provide a dummy database config
+# so Django can load without connecting
+IS_BUILD_PHASE = os.getenv('IS_BUILD_PHASE', 'false').lower() == 'true'
+
+if DATABASE_URL and not IS_BUILD_PHASE:
     DATABASES = {
         'default': dj_database_url.config(
             default=DATABASE_URL,
@@ -107,6 +111,14 @@ if DATABASE_URL:
         DATABASES['default']['OPTIONS'] = {
             'sslmode': 'require',
         }
+elif DATABASE_URL and IS_BUILD_PHASE:
+    # Dummy config for build phase to prevent connection attempts
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': ':memory:',
+        }
+    }
 else:
     # Local development fallback
     DATABASES = {
