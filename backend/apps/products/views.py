@@ -283,9 +283,9 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
     @action(detail=False, methods=['get'], url_path='lookup')
     def lookup(self, request):
-        """Lookup products and variations by barcode.
+        """Lookup products by barcode.
 
-        Returns JSON with 'variations' and/or 'products' arrays when matches are found.
+        Returns JSON with 'products' array when matches are found.
         Respects tenant and outlet scoping via TenantFilterMixin/get_queryset.
         """
         barcode = request.query_params.get('barcode')
@@ -403,7 +403,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
-        """Get products with low stock - checks both product level and variation level"""
+        """Get products with low stock"""
         from apps.inventory.models import LocationStock
         from apps.outlets.models import Outlet
         
@@ -428,26 +428,11 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         low_stock_products = []
         
         for product in queryset:
-            is_low = False
-            
-            # Check product-level stock (legacy)
+            # Check product-level stock (UNITS ONLY ARCHITECTURE)
             if product.low_stock_threshold > 0:
                 total_stock = product.get_total_stock(outlet=outlet)
                 if total_stock <= product.low_stock_threshold:
-                    is_low = True
-            
-            # Check variation-level stock (preferred)
-            if not is_low:
-                variations = product.variations.filter(is_active=True, track_inventory=True)
-                for variation in variations:
-                    if variation.low_stock_threshold > 0:
-                        var_stock = variation.get_total_stock(outlet=outlet)
-                        if var_stock <= variation.low_stock_threshold:
-                            is_low = True
-                            break
-            
-            if is_low:
-                low_stock_products.append(product)
+                    low_stock_products.append(product)
         
         page = self.paginate_queryset(low_stock_products)
         if page is not None:
