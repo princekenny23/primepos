@@ -90,7 +90,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'primepos.wsgi.application'
 
 # Database
-# Support Supabase, Render, and local PostgreSQL
+# Supports Render PostgreSQL and local development
 DATABASE_URL = config('DATABASE_URL', default=None)
 
 # During build (collectstatic), provide a dummy database config
@@ -106,17 +106,8 @@ if DATABASE_URL and not IS_BUILD_PHASE:
         )
     }
     
-    # Enable SSL and IPv4 for Supabase (required)
-    if DATABASE_URL:
-        # Add connection options for stability
-        if 'OPTIONS' not in DATABASES['default']:
-            DATABASES['default']['OPTIONS'] = {}
-        
-        # Force IPv4 and add SSL options
-        DATABASES['default']['OPTIONS'].update({
-            'sslmode': 'require',
-            'connect_timeout': 10,
-        })
+    # Connection health checks for stability
+    # Render PostgreSQL is on internal network - no SSL needed
 elif DATABASE_URL and IS_BUILD_PHASE:
     # Dummy config for build phase to prevent connection attempts
     DATABASES = {
@@ -270,15 +261,7 @@ LOGGING = {
     },
 }
 
-# Supabase Configuration
-SUPABASE_URL = config('SUPABASE_URL', default='')
-SUPABASE_ANON_KEY = config('SUPABASE_ANON_KEY', default='')
-SUPABASE_SERVICE_KEY = config('SUPABASE_SERVICE_KEY', default='')
-
-# Enable Supabase real-time if configured
-SUPABASE_REALTIME_ENABLED = bool(SUPABASE_URL and SUPABASE_ANON_KEY)
-
-# Log when using Supabase
-if DATABASE_URL and ('supabase.co' in DATABASE_URL or 'supabase' in DATABASE_URL.lower()):
-    print("[SUPABASE] Connected to Supabase PostgreSQL database")
+# Database connection established successfully
+if DATABASE_URL:
+    print("[DATABASE] Connected to PostgreSQL")
 
