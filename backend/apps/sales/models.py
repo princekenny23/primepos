@@ -154,6 +154,7 @@ class SaleItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items', help_text="Product sold")
     unit = models.ForeignKey('products.ProductUnit', on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_items', help_text="Product unit used for this sale (e.g., piece, dozen, box)")
     product_name = models.CharField(max_length=255)  # Store name in case product is deleted
+    variation_name = models.CharField(max_length=255, blank=True, null=True, help_text="Variation name snapshot")
     unit_name = models.CharField(max_length=50, blank=True, help_text="Unit name snapshot (e.g., 'piece', 'dozen')")
     quantity = models.IntegerField(validators=[MinValueValidator(1)], help_text="Quantity sold in the selected unit")
     quantity_in_base_units = models.IntegerField(validators=[MinValueValidator(1)], default=1, help_text="Quantity in base units (for inventory deduction)")
