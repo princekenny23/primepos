@@ -273,6 +273,6 @@ SUPABASE_SERVICE_KEY = config('SUPABASE_SERVICE_KEY', default='')
 SUPABASE_REALTIME_ENABLED = bool(SUPABASE_URL and SUPABASE_ANON_KEY)
 
 # Log when using Supabase
-if 'supabase.co' in DATABASE_URL or 'supabase' in DATABASE_URL.lower():
+if DATABASE_URL and ('supabase.co' in DATABASE_URL or 'supabase' in DATABASE_URL.lower()):
     print("[SUPABASE] Connected to Supabase PostgreSQL database")
 
