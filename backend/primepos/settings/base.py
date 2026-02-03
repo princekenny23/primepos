@@ -106,11 +106,17 @@ if DATABASE_URL and not IS_BUILD_PHASE:
         )
     }
     
-    # Enable SSL for Supabase (required)
-    if 'supabase.co' in DATABASE_URL:
-        DATABASES['default']['OPTIONS'] = {
+    # Enable SSL and IPv4 for Supabase (required)
+    if DATABASE_URL:
+        # Add connection options for stability
+        if 'OPTIONS' not in DATABASES['default']:
+            DATABASES['default']['OPTIONS'] = {}
+        
+        # Force IPv4 and add SSL options
+        DATABASES['default']['OPTIONS'].update({
             'sslmode': 'require',
-        }
+            'connect_timeout': 10,
+        })
 elif DATABASE_URL and IS_BUILD_PHASE:
     # Dummy config for build phase to prevent connection attempts
     DATABASES = {
