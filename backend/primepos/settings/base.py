@@ -31,7 +31,6 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'django_filters',
-    'channels',
     
     # Local apps
     'apps.health',
@@ -221,16 +220,6 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
     'x-outlet-id',  # Custom header for outlet data isolation
 ]
-
-# Channels Configuration
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
-        },
-    },
-}
 
 # QZ Tray signing configuration
 # Set these in environment for production. Example:
