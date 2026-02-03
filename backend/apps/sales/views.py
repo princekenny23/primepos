@@ -311,7 +311,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 product=product,
                 unit=unit,
                 product_name=product.name,
-                variation_name='',  # No variations in UNITS ONLY
                 unit_name=unit_name,
                 quantity=quantity,
                 quantity_in_base_units=quantity_in_base_units,
@@ -605,11 +604,8 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             
             sale_items_data.append({
                 'product': product,
-                'variation': variation,
                 'product_id': product_id,
-                'variation_id': variation_id,
                 'product_name': product.name,
-                'variation_name': variation.name if variation else '',
                 'quantity': quantity,
                 'price': price,
                 'total': item_total,
@@ -665,14 +661,11 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Create sale items and deduct stock
         for item_data in sale_items_data:
             product = item_data['product']
-            variation = item_data.get('variation')
             
             SaleItem.objects.create(
                 sale=sale,
                 product=product,
-                variation=variation,
                 product_name=item_data['product_name'],
-                variation_name=item_data.get('variation_name', ''),
                 quantity=item_data['quantity'],
                 quantity_in_base_units=item_data['quantity'],
                 price=item_data['price'],
@@ -706,7 +699,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 StockMovement.objects.create(
                     tenant=tenant,
                     product=product,
-                    variation=variation,
                     outlet=outlet,
                     user=request.user,
                     movement_type='sale',
