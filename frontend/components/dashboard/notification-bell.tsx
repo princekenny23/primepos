@@ -15,53 +15,29 @@ import { formatDistanceToNow } from "date-fns"
 import { notificationService, type Notification } from "@/lib/services/notificationService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
-import { useWebSocketNotifications } from "@/hooks/useWebSocketNotifications"
 
 export function NotificationBell() {
   const { currentBusiness } = useBusinessStore()
   const { currentOutlet } = useTenant()
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
-  
-  // Use WebSocket hook for real-time notifications
-  const { isConnected, unreadCount, latestNotification } = useWebSocketNotifications()
 
   useEffect(() => {
     if (!currentBusiness) return
 
     loadNotifications()
+    loadUnreadCount()
 
-    // Auto-refresh every 30 seconds (as fallback if WebSocket fails)
+    // Poll for notifications every 30 seconds
     const interval = setInterval(() => {
       loadNotifications()
+      loadUnreadCount()
     }, 30000)
 
     return () => clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBusiness, currentOutlet])
-
-  // Update notifications list when new notification arrives via WebSocket
-  useEffect(() => {
-    if (latestNotification) {
-      // Add new notification to the top of the list
-      setNotifications((prev) => {
-        // Check if notification already exists (avoid duplicates)
-        const exists = prev.some((n) => n.id === latestNotification.id)
-        if (exists) {
-          // Update existing notification
-          return prev.map((n) => n.id === latestNotification.id ? latestNotification : n)
-        }
-        // Add new notification at the top
-        return [latestNotification, ...prev].slice(0, 10) // Keep only latest 10
-      })
-      // Optionally refresh the list after a short delay to ensure sync
-      const timeoutId = setTimeout(() => {
-        loadNotifications()
-      }, 1000)
-      return () => clearTimeout(timeoutId)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestNotification])
 
   const loadNotifications = async () => {
     if (!currentBusiness) return
@@ -83,13 +59,26 @@ export function NotificationBell() {
     }
   }
 
+  const loadUnreadCount = async () => {
+    if (!currentBusiness) return
+
+    try {
+      const count = await notificationService.getUnreadCount()
+      setUnreadCount(count)
+    } catch (error) {
+      console.error("Failed to load unread count:", error)
+      setUnreadCount(0)
+    }
+  }
+
   const handleMarkAsRead = async (id: string | number) => {
     try {
       await notificationService.markRead(id)
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, read: true } : n))
       )
-      // Unread count will be updated via WebSocket
+      // Refresh unread count
+      await loadUnreadCount()
     } catch (error) {
       console.error("Failed to mark notification as read:", error)
     }
@@ -150,9 +139,6 @@ export function NotificationBell() {
               </>
             )}
           </div>
-          {!isConnected && (
-            <span className="absolute -bottom-1 -right-1 h-2 w-2 bg-yellow-500 rounded-full border border-white" title="WebSocket disconnected" />
-          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80">

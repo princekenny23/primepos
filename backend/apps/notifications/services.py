@@ -3,123 +3,11 @@ Notification Service for creating notifications automatically when events occur.
 Square POS-like notification system.
 """
 from django.utils import timezone
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
 from .models import Notification
-from .serializers import NotificationSerializer
-
-channel_layer = get_channel_layer()
 
 
 class NotificationService:
     """Service for creating and managing notifications"""
-    
-    @staticmethod
-    def _send_websocket_notification(notification):
-        """Send notification via WebSocket to relevant users"""
-        if not channel_layer:
-            return
-        
-        try:
-            # Serialize notification
-            serializer = NotificationSerializer(notification)
-            notification_data = serializer.data
-            
-            # Send to specific user if notification is user-specific
-            if notification.user:
-                async_to_sync(channel_layer.group_send)(
-                    f'notifications_{notification.user.id}',
-                    {
-                        'type': 'notification_message',
-                        'notification': notification_data
-                    }
-                )
-                # Also send unread count update
-                unread_count = Notification.objects.filter(
-                    tenant=notification.tenant,
-                    user=notification.user,
-                    read=False
-                ).count()
-                async_to_sync(channel_layer.group_send)(
-                    f'notifications_{notification.user.id}',
-                    {
-                        'type': 'notification_count',
-                        'unread_count': unread_count
-                    }
-                )
-            else:
-                # Send to all users in the tenant (general notifications)
-                from django.contrib.auth import get_user_model
-                User = get_user_model()
-                tenant_users = User.objects.filter(tenant=notification.tenant)
-                for user in tenant_users:
-                    async_to_sync(channel_layer.group_send)(
-                        f'notifications_{user.id}',
-                        {
-                            'type': 'notification_message',
-                            'notification': notification_data
-                        }
-                    )
-                    # Also send unread count update
-                    unread_count = Notification.objects.filter(
-                        tenant=notification.tenant,
-                        user=user,
-                        read=False
-                    ).count()
-                    async_to_sync(channel_layer.group_send)(
-                        f'notifications_{user.id}',
-                        {
-                            'type': 'notification_count',
-                            'unread_count': unread_count
-                        }
-                    )
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to send WebSocket notification: {str(e)}")
-    
-    @staticmethod
-    def _send_sale_update(sale, action='created'):
-        """Send sale update via WebSocket to relevant users for real-time sales list updates"""
-        if not channel_layer:
-            return
-        
-        try:
-            # Refresh sale with all relationships to avoid N+1 queries
-            from apps.sales.models import Sale
-            sale = Sale.objects.select_related(
-                'tenant', 'outlet', 'user', 'shift', 'customer'
-            ).prefetch_related(
-                'items',
-                'items__product'
-            ).get(id=sale.id)
-            
-            # Serialize sale data
-            from apps.sales.serializers import SaleSerializer
-            serializer = SaleSerializer(sale)
-            sale_data = serializer.data
-            
-            # Get tenant users who should receive this update
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            
-            # Send to all users in the tenant (or optionally filter by outlet)
-            tenant_users = User.objects.filter(tenant=sale.tenant)
-            
-            for user in tenant_users:
-                # Send sale update to user's notification channel
-                async_to_sync(channel_layer.group_send)(
-                    f'notifications_{user.id}',
-                    {
-                        'type': 'sale_update',
-                        'sale': sale_data,
-                        'action': action  # 'created', 'updated', 'refunded'
-                    }
-                )
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to send sale update via WebSocket: {str(e)}")
     
     @staticmethod
     def notify_sale_completed(sale):
@@ -141,10 +29,6 @@ class NotificationService:
                 'outlet_id': sale.outlet.id if sale.outlet else None,
             }
         )
-        NotificationService._send_websocket_notification(notification)
-        
-        # Also send real-time sale update to all users in the tenant/outlet
-        NotificationService._send_sale_update(sale, 'created')
     
     @staticmethod
     def notify_low_stock(product_or_unit, outlet=None):
@@ -184,7 +68,6 @@ class NotificationService:
                 'outlet_id': outlet.id if outlet else None,
             }
         )
-        NotificationService._send_websocket_notification(notification)
     
     @staticmethod
     def notify_shift_opened(shift):
@@ -206,7 +89,6 @@ class NotificationService:
                 'opening_cash': str(shift.opening_cash_balance),
             }
         )
-        NotificationService._send_websocket_notification(notification)
     
     @staticmethod
     def notify_shift_closed(shift):
@@ -235,7 +117,6 @@ class NotificationService:
                 'difference': str(difference) if difference is not None else None,
             }
         )
-        NotificationService._send_websocket_notification(notification)
     
     @staticmethod
     def notify_customer_created(customer):
@@ -256,7 +137,6 @@ class NotificationService:
                 'phone': customer.phone,
             }
         )
-        NotificationService._send_websocket_notification(notification)
     
     @staticmethod
     def notify_staff_added(staff):
@@ -277,7 +157,6 @@ class NotificationService:
                 'role': staff.role.name if staff.role else None,
             }
         )
-        NotificationService._send_websocket_notification(notification)
     
     @staticmethod
     def notify_delivery_created(delivery):
@@ -298,7 +177,6 @@ class NotificationService:
                 'status': delivery.status,
             }
         )
-        NotificationService._send_websocket_notification(notification)
     
     @staticmethod
     def notify_delivery_status_changed(delivery, old_status, new_status):
@@ -337,7 +215,6 @@ class NotificationService:
                 'new_status': new_status,
             }
         )
-        NotificationService._send_websocket_notification(notification)
     
     @staticmethod
     def notify_payment_received(payment):
@@ -360,4 +237,3 @@ class NotificationService:
                 'sale_id': payment.sale.id if payment.sale else None,
             }
         )
-        NotificationService._send_websocket_notification(notification)
