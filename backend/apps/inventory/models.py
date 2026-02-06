@@ -238,18 +238,15 @@ class StockTakeItem(models.Model):
         ]
 
     def clean(self):
-        """Ensure either product or variation is set"""
+        """Ensure product is set"""
         from django.core.exceptions import ValidationError
-        if not self.product and not self.variation:
-            raise ValidationError("Either product or variation must be set")
+        if not self.product:
+            raise ValidationError("Product must be set")
     
     def save(self, *args, **kwargs):
         self.difference = self.counted_quantity - self.expected_quantity
-        # Auto-set product from variation if needed
-        if self.variation and not self.product:
-            self.product = self.variation.product
         # Validate uniqueness for product (backward compat)
-        if self.product and not self.variation:
+        if self.product:
             existing = StockTakeItem.objects.filter(
                 stock_take=self.stock_take,
                 product=self.product

@@ -51,6 +51,12 @@ interface SaleDetail extends Sale {
     email?: string
     phone?: string
   }
+  user?: {
+    id: string
+    email: string
+    first_name?: string
+    last_name?: string
+  }
   outlet?: {
     id: string
     name: string
@@ -122,6 +128,15 @@ export default function DiscountsPage() {
           }
         }
 
+        if (discount._raw?.user_detail) {
+          discountDetail.user = {
+            id: String(discount._raw.user_detail.id),
+            email: discount._raw.user_detail.email || "",
+            first_name: discount._raw.user_detail.first_name || "",
+            last_name: discount._raw.user_detail.last_name || "",
+          }
+        }
+
         discountDetail.receipt_number = discount._raw?.receipt_number || discount.receipt_number
         discountDetail.payment_method = discount._raw?.payment_method || discount.payment_method || discount.paymentMethod
 
@@ -141,6 +156,13 @@ export default function DiscountsPage() {
       setIsLoading(false)
     }
   }, [currentBusiness, currentOutlet, dateRange, toast])
+
+  const getUserDisplay = (sale: SaleDetail) => {
+    const user = sale.user
+    if (!user) return "System"
+    const fullName = `${user.first_name || ""} ${user.last_name || ""}`.trim()
+    return fullName || user.email || "System"
+  }
 
   useEffect(() => {
     loadDiscounts()
@@ -258,6 +280,7 @@ export default function DiscountsPage() {
                     <TableHead className="text-gray-900 font-semibold">Receipt #</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Customer</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Date</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                     <TableHead className="text-right text-gray-900 font-semibold">Subtotal</TableHead>
                     <TableHead className="text-right text-gray-900 font-semibold">Discount</TableHead>
@@ -275,6 +298,7 @@ export default function DiscountsPage() {
                       <TableCell>
                         {format(new Date((sale as any).created_at || sale.createdAt), "MMM dd, yyyy")}
                       </TableCell>
+                      <TableCell>{getUserDisplay(sale)}</TableCell>
                       <TableCell>{sale.outlet?.name || "N/A"}</TableCell>
                       <TableCell className="text-right">
                         {currentBusiness?.currencySymbol || "MWK"} {Number(sale.subtotal || sale.total || 0).toFixed(2)}

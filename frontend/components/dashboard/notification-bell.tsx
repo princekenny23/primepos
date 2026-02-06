@@ -64,7 +64,7 @@ export function NotificationBell() {
 
     try {
       const count = await notificationService.getUnreadCount()
-      setUnreadCount(count)
+      setUnreadCount(count?.unread_count ?? 0)
     } catch (error) {
       console.error("Failed to load unread count:", error)
       setUnreadCount(0)

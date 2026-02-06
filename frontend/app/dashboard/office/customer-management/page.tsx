@@ -96,6 +96,10 @@ export default function CustomerManagementPage() {
     }
   }, [currentBusiness, outletFilter, toast])
 
+  useEffect(() => {
+    loadCustomers()
+  }, [loadCustomers])
+
   const handleDeleteCustomer = useCallback(async (customerId: string) => {
     loadCustomers()
   }, [loadCustomers])
@@ -215,21 +219,21 @@ export default function CustomerManagementPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto rounded-md border border-gray-300 bg-white">
-              <Table>
+            <div className="rounded-md border border-gray-300 bg-white overflow-hidden">
+              <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow className="bg-gray-50">
-                    <TableHead className="text-gray-900 font-semibold">Name</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Email</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Phone</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Address</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Loyalty Points</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Total Spent</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Credit Status</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Outstanding</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Last Visit</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Actions</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Name</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Email</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[9%] whitespace-normal">Phone</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Address</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[8%] whitespace-normal">Outlet</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[8%] whitespace-normal">Loyalty</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[9%] whitespace-normal">Spent</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[10%] whitespace-normal">Credit</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[10%] whitespace-normal">Outstanding</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[7%] whitespace-normal">Last Visit</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[3%] whitespace-normal">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -261,7 +265,7 @@ export default function CustomerManagementPage() {
                       
                       return (
                         <TableRow key={customer.id} className="border-gray-300">
-                          <TableCell>
+                          <TableCell className="break-words">
                             <Link 
                               href={`/dashboard/office/customer-management/${customer.id}`}
                               className="font-medium hover:text-primary"
@@ -269,7 +273,7 @@ export default function CustomerManagementPage() {
                               {customer.name}
                             </Link>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             {customer.email ? (
                               <div className="flex items-center gap-2 text-sm">
                                 <Mail className="h-3 w-3 text-muted-foreground" />
@@ -279,7 +283,7 @@ export default function CustomerManagementPage() {
                               <span className="text-xs text-muted-foreground">-</span>
                             )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             {customer.phone ? (
                               <div className="flex items-center gap-2 text-sm">
                                 <Phone className="h-3 w-3 text-muted-foreground" />
@@ -289,24 +293,24 @@ export default function CustomerManagementPage() {
                               <span className="text-xs text-muted-foreground">-</span>
                             )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             <span className="text-sm text-muted-foreground">
                               {customer.address || "-"}
                             </span>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             <span className="font-medium">{outletName}</span>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             <div className="flex items-center gap-2">
                               <Award className="h-4 w-4 text-yellow-500" />
                               <span className="font-semibold">{customerPoints.toLocaleString('en-US')}</span>
                             </div>
                           </TableCell>
-                          <TableCell className="font-semibold">
+                          <TableCell className="font-semibold break-words">
                             {currentBusiness?.currencySymbol || "MWK"} {totalSpent.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             {customer.credit_enabled ? (
                               <div className="space-y-1">
                                 <Badge variant={customer.credit_status === 'active' ? 'default' : 'secondary'}>
@@ -320,7 +324,7 @@ export default function CustomerManagementPage() {
                               <span className="text-xs text-muted-foreground">No Credit</span>
                             )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             {customer.credit_enabled && (Number(customer.outstanding_balance) || 0) > 0 ? (
                               <div className="space-y-1">
                                 <span className="font-medium text-orange-600">
@@ -334,7 +338,7 @@ export default function CustomerManagementPage() {
                               <span className="text-xs text-muted-foreground">-</span>
                             )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="break-words">
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <Calendar className="h-3 w-3" />
                               {lastVisit ? new Date(lastVisit).toLocaleDateString() : "Never"}

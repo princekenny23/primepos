@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db import transaction
 from django.utils import timezone
-from django.db.models import Sum, Count
+from django.db.models import Sum, Count, Max
 from decimal import Decimal
 
 from apps.tenants.permissions import TenantFilterMixin
@@ -504,24 +504,22 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
     
     def _generate_receipt_number(self, tenant):
         """Generate unique receipt number"""
-        today = timezone.now().strftime('%Y%m%d')
-        prefix = f"RCP-{today}-"
-        
-        last_sale = Sale.objects.filter(
-            tenant=tenant,
-            receipt_number__startswith=prefix
-        ).order_by('-receipt_number').first()
-        
-        if last_sale:
-            try:
-                last_num = int(last_sale.receipt_number.split('-')[-1])
-                new_num = last_num + 1
-            except (ValueError, IndexError):
-                new_num = 1
-        else:
-            new_num = 1
-        
-        return f"{prefix}{new_num:04d}"
+        # Numeric-only receipt numbers (no date/prefix). Use global max to keep uniqueness.
+        recent_numbers = Sale.objects.order_by('-created_at').values_list('receipt_number', flat=True)[:1000]
+        max_numeric = 0
+        for number in recent_numbers:
+            if number and str(number).isdigit():
+                max_numeric = max(max_numeric, int(number))
+
+        if max_numeric == 0:
+            max_id = Sale.objects.aggregate(max_id=Max('id')).get('max_id') or 0
+            max_numeric = max_id
+
+        next_number = max_numeric + 1
+        while Sale.objects.filter(receipt_number=str(next_number)).exists():
+            next_number += 1
+
+        return str(next_number)
     
     # ==================== TRANSFER TAB ====================
     @action(detail=True, methods=['post'])

@@ -45,6 +45,9 @@ import { useToast } from "@/components/ui/use-toast"
 import { format, subDays } from "date-fns"
 import { useRouter } from "next/navigation"
 import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { creditPaymentService } from "@/lib/services/customerService"
 import type { Sale } from "@/lib/types"
 
 interface SaleDetail extends Sale {
@@ -58,6 +61,12 @@ interface SaleDetail extends Sale {
     name: string
     email?: string
     phone?: string
+  }
+  user?: {
+    id: string
+    email: string
+    first_name?: string
+    last_name?: string
   }
   outlet?: {
     id: string
@@ -82,6 +91,12 @@ export default function CreditsPage() {
   const [selectedSale, setSelectedSale] = useState<SaleDetail | null>(null)
   const [showSaleDetails, setShowSaleDetails] = useState(false)
   const [isLoadingSaleDetails, setIsLoadingSaleDetails] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [paymentAmount, setPaymentAmount] = useState("")
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "mobile" | "bank_transfer" | "other">("cash")
+  const [paymentRef, setPaymentRef] = useState("")
+  const [paymentNotes, setPaymentNotes] = useState("")
+  const [isSavingPayment, setIsSavingPayment] = useState(false)
 
   // Load credits
   const loadCredits = useCallback(async () => {
@@ -93,7 +108,6 @@ export default function CreditsPage() {
     setIsLoading(true)
     try {
       const filters: any = {
-        payment_method: "tab",
         outlet: currentOutlet.id,
       }
       
@@ -104,7 +118,7 @@ export default function CreditsPage() {
         filters.date_to = format(dateRange.to, "yyyy-MM-dd")
       }
 
-      const response = await saleService.list(filters)
+      const response = await saleService.list({ ...filters, payment_method: "tab" })
       const creditsData = response.results || []
 
       const enrichedCredits = creditsData.map((credit: any) => {
@@ -123,6 +137,15 @@ export default function CreditsPage() {
           creditDetail.outlet = {
             id: String(credit._raw.outlet_detail.id),
             name: credit._raw.outlet_detail.name || "",
+          }
+        }
+
+        if (credit._raw?.user_detail) {
+          creditDetail.user = {
+            id: String(credit._raw.user_detail.id),
+            email: credit._raw.user_detail.email || "",
+            first_name: credit._raw.user_detail.first_name || "",
+            last_name: credit._raw.user_detail.last_name || "",
           }
         }
 
@@ -146,9 +169,46 @@ export default function CreditsPage() {
     }
   }, [currentBusiness, currentOutlet, dateRange, toast])
 
+  const getUserDisplay = (sale: SaleDetail) => {
+    const user = sale.user
+    if (!user) return "System"
+    const fullName = `${user.first_name || ""} ${user.last_name || ""}`.trim()
+    return fullName || user.email || "System"
+  }
+
   useEffect(() => {
     loadCredits()
   }, [loadCredits])
+
+  const getAmountPaid = useCallback((sale: SaleDetail) => {
+    const amountPaid =
+      (sale as any).amount_paid ??
+      (sale as any).amountPaid ??
+      sale._raw?.amount_paid ??
+      sale._raw?.amountPaid ??
+      0
+    return Number(amountPaid) || 0
+  }, [])
+
+  const getPaymentStatus = useCallback((sale: SaleDetail) => {
+    const rawStatus = (sale as any).payment_status || sale._raw?.payment_status
+    if (rawStatus) return rawStatus
+
+    const total = Number(sale.total || 0)
+    const paid = getAmountPaid(sale)
+    if (paid >= total && total > 0) return "paid"
+    if (paid > 0) return "partially_paid"
+
+    const paymentMethod = (sale as any).payment_method || sale._raw?.payment_method
+    if (paymentMethod === "tab") return "unpaid"
+    return "unpaid"
+  }, [getAmountPaid])
+
+  const getRemainingBalance = (sale: SaleDetail) => {
+    const total = Number(sale.total || 0)
+    const paid = getAmountPaid(sale)
+    return Math.max(0, total - paid)
+  }
 
   const filteredCredits = useMemo(() => {
     let filtered = credits
@@ -164,12 +224,12 @@ export default function CreditsPage() {
     }
     if (statusFilter !== "all") {
       filtered = filtered.filter((credit) => {
-        const status = (credit as any).payment_status || credit._raw?.payment_status || "unpaid"
+        const status = getPaymentStatus(credit)
         return status === statusFilter
       })
     }
     return filtered
-  }, [credits, searchTerm, statusFilter])
+  }, [credits, searchTerm, statusFilter, getPaymentStatus])
 
   const handleViewSale = async (sale: SaleDetail) => {
     setIsLoadingSaleDetails(true)
@@ -191,6 +251,59 @@ export default function CreditsPage() {
       setShowSaleDetails(true)
     } finally {
       setIsLoadingSaleDetails(false)
+    }
+  }
+
+  const openPaymentModal = (sale: SaleDetail) => {
+    setSelectedSale(sale)
+    setPaymentAmount("")
+    setPaymentMethod("cash")
+    setPaymentRef("")
+    setPaymentNotes("")
+    setShowPaymentModal(true)
+  }
+
+  const handleRecordPayment = async () => {
+    if (!selectedSale) return
+    const amount = Number(paymentAmount)
+    if (!amount || amount <= 0) {
+      toast({
+        title: "Invalid amount",
+        description: "Enter a valid amount received.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSavingPayment(true)
+    try {
+      await creditPaymentService.create({
+        sale: selectedSale.id,
+        customer: selectedSale.customer?.id,
+        amount,
+        payment_method: paymentMethod,
+        payment_date: new Date().toISOString(),
+        reference_number: paymentRef || undefined,
+        notes: paymentNotes || undefined,
+      })
+
+      toast({
+        title: "Payment recorded",
+        description: "Receivable updated successfully.",
+      })
+
+      setShowPaymentModal(false)
+      setSelectedSale(null)
+      loadCredits()
+    } catch (error: any) {
+      console.error("Failed to record payment:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to record payment",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingPayment(false)
     }
   }
 
@@ -267,8 +380,11 @@ export default function CreditsPage() {
                     <TableHead className="text-gray-900 font-semibold">Receipt #</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Customer</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Date</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Amount</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">Paid</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">Remaining</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Status</TableHead>
                     <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
                   </TableRow>
@@ -283,19 +399,26 @@ export default function CreditsPage() {
                       <TableCell>
                         {format(new Date((credit as any).created_at || credit.createdAt), "MMM dd, yyyy")}
                       </TableCell>
+                      <TableCell>{getUserDisplay(credit)}</TableCell>
                       <TableCell>{credit.outlet?.name || "N/A"}</TableCell>
                       <TableCell>
                         {currentBusiness?.currencySymbol || "MWK"} {credit.total.toFixed(2)}
                       </TableCell>
                       <TableCell>
+                        {currentBusiness?.currencySymbol || "MWK"} {getAmountPaid(credit).toFixed(2)}
+                      </TableCell>
+                      <TableCell>
+                        {currentBusiness?.currencySymbol || "MWK"} {getRemainingBalance(credit).toFixed(2)}
+                      </TableCell>
+                      <TableCell>
                         <Badge 
                           variant={
-                            ((credit as any).payment_status || credit._raw?.payment_status) === "paid" ? "default" :
-                            ((credit as any).payment_status || credit._raw?.payment_status) === "partially_paid" ? "secondary" :
+                            getPaymentStatus(credit) === "paid" ? "default" :
+                            getPaymentStatus(credit) === "partially_paid" ? "secondary" :
                             "destructive"
                           }
                         >
-                          {(credit as any).payment_status || credit._raw?.payment_status || "unpaid"}
+                          {getPaymentStatus(credit)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
@@ -313,6 +436,9 @@ export default function CreditsPage() {
                               disabled={isLoadingSaleDetails}
                             >
                               View Details
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => openPaymentModal(credit)}>
+                              Record Payment
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -355,6 +481,61 @@ export default function CreditsPage() {
           }}
         />
       )}
+
+      <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
+        <DialogContent className="sm:max-w-[420px]" aria-describedby="record-payment-desc">
+          <DialogHeader>
+            <DialogTitle>Record Credit Payment</DialogTitle>
+            <DialogDescription id="record-payment-desc">
+              Enter the amount received and payment details for this credit sale.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Amount Received</Label>
+              <Input
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <Label>Payment Method</Label>
+              <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as any)}>
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Select method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="mobile">Mobile Money</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Reference</Label>
+              <Input
+                value={paymentRef}
+                onChange={(e) => setPaymentRef(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+            <div>
+              <Label>Notes</Label>
+              <Input
+                value={paymentNotes}
+                onChange={(e) => setPaymentNotes(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+            <Button className="w-full" onClick={handleRecordPayment} disabled={isSavingPayment}>
+              {isSavingPayment ? "Saving..." : "Save Payment"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

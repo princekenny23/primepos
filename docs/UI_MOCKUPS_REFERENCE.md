@@ -220,14 +220,16 @@
 │
 │     Fields needed for your business type:
 │     ✓ product_name       (REQUIRED)
-│     ✓ price              (REQUIRED)
-│     □ variation_name     (optional - for sizes)
-│     □ category           (optional - for organization)
-│     □ cost               (optional - for margins)
-│     □ wholesale_price    (optional - bulk pricing)
-│     □ quantity           (optional - opening stock)
-│     □ outlet             (optional - location)
-│     □ unit               (optional - pcs, box, dozen)
+     ✓ retail_price       (REQUIRED)
+     □ unit_name          (optional - bottle, case, kg, pcs)
+     □ conversion_factor  (optional - for multi-unit products)
+     □ wholesale_price    (optional - bulk pricing)
+     □ category           (optional - for organization)
+     □ cost               (optional - for margins)
+     □ batch_expiry_date  (optional - stock receive date)
+     □ initial_stock_qty  (optional - opening inventory)
+     □ outlet             (optional - location)
+     □ low_stock_threshold (optional - reorder point)
 │
 │  [DOWNLOAD EXCEL TEMPLATE]
 │

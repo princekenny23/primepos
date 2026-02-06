@@ -594,6 +594,9 @@ def transfer(request):
     to_outlet_id = request.data.get('to_outlet_id')
     quantity = request.data.get('quantity')
     reason = request.data.get('reason', '')
+    is_return_raw = request.data.get('is_return', False)
+    is_return = str(is_return_raw).lower() in ['true', '1', 'yes']
+    return_number = request.data.get('return_number')
     
     if not all([product_id, from_outlet_id, to_outlet_id, quantity]):
         return Response(
@@ -640,6 +643,20 @@ def transfer(request):
             reason=reason,
             reference_id=from_outlet_id
         )
+
+        if is_return:
+            if not return_number:
+                return_number = f"OUTLET-RET-{timezone.now().strftime('%Y%m%d%H%M%S')}"
+            StockMovement.objects.create(
+                tenant=tenant,
+                product=product,
+                outlet_id=from_outlet_id,
+                user=request.user,
+                movement_type='return',
+                quantity=quantity,
+                reason=reason or 'Outlet return',
+                reference_id=return_number
+            )
     
     return Response({"message": "Stock transfer recorded"}, status=status.HTTP_201_CREATED)
 

@@ -155,6 +155,13 @@ export default function TransactionsPage() {
     }
   }, [currentBusiness, currentOutlet, dateRange, toast])
 
+  const getUserDisplay = (sale: SaleDetail) => {
+    const user = sale.user
+    if (!user) return "System"
+    const fullName = `${user.first_name || ""} ${user.last_name || ""}`.trim()
+    return fullName || user.email || "System"
+  }
+
   useEffect(() => {
     loadTransactions()
   }, [loadTransactions])
@@ -262,6 +269,7 @@ export default function TransactionsPage() {
                     <TableHead className="text-gray-900 font-semibold">Receipt #</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Customer</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Date</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Payment Method</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Amount</TableHead>
@@ -279,6 +287,7 @@ export default function TransactionsPage() {
                       <TableCell>
                         {format(new Date((sale as any).created_at || sale.createdAt), "MMM dd, yyyy")}
                       </TableCell>
+                      <TableCell>{getUserDisplay(sale)}</TableCell>
                       <TableCell>{sale.outlet?.name || "N/A"}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="capitalize border-gray-300">

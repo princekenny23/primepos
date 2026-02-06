@@ -40,6 +40,8 @@ export interface Return {
   date: string
   outlet: any
   outlet_id: string
+  outlet_name?: string
+  user_name?: string
   reason: string
   notes?: string
   items: ReturnItem[]
@@ -100,6 +102,8 @@ export const returnService = {
           date: m.created_at || m.date,
           outlet: m.outlet,
           outlet_id: String(m.outlet_id || m.outlet?.id || ""),
+          outlet_name: m.outlet_name || m.outlet?.name || undefined,
+          user_name: m.user_name || m.user?.name || m.user?.email || "System",
           reason: m.reason || "Customer return",
           items: [{
             id: String(m.id),
@@ -121,13 +125,22 @@ export const returnService = {
           status: filters?.status,
         })
         
-        const supplierReturns = purchaseReturns.results.map((pr: PurchaseReturn) => ({
+        const supplierReturns = purchaseReturns.results.map((pr: PurchaseReturn) => {
+          const createdBy = pr.created_by as any
+          const createdByName =
+            createdBy && typeof createdBy === "object"
+              ? createdBy.name || createdBy.email
+              : undefined
+
+          return ({
           id: `supplier_${pr.id}`,
           return_type: "supplier" as ReturnType,
           return_number: pr.return_number,
           date: pr.return_date || pr.created_at,
           outlet: pr.outlet,
           outlet_id: String(pr.outlet_id),
+          outlet_name: pr.outlet?.name || undefined,
+          user_name: createdByName || (typeof createdBy === "string" ? createdBy : "System"),
           reason: pr.reason,
           notes: pr.notes,
           items: (pr.items || []).map((item: any) => ({
@@ -145,7 +158,8 @@ export const returnService = {
           purchase_order_id: pr.purchase_order_id ? String(pr.purchase_order_id) : undefined,
           created_at: pr.created_at,
           updated_at: pr.updated_at,
-        }))
+          })
+        })
         
         allReturns.push(...supplierReturns)
       }
@@ -167,6 +181,8 @@ export const returnService = {
           date: m.created_at || m.date,
           outlet: m.outlet,
           outlet_id: String(m.outlet_id || m.outlet?.id || ""),
+          outlet_name: m.outlet_name || m.outlet?.name || undefined,
+          user_name: m.user_name || m.user?.name || m.user?.email || "System",
           reason: m.reason || "Outlet return",
           items: [{
             id: String(m.id),
@@ -286,6 +302,8 @@ export const returnService = {
         throw new Error("From outlet and to outlet are required for outlet returns")
       }
       
+      const returnNumber = `OUTLET-RET-${Date.now()}`
+
       // Create stock transfers for each item
       const transfers = []
       for (const item of data.items) {
@@ -295,6 +313,8 @@ export const returnService = {
           to_outlet_id: data.to_outlet_id,
           quantity: item.quantity,
           reason: `Outlet return: ${data.reason}`,
+          is_return: true,
+          return_number: returnNumber,
         })
         transfers.push(transfer)
       }
@@ -302,7 +322,7 @@ export const returnService = {
       return {
         id: `outlet_${Date.now()}`,
         return_type: "outlet",
-        return_number: `OUTLET-RET-${Date.now()}`,
+        return_number: returnNumber,
         date: new Date().toISOString(),
         outlet: null,
         outlet_id: data.from_outlet_id,

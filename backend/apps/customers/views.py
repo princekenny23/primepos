@@ -302,6 +302,7 @@ class CreditPaymentViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Update sale payment status and amount_paid
         sale = serializer.instance.sale
         sale.amount_paid += serializer.instance.amount
+        sale.save(update_fields=['amount_paid'])
         sale.update_payment_status()
         
         # Update customer if needed (outstanding balance is calculated property)

@@ -24,8 +24,6 @@ import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { returnService, type ReturnType, type ReturnItem, type CreateReturnData } from "@/lib/services/returnService"
 import { productService } from "@/lib/services/productService"
-import { saleService } from "@/lib/services/saleService"
-import { customerService } from "@/lib/services/customerService"
 import { supplierService } from "@/lib/services/supplierService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
@@ -40,17 +38,13 @@ interface NewReturnModalProps {
 
 export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewReturnModalProps) {
   const { toast } = useToast()
-  const { currentBusiness, currentOutlet } = useBusinessStore()
+  const { currentOutlet } = useBusinessStore()
   const { outlets } = useTenant()
   const [isLoading, setIsLoading] = useState(false)
-  const [returnType, setReturnType] = useState<ReturnType>("customer")
+  const [returnType, setReturnType] = useState<ReturnType>("supplier")
   const [products, setProducts] = useState<any[]>([])
-  const [sales, setSales] = useState<any[]>([])
-  const [customers, setCustomers] = useState<any[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
-  const [selectedSale, setSelectedSale] = useState<string>("")
-  const [selectedCustomer, setSelectedCustomer] = useState<string>("")
   const [selectedSupplier, setSelectedSupplier] = useState<string>("")
   const [fromOutlet, setFromOutlet] = useState<string>("")
   const [toOutlet, setToOutlet] = useState<string>("")
@@ -59,30 +53,17 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
   const [items, setItems] = useState<ReturnItem[]>([])
   const [showProductSearch, setShowProductSearch] = useState(false)
 
-  // Load data based on return type
+  // Load data
   useEffect(() => {
     if (!open) return
 
     const loadData = async () => {
       try {
-        if (returnType === "customer") {
-          // Load recent sales for customer returns
-          const salesData = await saleService.list({
-            outlet: currentOutlet?.id,
-            status: "completed",
-          })
-          setSales(Array.isArray(salesData) ? salesData : salesData.results || [])
-          
-          // Load customers
-          const customersData = await customerService.list()
-          setCustomers(Array.isArray(customersData) ? customersData : customersData.results || [])
-        } else if (returnType === "supplier") {
-          // Load suppliers
-          const suppliersData = await supplierService.list()
-          setSuppliers(Array.isArray(suppliersData) ? suppliersData : suppliersData.results || [])
-        }
+        // Load suppliers
+        const suppliersData = await supplierService.list()
+        setSuppliers(Array.isArray(suppliersData) ? suppliersData : suppliersData.results || [])
         
-        // Always load products
+        // Load products
         const productsData = await productService.list({ is_active: true })
         setProducts(Array.isArray(productsData) ? productsData : productsData.results || [])
       } catch (error) {
@@ -91,14 +72,12 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
     }
 
     loadData()
-  }, [open, returnType, currentOutlet])
+  }, [open])
 
   // Reset form when modal opens/closes
   useEffect(() => {
     if (!open) {
-      setReturnType("customer")
-      setSelectedSale("")
-      setSelectedCustomer("")
+      setReturnType("supplier")
       setSelectedSupplier("")
       setFromOutlet("")
       setToOutlet("")
@@ -181,21 +160,8 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
         items: items,
       }
 
-      if (returnType === "customer") {
-        if (!selectedSale) {
-          toast({
-            title: "Error",
-            description: "Please select a sale for customer return",
-            variant: "destructive",
-          })
-          setIsLoading(false)
-          return
-        }
-        returnData.sale_id = selectedSale
-        if (selectedCustomer) {
-          returnData.customer_id = selectedCustomer
-        }
-      } else if (returnType === "supplier") {
+      // Supplier return
+      if (returnType === "supplier") {
         if (!selectedSupplier) {
           toast({
             title: "Error",
@@ -207,7 +173,8 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
         }
         returnData.supplier_id = selectedSupplier
         returnData.return_date = new Date().toISOString().split('T')[0]
-      } else {
+      } else if (returnType === "outlet") {
+        // Outlet return
         if (!fromOutlet || !toOutlet) {
           toast({
             title: "Error",
@@ -242,10 +209,6 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
     }
   }
 
-  // Get sale items when sale is selected (for customer returns)
-  const selectedSaleData = sales.find(s => String(s.id) === selectedSale)
-  const saleItems = selectedSaleData?.items || []
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -260,73 +223,10 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
           <div className="space-y-6 py-4">
             {/* Return Type Selection */}
             <Tabs value={returnType} onValueChange={(v) => setReturnType(v as ReturnType)}>
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="customer">Customer Return</TabsTrigger>
+              <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="supplier">Supplier Return</TabsTrigger>
                 <TabsTrigger value="outlet">Outlet Return</TabsTrigger>
               </TabsList>
-
-              {/* Customer Return Tab */}
-              <TabsContent value="customer" className="space-y-4 mt-4">
-                <div className="space-y-2">
-                  <Label>Sale *</Label>
-                  <Select value={selectedSale} onValueChange={setSelectedSale}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select a sale" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sales.map((sale) => (
-                        <SelectItem key={sale.id} value={String(sale.id)}>
-                          {sale._raw?.receipt_number || `Sale #${sale.id}`} - {currentBusiness?.currencySymbol || "MWK"} {sale.total?.toFixed(2)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {selectedSaleData && (
-                  <div className="p-3 bg-muted rounded-lg">
-                    <p className="text-sm font-medium mb-2">Sale Items:</p>
-                    <div className="space-y-1">
-                      {saleItems.map((item: any, idx: number) => (
-                        <div key={idx} className="text-sm text-muted-foreground">
-                          {item.productName} x{item.quantity}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label>Customer (Optional)</Label>
-                  <Select 
-                    value={selectedCustomer || undefined} 
-                    onValueChange={(value) => setSelectedCustomer(value || "")}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select customer (optional)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customers.map((customer) => (
-                        <SelectItem key={customer.id} value={String(customer.id)}>
-                          {customer.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {selectedCustomer && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setSelectedCustomer("")}
-                      className="h-6 text-xs"
-                    >
-                      Clear selection
-                    </Button>
-                  )}
-                </div>
-              </TabsContent>
 
               {/* Supplier Return Tab */}
               <TabsContent value="supplier" className="space-y-4 mt-4">

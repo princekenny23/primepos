@@ -112,7 +112,7 @@ class Sale(models.Model):
     @property
     def is_credit_sale(self):
         """Check if this is a credit sale"""
-        return self.payment_method == 'credit'
+        return self.payment_method in ['credit', 'tab']
     
     @property
     def remaining_balance(self):

@@ -51,6 +51,12 @@ interface SaleDetail extends Sale {
     email?: string
     phone?: string
   }
+  user?: {
+    id: string
+    email: string
+    first_name?: string
+    last_name?: string
+  }
   outlet?: {
     id: string
     name: string
@@ -117,6 +123,15 @@ export default function ReturnsPage() {
           }
         }
 
+        if (ret._raw?.user_detail) {
+          returnDetail.user = {
+            id: String(ret._raw.user_detail.id),
+            email: ret._raw.user_detail.email || "",
+            first_name: ret._raw.user_detail.first_name || "",
+            last_name: ret._raw.user_detail.last_name || "",
+          }
+        }
+
         returnDetail.receipt_number = ret._raw?.receipt_number || ret.receipt_number
         returnDetail.payment_method = ret._raw?.payment_method || ret.payment_method || ret.paymentMethod
 
@@ -136,6 +151,13 @@ export default function ReturnsPage() {
       setIsLoading(false)
     }
   }, [currentBusiness, currentOutlet, dateRange, toast])
+
+  const getUserDisplay = (sale: SaleDetail) => {
+    const user = sale.user
+    if (!user) return "System"
+    const fullName = `${user.first_name || ""} ${user.last_name || ""}`.trim()
+    return fullName || user.email || "System"
+  }
 
   useEffect(() => {
     loadReturns()
@@ -237,6 +259,7 @@ export default function ReturnsPage() {
                     <TableHead className="text-gray-900 font-semibold">Receipt #</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Customer</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Date</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Payment Method</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Amount Refunded</TableHead>
@@ -254,6 +277,7 @@ export default function ReturnsPage() {
                       <TableCell>
                         {format(new Date((ret as any).created_at || ret.createdAt), "MMM dd, yyyy")}
                       </TableCell>
+                      <TableCell>{getUserDisplay(ret)}</TableCell>
                       <TableCell>{ret.outlet?.name || "N/A"}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="capitalize border-gray-300">
