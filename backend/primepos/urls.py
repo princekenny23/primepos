@@ -6,6 +6,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from django.http import JsonResponse
+from apps.products.views import ProductViewSet
 from django.views.decorators.http import require_http_methods
 from .api_root import api_root
 
@@ -28,6 +29,8 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('apps.health.urls')),
     path('api/v1/', api_root, name='api-root'),
+    path('api/v1/products/bulk-import/', ProductViewSet.as_view({'post': 'bulk_import'}), name='product-bulk-import'),
+    path('api/v1/products/bulk-export/', ProductViewSet.as_view({'get': 'bulk_export'}), name='product-bulk-export'),
     path('api/v1/', include('apps.accounts.urls')),
     path('api/v1/', include('apps.tenants.urls')),
     path('api/v1/', include('apps.outlets.urls')),

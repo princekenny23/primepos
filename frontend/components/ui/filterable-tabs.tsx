@@ -25,6 +25,7 @@ interface FilterableTabsProps {
   onSearchChange?: (value: string) => void
   searchPlaceholder?: string
   actionButton?: ReactNode
+  actionButtonPlacement?: "right" | "below"
 }
 
 export function FilterableTabs({
@@ -38,6 +39,7 @@ export function FilterableTabs({
   onSearchChange,
   searchPlaceholder = "Search...",
   actionButton,
+  actionButtonPlacement = "right",
 }: FilterableTabsProps) {
   // Map number of tabs to Tailwind grid classes
   const gridColsMap: Record<number, string> = {
@@ -77,12 +79,17 @@ export function FilterableTabs({
               )
             })}
           </TabsList>
-          {actionButton && (
+          {actionButton && actionButtonPlacement === "right" && (
             <div className="flex-shrink-0">
               {actionButton}
             </div>
           )}
         </div>
+        {actionButton && actionButtonPlacement === "below" && (
+          <div className="flex justify-end">
+            {actionButton}
+          </div>
+        )}
         {searchValue !== undefined && onSearchChange && (
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />

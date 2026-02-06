@@ -233,6 +233,35 @@ class PurchaseReturn(models.Model):
 
     def __str__(self):
         return f"Return {self.return_number} - {self.supplier.name}"
+
+
+class PurchaseReturnItem(models.Model):
+    """Purchase Return Item model"""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='purchase_return_items')
+    purchase_return = models.ForeignKey(PurchaseReturn, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='purchase_return_items')
+
+    quantity = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
+    reason = models.CharField(max_length=255, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'suppliers_purchasereturnitem'
+        verbose_name = 'Purchase Return Item'
+        verbose_name_plural = 'Purchase Return Items'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant']),
+            models.Index(fields=['purchase_return']),
+            models.Index(fields=['product']),
+        ]
+
+    def __str__(self):
+        return f"{self.product.name} x{self.quantity}"
     
 class ProductSupplier(models.Model):
     """

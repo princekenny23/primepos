@@ -1,10 +1,12 @@
 from rest_framework import serializers
+from decimal import Decimal
 from .models import (
     Supplier, PurchaseOrder, SupplierInvoice,
-    PurchaseReturn, ProductSupplier
+    PurchaseReturn, PurchaseReturnItem, ProductSupplier
 )
 from apps.outlets.serializers import OutletSerializer
 from apps.products.serializers import ProductSerializer
+from apps.products.models import Product
 
 
 class SupplierSerializer(serializers.ModelSerializer):
@@ -230,6 +232,13 @@ class PurchaseReturnSerializer(serializers.ModelSerializer):
     outlet = OutletSerializer(read_only=True)
     outlet_id = serializers.IntegerField(write_only=True)
     created_by = serializers.StringRelatedField(read_only=True)
+    items_data = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False,
+        help_text="List of items to return (for future use)"
+    )
+    items = serializers.SerializerMethodField(read_only=True, help_text="Return items")
     
     class Meta:
         model = PurchaseReturn
@@ -237,39 +246,177 @@ class PurchaseReturnSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'supplier', 'supplier_id', 'purchase_order', 'purchase_order_id',
             'outlet', 'outlet_id', 'return_number', 'return_date', 'status',
             'reason', 'total', 'notes', 'created_by',
-            'created_at', 'updated_at', 'returned_at'
+            'created_at', 'updated_at', 'returned_at', 'items_data', 'items'
         )
         read_only_fields = ('id', 'tenant', 'return_number', 'created_by', 'created_at', 'updated_at', 'returned_at')
+    
+    def get_items(self, obj):
+        items = obj.items.select_related('product').all()
+        return [
+            {
+                'id': item.id,
+                'product_id': item.product_id,
+                'product_name': item.product.name if item.product else "Unknown",
+                'quantity': item.quantity,
+                'unit_price': str(item.unit_price),
+                'total': str(item.total),
+                'reason': item.reason,
+            }
+            for item in items
+        ]
     
     def create(self, validated_data):
         """Create purchase return"""
         supplier_id = validated_data.pop('supplier_id')
-        outlet_id = validated_data.pop('outlet_id')
+        outlet_id = validated_data.pop('outlet_id', None)
         purchase_order_id = validated_data.pop('purchase_order_id', None)
-        
+        items_data = validated_data.pop('items_data', [])
+
         from apps.outlets.models import Outlet
-        outlet = Outlet.objects.get(id=outlet_id)
+
+        outlet = validated_data.pop('outlet', None)
+        if not outlet and outlet_id:
+            outlet = Outlet.objects.get(id=outlet_id)
+
         supplier = Supplier.objects.get(id=supplier_id)
         purchase_order = None
         if purchase_order_id:
             purchase_order = PurchaseOrder.objects.get(id=purchase_order_id)
-        
-        # Generate return number
+
+        tenant = validated_data.pop('tenant', None)
+        if not tenant:
+            request = self.context.get('request')
+            if request:
+                tenant = getattr(request, 'tenant', None) or request.user.tenant
+
         from datetime import date
         today = date.today()
-        ret_count = PurchaseReturn.objects.filter(tenant=validated_data['tenant'], return_date__year=today.year).count() + 1
+        ret_count = PurchaseReturn.objects.filter(tenant=tenant, return_date__year=today.year).count() + 1
         return_number = f"RET-{today.strftime('%Y%m%d')}-{ret_count:04d}"
-        
-        purchase_return = PurchaseReturn.objects.create(
-            **validated_data,
-            supplier=supplier,
-            outlet=outlet,
-            purchase_order=purchase_order,
-            return_number=return_number,
-            created_by=self.context['request'].user
-        )
-        
+
+        user = validated_data.pop('created_by', None)
+        if not user:
+            request = self.context.get('request')
+            user = request.user if request else None
+
+        from django.db import transaction
+
+        with transaction.atomic():
+            purchase_return = PurchaseReturn.objects.create(
+                **validated_data,
+                tenant=tenant,
+                supplier=supplier,
+                outlet=outlet,
+                purchase_order=purchase_order,
+                return_number=return_number,
+                created_by=user
+            )
+
+            total_amount = Decimal('0')
+            for item_data in items_data:
+                product_id = item_data.get('product_id') or item_data.get('product')
+                quantity = item_data.get('quantity', 1)
+                unit_price = item_data.get('unit_price', '0')
+                reason = item_data.get('reason', '')
+
+                if not product_id:
+                    continue
+
+                try:
+                    quantity = int(Decimal(str(quantity)))
+                except Exception:
+                    quantity = 1
+
+                if quantity <= 0:
+                    continue
+
+                product = Product.objects.get(id=product_id)
+                unit_price_decimal = Decimal(str(unit_price))
+                line_total = unit_price_decimal * Decimal(str(quantity))
+                total_amount += line_total
+
+                PurchaseReturnItem.objects.create(
+                    tenant=tenant,
+                    purchase_return=purchase_return,
+                    product=product,
+                    quantity=quantity,
+                    unit_price=unit_price_decimal,
+                    total=line_total,
+                    reason=reason or ''
+                )
+
+            if (purchase_return.total is None or Decimal(str(purchase_return.total)) == Decimal('0')) and total_amount > 0:
+                purchase_return.total = total_amount
+                purchase_return.save(update_fields=['total'])
+
         return purchase_return
+
+    def update(self, instance, validated_data):
+        """Update purchase return and items"""
+        items_data = validated_data.pop('items_data', None)
+        supplier_id = validated_data.pop('supplier_id', None)
+        outlet_id = validated_data.pop('outlet_id', None)
+        purchase_order_id = validated_data.pop('purchase_order_id', None)
+
+        if supplier_id:
+            instance.supplier = Supplier.objects.get(id=supplier_id)
+        if outlet_id:
+            from apps.outlets.models import Outlet
+            instance.outlet = Outlet.objects.get(id=outlet_id)
+        if purchase_order_id is not None:
+            if purchase_order_id:
+                instance.purchase_order = PurchaseOrder.objects.get(id=purchase_order_id)
+            else:
+                instance.purchase_order = None
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        from django.db import transaction
+
+        with transaction.atomic():
+            instance.save()
+
+            if items_data is not None:
+                instance.items.all().delete()
+                total_amount = Decimal('0')
+                for item_data in items_data:
+                    product_id = item_data.get('product_id') or item_data.get('product')
+                    quantity = item_data.get('quantity', 1)
+                    unit_price = item_data.get('unit_price', '0')
+                    reason = item_data.get('reason', '')
+
+                    if not product_id:
+                        continue
+
+                    try:
+                        quantity = int(Decimal(str(quantity)))
+                    except Exception:
+                        quantity = 1
+
+                    if quantity <= 0:
+                        continue
+
+                    product = Product.objects.get(id=product_id)
+                    unit_price_decimal = Decimal(str(unit_price))
+                    line_total = unit_price_decimal * Decimal(str(quantity))
+                    total_amount += line_total
+
+                    PurchaseReturnItem.objects.create(
+                        tenant=instance.tenant,
+                        purchase_return=instance,
+                        product=product,
+                        quantity=quantity,
+                        unit_price=unit_price_decimal,
+                        total=line_total,
+                        reason=reason or ''
+                    )
+
+                if total_amount > 0:
+                    instance.total = total_amount
+                    instance.save(update_fields=['total'])
+
+        return instance
 
 
 class ProductSupplierSerializer(serializers.ModelSerializer):

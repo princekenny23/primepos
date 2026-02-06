@@ -79,7 +79,8 @@ export function useBarcodeScanner(options: BarcodeScannerOptions = {}) {
 
       // Ignore modifier keys; guard against undefined/non-string keys
       if (typeof e.key !== 'string') return
-      if (e.key.length > 1 && e.key !== suffixKey) return
+      const key = e.key === 'NumpadEnter' ? 'Enter' : e.key
+      if (key.length > 1 && key !== suffixKey) return
 
       // Append character (avoid interfering with typing into inputs)
       const active = document.activeElement
@@ -90,7 +91,7 @@ export function useBarcodeScanner(options: BarcodeScannerOptions = {}) {
       // But for global handler, still capture even if input is focused.
 
       // Append key
-      if (e.key === suffixKey) {
+      if (key === suffixKey) {
         // Suffix received - finalize buffer
         const code = bufferRef.current.trim()
         bufferRef.current = ''
@@ -103,7 +104,7 @@ export function useBarcodeScanner(options: BarcodeScannerOptions = {}) {
       }
 
       // Append regular character
-      bufferRef.current += e.key
+      bufferRef.current += key
 
       // Clear previous timeout
       if (timeoutRef.current) {

@@ -160,16 +160,17 @@ export function PrinterSettings() {
           {printers.length === 0 && <p className="text-sm text-muted-foreground">No printers discovered yet.</p>}
           <div className="space-y-1">
             {Array.from(new Set([...(printers || []), ...extraPrinters])).map((p) => (
-              <div key={p} className="flex items-center gap-3">
+              <label key={p} className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="radio"
                   name="printer"
                   value={p}
                   checked={selectedPrinter === p}
                   onChange={() => setSelectedPrinter(p)}
+                  title={`Select printer: ${p}`}
                 />
-                <div className="truncate">{p}</div>
-              </div>
+                <span className="truncate">{p}</span>
+              </label>
             ))}
           </div>
           <div className="mt-2">

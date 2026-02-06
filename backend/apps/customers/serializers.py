@@ -15,6 +15,7 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
     """Credit payment serializer"""
     sale_receipt_number = serializers.CharField(source='sale.receipt_number', read_only=True)
     user_name = serializers.CharField(source='user.get_full_name', read_only=True)
+    customer = serializers.PrimaryKeyRelatedField(required=False, allow_null=True, queryset=Customer.objects.all())
     
     class Meta:
         model = CreditPayment
@@ -24,6 +25,21 @@ class CreditPaymentSerializer(serializers.ModelSerializer):
             'notes', 'user', 'user_name', 'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'tenant', 'payment_date', 'created_at', 'updated_at')
+
+    def validate(self, attrs):
+        sale = attrs.get('sale')
+        customer = attrs.get('customer')
+
+        if not sale:
+            raise serializers.ValidationError({'sale': 'This field is required.'})
+
+        if not customer:
+            if sale.customer:
+                attrs['customer'] = sale.customer
+            else:
+                raise serializers.ValidationError({'customer': 'Customer is required for credit payments.'})
+
+        return attrs
 
 
 class CustomerSerializer(serializers.ModelSerializer):

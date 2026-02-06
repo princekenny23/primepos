@@ -29,8 +29,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { Plus, MoreVertical, AlertCircle, CheckCircle2, Eye, Users, Upload, Menu } from "lucide-react"
+import { Plus, MoreVertical, AlertCircle, CheckCircle2, Eye, Users, Upload, Menu, Trash2 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
@@ -72,6 +82,8 @@ export default function StockTakingHistoryPage() {
   const [isImporting, setIsImporting] = useState(false)
   const [allStockTakes, setAllStockTakes] = useState<StockTake[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<StockTake | null>(null)
   const useReal = useRealAPI()
 
   useEffect(() => {
@@ -106,7 +118,7 @@ export default function StockTakingHistoryPage() {
               progress: isRunning ? progress : 100,
               totalItems,
               countedItems: isRunning ? countedItems : totalItems,
-              startedBy: st.user?.name || st.user?.email || "System",
+              startedBy: st.user_name || st.user?.name || st.user?.email || "System",
               participants: 1,
               completedAt: st.completed_at,
               operatingDate: st.operating_date || st.created_at?.split('T')[0] || "--",
@@ -139,6 +151,29 @@ export default function StockTakingHistoryPage() {
 
   const handleViewStockTake = (id: string) => {
     router.push(`/dashboard/inventory/stock-taking/${id}`)
+  }
+
+  const handleDeleteStockTake = (stockTake: StockTake) => {
+    setPendingDelete(stockTake)
+    setDeleteDialogOpen(true)
+  }
+
+  const confirmDeleteStockTake = async () => {
+    if (!pendingDelete) return
+    try {
+      await inventoryService.deleteStockTake(pendingDelete.id)
+      setAllStockTakes((prev) => prev.filter((st) => st.id !== pendingDelete.id))
+      toast({ title: "Deleted", description: "Stock take session deleted." })
+    } catch (error: any) {
+      toast({
+        title: "Delete failed",
+        description: error?.message || "Could not delete stock take.",
+        variant: "destructive",
+      })
+    } finally {
+      setDeleteDialogOpen(false)
+      setPendingDelete(null)
+    }
   }
 
   const formatDate = (dateString: string) => {
@@ -314,16 +349,7 @@ export default function StockTakingHistoryPage() {
 
                         {/* USER(S) */}
                         <TableCell>
-                          {stockTake.participants && stockTake.participants > 0 ? (
-                            <Link 
-                              href={`/dashboard/inventory/stock-taking/${stockTake.id}`}
-                              className="text-blue-900 dark:text-blue-900 hover:underline"
-                            >
-                              {stockTake.participants}
-                            </Link>
-                          ) : (
-                            <span className="text-muted-foreground">0</span>
-                          )}
+                          {stockTake.startedBy || "System"}
                         </TableCell>
 
                         {/* ITEMS */}
@@ -358,6 +384,14 @@ export default function StockTakingHistoryPage() {
                                   View Details
                                 </DropdownMenuItem>
                               )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => handleDeleteStockTake(stockTake)}
+                                className="text-destructive"
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
@@ -401,6 +435,8 @@ export default function StockTakingHistoryPage() {
                   onChange={handleFileChange}
                   className="hidden"
                   id="stock-take-file-upload"
+                  aria-label="Upload stock take file"
+                  title="Upload stock take file"
                 />
                 <Label htmlFor="stock-take-file-upload">
                   <Button variant="outline" asChild>
@@ -447,6 +483,25 @@ export default function StockTakingHistoryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete stock take?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the selected stock take session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingDelete(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteStockTake}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   )
 }

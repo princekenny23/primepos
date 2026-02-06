@@ -22,6 +22,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Progress } from "@/components/ui/progress"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -29,7 +39,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { ClipboardCheck, Search, Save, ArrowLeft, CheckCircle2, Zap, X } from "lucide-react"
+import { ClipboardCheck, Search, Save, ArrowLeft, CheckCircle2 } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { productService } from "@/lib/services/productService"
@@ -67,7 +77,7 @@ export default function StockTakingDetailPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isCompleting, setIsCompleting] = useState(false)
-  const [isAutoCompleting, setIsAutoCompleting] = useState(false)
+  const [completeDialogOpen, setCompleteDialogOpen] = useState(false)
 
   // Modal / scanner states
   const [showAddProduct, setShowAddProduct] = useState(false)
@@ -305,43 +315,6 @@ export default function StockTakingDetailPage() {
     setEditCountValue("")
   }
 
-  const handleAutoComplete = async () => {
-    if (!confirm("This will set all uncounted items to their expected quantity. This action cannot be undone. Continue?")) {
-      return
-    }
-
-    setIsAutoCompleting(true)
-    try {
-      const uncountedItems = items.filter(item => !item.isCounted)
-      
-      // Update all uncounted items to expected quantity
-      const updatePromises = uncountedItems.map(item =>
-        inventoryService.updateStockTakeItem(stockTakeId, item.id, {
-          counted_quantity: item.expectedQty,
-        })
-      )
-      
-      await Promise.all(updatePromises)
-      
-      toast({
-        title: "Auto-Complete Successful",
-        description: `Set ${uncountedItems.length} items to their expected quantities.`,
-      })
-      
-      // Reload data
-      loadStockTakeData()
-    } catch (error) {
-      console.error("Failed to auto-complete:", error)
-      toast({
-        title: "Auto-Complete Failed",
-        description: "Failed to auto-complete items. Please try again.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsAutoCompleting(false)
-    }
-  }
-
   const handleSaveAll = async () => {
     setIsSaving(true)
     try {
@@ -376,10 +349,6 @@ export default function StockTakingDetailPage() {
   }
 
   const handleComplete = async () => {
-    if (!confirm("Are you sure you want to complete this stock take? This will apply all adjustments to stock levels.")) {
-      return
-    }
-
     setIsCompleting(true)
     try {
       await inventoryService.completeStockTake(stockTakeId)
@@ -441,22 +410,14 @@ export default function StockTakingDetailPage() {
             </Button>
             {!isCompleted && (
               <>
-                {hasUncountedItems && (
-                  <Button 
-                    onClick={handleAutoComplete} 
-                    disabled={isAutoCompleting}
-                    variant="outline"
-                    className="bg-yellow-50 hover:bg-yellow-100 text-yellow-700 border-yellow-300"
-                  >
-                    <Zap className="mr-2 h-4 w-4" />
-                    {isAutoCompleting ? "Auto-Completing..." : "Auto-Complete"}
-                  </Button>
-                )}
                 <Button onClick={handleSaveAll} disabled={isSaving} variant="outline">
                   <Save className="mr-2 h-4 w-4" />
                   {isSaving ? "Saving..." : "Save Progress"}
                 </Button>
-                <Button onClick={handleComplete} disabled={isCompleting || countedItemsCount === 0}>
+                <Button
+                  onClick={() => setCompleteDialogOpen(true)}
+                  disabled={isCompleting || countedItemsCount === 0}
+                >
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                   {isCompleting ? "Completing..." : "Complete Stock Take"}
                 </Button>
@@ -485,47 +446,6 @@ export default function StockTakingDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Summary Cards */}
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Items</CardTitle>
-              <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalItems}</div>
-              <p className="text-xs text-muted-foreground">
-                Items to count
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Counted Items</CardTitle>
-              <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{countedItemsCount}</div>
-              <p className="text-xs text-muted-foreground">
-                Items completed
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Remaining Items</CardTitle>
-              <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-orange-600">{totalItems - countedItemsCount}</div>
-              <p className="text-xs text-muted-foreground">
-                Items not counted
-              </p>
-            </CardContent>
-          </Card>
-        </div>
 
         {/* Search Bar with Dropdown */}
         <Card>
@@ -587,7 +507,7 @@ export default function StockTakingDetailPage() {
                   </div>
                   
                   {/* Scrollable Items List */}
-                  <div className="max-h-[500px] overflow-y-auto overflow-x-hidden">
+                  <div className="max-h-60 overflow-y-auto overflow-x-hidden">
                     {searchableItems.length === 0 ? (
                       <div className="p-4 text-center text-sm text-muted-foreground">
                         No items found
@@ -755,6 +675,24 @@ export default function StockTakingDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Complete Stock Take Dialog */}
+      <AlertDialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Complete stock take?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will apply all adjustments to stock levels and close this session.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleComplete}>
+              Complete Stock Take
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Add/Edit Product Modal for scanned barcodes */}
       <ProductModalTabs

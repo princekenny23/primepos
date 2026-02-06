@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
@@ -20,8 +20,20 @@ import {
   Package, 
   RotateCcw,
   Plus,
-  Eye
+  Eye,
+  Calendar,
+  MoreVertical,
+  Edit,
+  Trash2
 } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { returnService, type Return } from "@/lib/services/returnService"
 import { useBusinessStore } from "@/stores/businessStore"
@@ -30,9 +42,32 @@ import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { useI18n } from "@/contexts/i18n-context"
+import { StockAdjustmentModal } from "@/components/modals/stock-adjustment-modal"
+import { TransferStockModal } from "@/components/modals/transfer-stock-modal"
+import { ReceiveStockModal } from "@/components/modals/receive-stock-modal"
+import { NewReturnModal } from "@/components/modals/new-return-modal"
+import { useToast } from "@/components/ui/use-toast"
 import { productService } from "@/lib/services/productService"
-import { StockDisplayGrid } from "@/components/stock/stock-display"
 import type { Product } from "@/lib/types"
+import { purchaseReturnService } from "@/lib/services/purchaseReturnService"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 export default function StockControlPage() {
   const router = useRouter()
@@ -40,21 +75,24 @@ export default function StockControlPage() {
   const [activeTab, setActiveTab] = useState<string>("adjusts")
   const useReal = useRealAPI()
   const { t } = useI18n()
+  const { toast } = useToast()
 
   // Data states
   const [adjustments, setAdjustments] = useState<any[]>([])
   const [transfers, setTransfers] = useState<any[]>([])
   const [receiving, setReceiving] = useState<any[]>([])
   const [returns, setReturns] = useState<Return[]>([])
-  const [stockProducts, setStockProducts] = useState<Product[]>([])
+  const [products, setProducts] = useState<Product[]>([])
 
   // Loading states
   const [isLoadingAdjustments, setIsLoadingAdjustments] = useState(true)
   const [isLoadingTransfers, setIsLoadingTransfers] = useState(true)
   const [isLoadingReceiving, setIsLoadingReceiving] = useState(true)
   const [isLoadingReturns, setIsLoadingReturns] = useState(true)
-  const [isLoadingStock, setIsLoadingStock] = useState(true)
-  const [stockError, setStockError] = useState<string | null>(null)
+
+  // Date range filter states
+  const [startDate, setStartDate] = useState<string>('')
+  const [endDate, setEndDate] = useState<string>('')
 
   // Load adjustments
   const loadAdjustments = useCallback(async () => {
@@ -109,21 +147,44 @@ export default function StockControlPage() {
         })
         
         const transferMap = new Map()
-        const transferOutResults = transferOutMovements.results || []
+        const transferOutResults = (transferOutMovements.results || []).filter((movement: any) => {
+          const reason = (movement.reason || "").toLowerCase()
+          return !reason.includes("outlet return")
+        })
         
         transferOutResults.forEach((movement: any) => {
           const transferId = `${movement.id}_${movement.product?.id || movement.product}_${movement.created_at}`
           
           if (!transferMap.has(transferId)) {
-            const fromOutletId = movement.outlet || (typeof movement.outlet === 'object' ? movement.outlet.id : movement.outlet)
+            // Extract from outlet name
+            let fromOutletName = "N/A"
+            if (movement.outlet_name) {
+              fromOutletName = movement.outlet_name
+            } else if (typeof movement.outlet === 'object' && movement.outlet?.name) {
+              fromOutletName = movement.outlet.name
+            } else if (movement.outlet) {
+              const outletId = typeof movement.outlet === 'object' ? movement.outlet.id : movement.outlet
+              const foundOutlet = outlets.find(o => o.id === outletId)
+              if (foundOutlet) fromOutletName = foundOutlet.name
+            }
+            
+            const toOutletId = movement.reference_id || null
+            const toOutletName = toOutletId
+              ? outlets.find(o => String(o.id) === String(toOutletId))?.name || "N/A"
+              : "N/A"
+
             transferMap.set(transferId, {
               id: movement.id,
               product_name: movement.product_name || movement.product?.name || "N/A",
-              from_outlet_name: movement.outlet_name || (typeof movement.outlet === 'object' ? movement.outlet.name : "N/A"),
-              to_outlet_name: "N/A",
+              from_outlet_name: fromOutletName,
+              from_outlet_id: typeof movement.outlet === 'object' ? movement.outlet?.id : movement.outlet,
+              to_outlet_name: toOutletName,
+              to_outlet_id: toOutletId,
               quantity: movement.quantity,
               reason: movement.reason || "",
+              user_name: movement.user_name || movement.user?.name || movement.user?.email || "System",
               date: movement.created_at,
+              product_id: movement.product?.id || movement.product,
             })
           }
         })
@@ -132,15 +193,43 @@ export default function StockControlPage() {
           movement_type: "transfer_in",
         })
         
-        const transferInResults = transferInMovements.results || []
+        const transferInResults = (transferInMovements.results || []).filter((movement: any) => {
+          const reason = (movement.reason || "").toLowerCase()
+          return !reason.includes("outlet return")
+        })
+        
         transferInResults.forEach((movement: any) => {
-          const matchingTransfer = Array.from(transferMap.values()).find((t: any) => 
-            t.quantity === movement.quantity &&
-            (movement.reference_id === String(t.id) || 
-             new Date(t.date).toDateString() === new Date(movement.created_at).toDateString())
-          )
+          // Try to match transfer_in with transfer_out by reference_id first, then by product and date
+          const matchingTransfer = Array.from(transferMap.values()).find((t: any) => {
+            // Match by destination outlet id + product + quantity + date
+            const movementOutletId = movement.outlet?.id || movement.outlet
+            const sameOutlet = t.to_outlet_id && String(t.to_outlet_id) === String(movementOutletId)
+            // Fallback: match by product, quantity and same date
+            const movementProductId = movement.product?.id || movement.product
+            const sameProduct = (t.product_id === movementProductId) || 
+                               (t.product_name === movement.product_name) ||
+                               (t.product_name === (movement.product?.name))
+            const sameQuantity = t.quantity === movement.quantity
+            const sameDate = new Date(t.date).toDateString() === new Date(movement.created_at).toDateString()
+            return sameOutlet && sameProduct && sameQuantity && sameDate
+          })
+          
           if (matchingTransfer) {
-            matchingTransfer.to_outlet_name = movement.outlet_name || (typeof movement.outlet === 'object' ? movement.outlet.name : "N/A")
+            // Get destination outlet name from the transfer_in movement
+            let toOutletName = "N/A"
+            if (movement.outlet_name) {
+              toOutletName = movement.outlet_name
+            } else if (typeof movement.outlet === 'object' && movement.outlet?.name) {
+              toOutletName = movement.outlet.name
+            } else if (movement.outlet) {
+              const outletId = typeof movement.outlet === 'object' ? movement.outlet.id : movement.outlet
+              const foundOutlet = outlets.find(o => o.id === outletId)
+              if (foundOutlet) {
+                toOutletName = foundOutlet.name
+              }
+            }
+            
+            matchingTransfer.to_outlet_name = toOutletName
           }
         })
         
@@ -154,7 +243,7 @@ export default function StockControlPage() {
     } finally {
       setIsLoadingTransfers(false)
     }
-  }, [currentBusiness, useReal])
+  }, [currentBusiness, outlets, useReal])
 
   // Load receiving
   const loadReceiving = useCallback(async () => {
@@ -191,15 +280,42 @@ export default function StockControlPage() {
               reason: movement.reason || "",
               total_items: 0,
               total_quantity: 0,
+              item_names: new Set<string>(),
+              items: [],
+              outlet_id: outletId,
+              user_name: movement.user_name || movement.user?.name || movement.user?.email || "System",
             })
           }
           
           const receiving = receivingMap.get(key)
+          const productName = movement.product_name || movement.product?.name
+          if (productName) {
+            receiving.item_names.add(productName)
+          }
+          receiving.items.push({
+            movement_id: movement.id,
+            product_id: String(movement.product?.id || movement.product || ""),
+            product_name: productName || "N/A",
+            quantity: String(movement.quantity || 0),
+          })
           receiving.total_items += 1
           receiving.total_quantity += movement.quantity || 0
+          if (!receiving.reason && movement.reason) {
+            receiving.reason = movement.reason
+          }
         })
-        
-        setReceiving(Array.from(receivingMap.values()))
+
+        const receivingList = Array.from(receivingMap.values()).map((rec: any) => {
+          const itemNames = Array.from(rec.item_names)
+          return {
+            ...rec,
+            item_names: itemNames,
+            item_preview: itemNames.slice(0, 2).join(", "),
+            item_more_count: itemNames.length > 2 ? itemNames.length - 2 : 0,
+          }
+        })
+
+        setReceiving(receivingList)
       } else {
         setReceiving([])
       }
@@ -211,27 +327,14 @@ export default function StockControlPage() {
     }
   }, [currentBusiness, outlets, useReal])
 
-  const loadStockOverview = useCallback(async () => {
-    if (!currentBusiness) {
-      setStockProducts([])
-      setIsLoadingStock(false)
-      return
-    }
-
-    setIsLoadingStock(true)
-    setStockError(null)
+  const loadProducts = useCallback(async () => {
     try {
       const response = await productService.list({ is_active: true })
-      const items = response.results || []
-      setStockProducts(items.slice(0, 6))
+      setProducts(response.results || [])
     } catch (error) {
-      console.error("Failed to load stock overview:", error)
-      setStockProducts([])
-      setStockError("Could not load stock overview")
-    } finally {
-      setIsLoadingStock(false)
+      console.error("Failed to load products:", error)
     }
-  }, [currentBusiness])
+  }, [])
 
   // Load returns
   const loadReturns = useCallback(async () => {
@@ -261,8 +364,7 @@ export default function StockControlPage() {
     loadTransfers()
     loadReceiving()
     loadReturns()
-    loadStockOverview()
-  }, [loadAdjustments, loadTransfers, loadReceiving, loadReturns, loadStockOverview])
+  }, [loadAdjustments, loadTransfers, loadReceiving, loadReturns])
 
   const tabs: TabConfig[] = [
     {
@@ -306,38 +408,722 @@ export default function StockControlPage() {
     }
   }
 
+  // Filter data by date range
+  const filterByDateRange = (items: any[]) => {
+    if (!startDate && !endDate) return items
+
+    return items.filter((item) => {
+      const itemDate = new Date(item.date)
+      if (startDate) {
+        const start = new Date(startDate)
+        if (itemDate < start) return false
+      }
+      if (endDate) {
+        const end = new Date(endDate)
+        end.setHours(23, 59, 59, 999)
+        if (itemDate > end) return false
+      }
+      return true
+    })
+  }
+
+  // Apply filters to all data
+  const filteredAdjustments = filterByDateRange(adjustments)
+  const filteredTransfers = filterByDateRange(transfers)
+  const filteredReceiving = filterByDateRange(receiving)
+  const filteredReturns = filterByDateRange(returns)
+
+  // Date range picker state
+  const [showDatePicker, setShowDatePicker] = useState(false)
+
+  // Modal states
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false)
+  const [showTransferModal, setShowTransferModal] = useState(false)
+  const [showReceiveModal, setShowReceiveModal] = useState(false)
+  const [showReturnModal, setShowReturnModal] = useState(false)
+
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
+  const [detailsPayload, setDetailsPayload] = useState<{
+    item: any
+    type: string
+    mode: "view" | "edit"
+  } | null>(null)
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<{
+    item: any
+    type: string
+  } | null>(null)
+
+  const [editForm, setEditForm] = useState<{
+    reason: string
+    quantity: string
+    product_id: string
+    outlet_id: string
+    to_outlet_id: string
+    supplier: string
+    return_number: string
+    status: string
+    notes: string
+    items: Array<{ id?: string; movement_id?: string; product_id: string; quantity: string; unit_price?: string }>
+  }>({
+    reason: "",
+    quantity: "",
+    product_id: "",
+    outlet_id: "",
+    to_outlet_id: "",
+    supplier: "",
+    return_number: "",
+    status: "",
+    notes: "",
+    items: [],
+  })
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+
+  const isEditableType = (type?: string) =>
+    type === "adjustment" || type === "transfer" || type === "receiving" || type === "return"
+
+  const openDetails = (item: any, type: string, mode: "view" | "edit") => {
+    setDetailsPayload({ item, type, mode })
+    if (mode === "edit") {
+      loadProducts()
+      setEditForm({
+        reason: item.reason || "",
+        quantity: typeof item.quantity !== "undefined" ? String(item.quantity) : "",
+        product_id: String(item.product_id || ""),
+        outlet_id: String(item.from_outlet_id || item.outlet_id || item.outlet?.id || ""),
+        to_outlet_id: String(item.to_outlet_id || ""),
+        supplier: String(item.supplier || ""),
+        return_number: String(item.return_number || ""),
+        status: String(item.status || ""),
+        notes: String(item.notes || ""),
+        items: Array.isArray(item.items)
+          ? item.items.map((i: any) => ({
+              id: i.id,
+              movement_id: i.movement_id || i.id,
+              product_id: String(i.product_id || ""),
+              quantity: String(i.quantity ?? ""),
+              unit_price: i.unit_price,
+            }))
+          : [],
+      })
+    }
+    setDetailsDialogOpen(true)
+  }
+
+  const handleView = (item: any, type: string) => {
+    openDetails(item, type, "view")
+  }
+
+  const handleEdit = (item: any, type: string) => {
+    openDetails(item, type, "edit")
+  }
+
+  const handleDelete = (item: any, type: string) => {
+    setPendingDelete({ item, type })
+    setDeleteDialogOpen(true)
+  }
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return
+    const { item, type } = pendingDelete
+    const id = String(item.id)
+
+    if (type === "adjustment") {
+      setAdjustments((prev) => prev.filter((a) => String(a.id) !== id))
+    } else if (type === "transfer") {
+      setTransfers((prev) => prev.filter((t) => String(t.id) !== id))
+    } else if (type === "receiving") {
+      setReceiving((prev) => prev.filter((r) => String(r.id) !== id))
+    } else if (type === "return") {
+      setReturns((prev) => prev.filter((r) => String(r.id) !== id))
+    }
+
+    setDeleteDialogOpen(false)
+    setPendingDelete(null)
+  }
+
+  const getSupplierReturnId = (id: string) => {
+    const parts = id.split("_")
+    return parts.length > 1 ? parts[1] : id
+  }
+
+  const handleSupplierApprove = async (returnItem: Return) => {
+    try {
+      const supplierId = getSupplierReturnId(String(returnItem.id))
+      await purchaseReturnService.approve(supplierId)
+      setReturns((prev) =>
+        prev.map((r) =>
+          String(r.id) === String(returnItem.id) ? { ...r, status: "approved" } : r
+        )
+      )
+      toast({ title: "Approved", description: "Supplier return approved." })
+    } catch (error: any) {
+      toast({
+        title: "Approve failed",
+        description: error?.message || "Could not approve supplier return.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleSupplierComplete = async (returnItem: Return) => {
+    try {
+      const supplierId = getSupplierReturnId(String(returnItem.id))
+      await purchaseReturnService.complete(supplierId)
+      setReturns((prev) =>
+        prev.map((r) =>
+          String(r.id) === String(returnItem.id) ? { ...r, status: "returned" } : r
+        )
+      )
+      toast({ title: "Completed", description: "Supplier return marked as returned." })
+    } catch (error: any) {
+      toast({
+        title: "Complete failed",
+        description: error?.message || "Could not complete supplier return.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleSaveEdit = async () => {
+    if (!detailsPayload) return
+    const { item, type } = detailsPayload
+
+    if (!isEditableType(type)) {
+      toast({
+        title: "Not editable",
+        description: "Editing is only available for adjustments and transfers.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if ((type === "adjustment" || type === "transfer") && !editForm.quantity) {
+      toast({
+        title: "Validation Error",
+        description: "Quantity is required.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSavingEdit(true)
+    try {
+      const allowedReturnStatuses = [
+        "draft",
+        "pending",
+        "approved",
+        "returned",
+        "cancelled",
+      ] as const
+      type ReturnStatus = (typeof allowedReturnStatuses)[number]
+      const sanitizedStatus = allowedReturnStatuses.includes(editForm.status as ReturnStatus)
+        ? (editForm.status as ReturnStatus)
+        : undefined
+
+      if (type === "adjustment") {
+        const updatePayload: Record<string, any> = {
+          reason: editForm.reason,
+          quantity: Number(editForm.quantity),
+        }
+        if (editForm.product_id) updatePayload.product_id = editForm.product_id
+        if (editForm.outlet_id) updatePayload.outlet = editForm.outlet_id
+
+        await inventoryService.updateMovement(String(item.id), updatePayload)
+
+        setAdjustments((prev) =>
+          prev.map((a) =>
+            String(a.id) === String(item.id)
+              ? {
+                  ...a,
+                  reason: editForm.reason,
+                  quantity: Number(editForm.quantity),
+                  product_id: editForm.product_id,
+                  outlet_id: editForm.outlet_id,
+                }
+              : a
+          )
+        )
+      } else if (type === "transfer") {
+        const updatePayload: Record<string, any> = {
+          reason: editForm.reason,
+          quantity: Number(editForm.quantity),
+        }
+        if (editForm.product_id) updatePayload.product_id = editForm.product_id
+        if (editForm.outlet_id) updatePayload.outlet = editForm.outlet_id
+        if (editForm.to_outlet_id) updatePayload.reference_id = editForm.to_outlet_id
+
+        await inventoryService.updateMovement(String(item.id), updatePayload)
+
+        setTransfers((prev) =>
+          prev.map((t) =>
+            String(t.id) === String(item.id)
+              ? {
+                  ...t,
+                  reason: editForm.reason,
+                  quantity: Number(editForm.quantity),
+                  product_id: editForm.product_id,
+                  from_outlet_id: editForm.outlet_id,
+                  to_outlet_id: editForm.to_outlet_id,
+                }
+              : t
+          )
+        )
+      } else if (type === "receiving") {
+        const items = editForm.items || []
+        await Promise.all(
+          items.map((entry) =>
+            entry.movement_id
+              ? inventoryService.updateMovement(String(entry.movement_id), {
+                  product_id: entry.product_id,
+                  quantity: Number(entry.quantity),
+                  reason: editForm.reason,
+                  outlet: editForm.outlet_id || item.outlet_id,
+                  reference_id: editForm.supplier || item.supplier,
+                })
+              : Promise.resolve()
+          )
+        )
+
+        const totalQuantity = items.reduce(
+          (sum, entry) => sum + Number(entry.quantity || 0),
+          0
+        )
+        setReceiving((prev) =>
+          prev.map((r) =>
+            String(r.id) === String(item.id)
+              ? {
+                  ...r,
+                  supplier: editForm.supplier,
+                  outlet_id: editForm.outlet_id,
+                  reason: editForm.reason,
+                  items: items.map((i) => ({
+                    movement_id: i.movement_id,
+                    product_id: i.product_id,
+                    quantity: i.quantity,
+                  })),
+                  total_items: items.length,
+                  total_quantity: totalQuantity,
+                }
+              : r
+          )
+        )
+      } else if (type === "return") {
+        const rawId = String(item.id || "")
+        const [returnType, returnId] = rawId.split("_")
+
+        if (returnType === "supplier") {
+          await purchaseReturnService.update(returnId, {
+            reason: editForm.reason,
+            notes: editForm.notes,
+            status: sanitizedStatus,
+            return_number: editForm.return_number,
+            items_data: editForm.items.map((i) => ({
+              product_id: Number(i.product_id),
+              quantity: Number(i.quantity),
+              unit_price: i.unit_price || "0",
+              reason: editForm.reason,
+            })),
+          })
+        } else {
+          await Promise.all(
+            editForm.items.map((entry) =>
+              entry.id
+                ? inventoryService.updateMovement(String(entry.id), {
+                    product_id: entry.product_id,
+                    quantity: Number(entry.quantity),
+                    reason: editForm.reason,
+                    reference_id: editForm.return_number || item.return_number,
+                  })
+                : Promise.resolve()
+            )
+          )
+        }
+
+        setReturns((prev) =>
+          prev.map((r) =>
+            String(r.id) === String(item.id)
+              ? {
+                  ...r,
+                  reason: editForm.reason,
+                  notes: editForm.notes,
+                  status: sanitizedStatus ?? r.status,
+                  return_number: editForm.return_number,
+                  items: editForm.items.map((i) => ({
+                    id: i.id,
+                    product_id: i.product_id,
+                    quantity: Number(i.quantity),
+                  })),
+                }
+              : r
+          )
+        )
+      }
+
+      toast({ title: "Updated", description: "Changes saved successfully." })
+      setDetailsDialogOpen(false)
+    } catch (error: any) {
+      toast({
+        title: "Update failed",
+        description: error?.message || "Could not save changes.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
+
+  const renderDetailsContent = () => {
+    if (!detailsPayload) return null
+
+    const { item, type } = detailsPayload
+    const formattedDate = item?.date || item?.created_at
+      ? format(new Date(item.date || item.created_at), "MMM dd, yyyy")
+      : "N/A"
+
+    const rows: Array<{ label: string; value: ReactNode }> = []
+
+    if (type === "adjustment") {
+      rows.push(
+        { label: "Product", value: item.product_name || "N/A" },
+        { label: "Outlet", value: item.outlet_name || "N/A" },
+        { label: "Quantity", value: item.quantity ?? 0 },
+        { label: "Reason", value: item.reason || "-" },
+        { label: "User", value: item.user_name || "System" },
+        { label: "Date", value: formattedDate }
+      )
+    } else if (type === "transfer") {
+      rows.push(
+        { label: "Product", value: item.product_name || "N/A" },
+        { label: "From Outlet", value: item.from_outlet_name || "N/A" },
+        { label: "To Outlet", value: item.to_outlet_name || "N/A" },
+        { label: "Quantity", value: item.quantity ?? 0 },
+        { label: "Reason", value: item.reason || "-" },
+        { label: "Date", value: formattedDate }
+      )
+    } else if (type === "receiving") {
+      rows.push(
+        { label: "Supplier", value: item.supplier || "Unknown Supplier" },
+        { label: "Outlet", value: item.outlet_name || "N/A" },
+        { label: "Items", value: item.total_items ?? 0 },
+        { label: "Total Quantity", value: item.total_quantity ?? 0 },
+        { label: "Reason", value: item.reason || "-" },
+        { label: "Date", value: formattedDate }
+      )
+      if (Array.isArray(item.item_names) && item.item_names.length > 0) {
+        rows.push({ label: "Item Names", value: item.item_names.join(", ") })
+      }
+    } else if (type === "return") {
+      rows.push(
+        { label: "Return #", value: item.return_number || "-" },
+        { label: "Outlet", value: item.outlet?.name || "N/A" },
+        { label: "Items", value: item.items?.length ?? 0 },
+        { label: "Status", value: item.status || "Pending" },
+        { label: "Reason", value: item.reason || "-" },
+        { label: "Date", value: formattedDate }
+      )
+    }
+
+    return (
+      <div className="space-y-3">
+        {rows.map((row) => (
+          <div key={row.label} className="grid grid-cols-3 gap-3 text-sm">
+            <div className="text-muted-foreground">{row.label}</div>
+            <div className="col-span-2 font-medium text-gray-900">
+              {row.value}
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const renderEditContent = () => {
+    if (!detailsPayload) return null
+    const { type } = detailsPayload
+
+    return (
+      <div className="space-y-4">
+        {(type === "adjustment" || type === "transfer") && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">Quantity</label>
+            <Input
+              type="number"
+              value={editForm.quantity}
+              onChange={(e) =>
+                setEditForm((prev) => ({ ...prev, quantity: e.target.value }))
+              }
+            />
+          </div>
+        )}
+        {(type === "adjustment" || type === "transfer") && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">Product</label>
+            <select
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              value={editForm.product_id}
+              onChange={(e) =>
+                setEditForm((prev) => ({ ...prev, product_id: e.target.value }))
+              }
+              aria-label="Product"
+              title="Product"
+            >
+              <option value="">Select product</option>
+              {products.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {(type === "adjustment" || type === "transfer" || type === "receiving") && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">Outlet</label>
+            <select
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              value={editForm.outlet_id}
+              onChange={(e) =>
+                setEditForm((prev) => ({ ...prev, outlet_id: e.target.value }))
+              }
+              aria-label="Outlet"
+              title="Outlet"
+            >
+              <option value="">Select outlet</option>
+              {outlets.map((o) => (
+                <option key={o.id} value={String(o.id)}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {type === "transfer" && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">To Outlet</label>
+            <select
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              value={editForm.to_outlet_id}
+              onChange={(e) =>
+                setEditForm((prev) => ({ ...prev, to_outlet_id: e.target.value }))
+              }
+              aria-label="To outlet"
+              title="To outlet"
+            >
+              <option value="">Select outlet</option>
+              {outlets.map((o) => (
+                <option key={o.id} value={String(o.id)}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {type === "receiving" && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">Supplier</label>
+            <Input
+              value={editForm.supplier}
+              onChange={(e) =>
+                setEditForm((prev) => ({ ...prev, supplier: e.target.value }))
+              }
+            />
+          </div>
+        )}
+        {type === "return" && (
+          <>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Return #</label>
+              <Input
+                value={editForm.return_number}
+                onChange={(e) =>
+                  setEditForm((prev) => ({ ...prev, return_number: e.target.value }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Status</label>
+              <Input
+                value={editForm.status}
+                onChange={(e) =>
+                  setEditForm((prev) => ({ ...prev, status: e.target.value }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Notes</label>
+              <Input
+                value={editForm.notes}
+                onChange={(e) =>
+                  setEditForm((prev) => ({ ...prev, notes: e.target.value }))
+                }
+              />
+            </div>
+          </>
+        )}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-gray-700">Reason</label>
+          <Input
+            value={editForm.reason}
+            onChange={(e) =>
+              setEditForm((prev) => ({ ...prev, reason: e.target.value }))
+            }
+          />
+        </div>
+        {(type === "receiving" || type === "return") && editForm.items.length > 0 && (
+          <div className="space-y-3">
+            <div className="text-sm font-medium text-gray-700">Items</div>
+            {editForm.items.map((itemEntry, index) => (
+              <div key={itemEntry.id || itemEntry.movement_id || index} className="grid grid-cols-3 gap-3">
+                <select
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                  value={itemEntry.product_id}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      items: prev.items.map((it, idx) =>
+                        idx === index ? { ...it, product_id: e.target.value } : it
+                      ),
+                    }))
+                  }
+                  aria-label="Item product"
+                  title="Item product"
+                >
+                  <option value="">Select product</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  type="number"
+                  value={itemEntry.quantity}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      items: prev.items.map((it, idx) =>
+                        idx === index ? { ...it, quantity: e.target.value } : it
+                      ),
+                    }))
+                  }
+                />
+                <Input
+                  placeholder="Unit price"
+                  value={itemEntry.unit_price || ""}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      items: prev.items.map((it, idx) =>
+                        idx === index ? { ...it, unit_price: e.target.value } : it
+                      ),
+                    }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <DashboardLayout>
       <PageLayout
         title={t("inventory.menu.stock_control")}
         description={t("inventory.stock_control_description")}
-        actions={<PageRefreshButton />}
+        actions={null}
       >
-        <div className="mb-6 space-y-3">
-          <h3 className="text-lg font-semibold text-gray-900">Stock Overview</h3>
-          {isLoadingStock ? (
-            <div className="text-sm text-muted-foreground">Loading stock...</div>
-          ) : stockError ? (
-            <div className="text-sm text-destructive">{stockError}</div>
-          ) : stockProducts.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No products available.</div>
-          ) : (
-            <StockDisplayGrid products={stockProducts} />
-          )}
-        </div>
-
         <FilterableTabs
           tabs={tabs}
           activeTab={activeTab}
           onTabChange={setActiveTab}
+          actionButtonPlacement="below"
           actionButton={
-            <Button
-              onClick={() => router.push(getAddButtonRoute(activeTab))}
-              className="bg-blue-900 hover:bg-blue-800 text-white"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Add {activeTab === "adjusts" ? "Adjustment" : activeTab === "transferred" ? "Transfer" : activeTab === "received" ? "Receiving" : "Return"}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                onClick={() => {
+                  if (activeTab === "adjusts") {
+                    setShowAdjustmentModal(true)
+                  } else if (activeTab === "transferred") {
+                    setShowTransferModal(true)
+                  } else if (activeTab === "received") {
+                    setShowReceiveModal(true)
+                  } else if (activeTab === "returned") {
+                    setShowReturnModal(true)
+                  }
+                }}
+                className="bg-blue-900 hover:bg-blue-800 text-white"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                {activeTab === "adjusts"
+                  ? "Adjust Stock"
+                  : activeTab === "transferred"
+                  ? "Transfer Stock"
+                  : activeTab === "received"
+                  ? "Receive Stock"
+                  : "Return Stock"}
+              </Button>
+              <div className="relative">
+                <Button
+                  size="sm"
+                  onClick={() => setShowDatePicker(!showDatePicker)}
+                  className="bg-blue-900 hover:bg-blue-800 text-white gap-2"
+                >
+                  <Calendar className="h-4 w-4" />
+                  {startDate || endDate ? `${startDate} to ${endDate}` : "Date Range"}
+                </Button>
+
+                {showDatePicker && (
+                  <div className="absolute top-full right-0 mt-2 bg-white border border-gray-300 rounded-lg shadow-lg p-3 z-50 min-w-max">
+                    <div className="flex flex-col gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">From:</label>
+                        <Input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-700">To:</label>
+                        <Input
+                          type="date"
+                          value={endDate}
+                          onChange={(e) => setEndDate(e.target.value)}
+                          className="mt-1"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        {(startDate || endDate) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setStartDate('')
+                              setEndDate('')
+                            }}
+                            className="text-xs flex-1"
+                          >
+                            Clear
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          onClick={() => setShowDatePicker(false)}
+                          className="text-xs flex-1"
+                        >
+                          Done
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           }
         >
           {/* Stock Adjusts Tab */}
@@ -346,7 +1132,7 @@ export default function StockControlPage() {
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Adjustment History</h3>
                 <p className="text-sm text-gray-600">
-                  {adjustments.length} adjustment{adjustments.length !== 1 ? "s" : ""} found
+                  {filteredAdjustments.length} of {adjustments.length} adjustment{adjustments.length !== 1 ? "s" : ""} found
                 </p>
               </div>
               <div className="rounded-md border border-gray-300 bg-white">
@@ -369,14 +1155,14 @@ export default function StockControlPage() {
                           Loading adjustments...
                         </TableCell>
                       </TableRow>
-                    ) : adjustments.length === 0 ? (
+                    ) : filteredAdjustments.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-gray-600">
-                          No adjustments found
+                          {adjustments.length === 0 ? "No adjustments found" : "No adjustments in selected date range"}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      adjustments.map((adjustment) => (
+                      filteredAdjustments.map((adjustment) => (
                         <TableRow key={adjustment.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {adjustment.date
@@ -393,10 +1179,31 @@ export default function StockControlPage() {
                           </TableCell>
                           <TableCell>{adjustment.user_name}</TableCell>
                           <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" className="border-gray-300">
-                              <Eye className="h-4 w-4 mr-1" />
-                              View
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="border-gray-300">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleView(adjustment, "adjustment")}> 
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleEdit(adjustment, "adjustment")}>
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => handleDelete(adjustment, "adjustment")}
+                                  className="text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))
@@ -413,7 +1220,7 @@ export default function StockControlPage() {
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Transfer History</h3>
                 <p className="text-sm text-gray-600">
-                  {transfers.length} transfer{transfers.length !== 1 ? "s" : ""} found
+                  {filteredTransfers.length} of {transfers.length} transfer{transfers.length !== 1 ? "s" : ""} found
                 </p>
               </div>
               <div className="rounded-md border border-gray-300 bg-white">
@@ -426,6 +1233,7 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">To Outlet</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Quantity</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">User</TableHead>
                       <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -436,14 +1244,14 @@ export default function StockControlPage() {
                           Loading transfers...
                         </TableCell>
                       </TableRow>
-                    ) : transfers.length === 0 ? (
+                    ) : filteredTransfers.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-gray-600">
-                          No transfers found
+                          {transfers.length === 0 ? "No transfers found" : "No transfers in selected date range"}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      transfers.map((transfer) => (
+                      filteredTransfers.map((transfer) => (
                         <TableRow key={transfer.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {transfer.date
@@ -455,11 +1263,33 @@ export default function StockControlPage() {
                           <TableCell>{transfer.to_outlet_name}</TableCell>
                           <TableCell>{transfer.quantity}</TableCell>
                           <TableCell>{transfer.reason || "-"}</TableCell>
+                          <TableCell>{transfer.user_name || "System"}</TableCell>
                           <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" className="border-gray-300">
-                              <Eye className="h-4 w-4 mr-1" />
-                              View
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="border-gray-300">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleView(transfer, "transfer")}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleEdit(transfer, "transfer")}>
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => handleDelete(transfer, "transfer")}
+                                  className="text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))
@@ -476,7 +1306,7 @@ export default function StockControlPage() {
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Receiving History</h3>
                 <p className="text-sm text-gray-600">
-                  {receiving.length} receiving record{receiving.length !== 1 ? "s" : ""} found
+                  {filteredReceiving.length} of {receiving.length} receiving record{receiving.length !== 1 ? "s" : ""} found
                 </p>
               </div>
               <div className="rounded-md border border-gray-300 bg-white">
@@ -487,8 +1317,10 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Supplier</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Items</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Item Names</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Total Quantity</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">User</TableHead>
                       <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -499,14 +1331,14 @@ export default function StockControlPage() {
                           Loading receiving records...
                         </TableCell>
                       </TableRow>
-                    ) : receiving.length === 0 ? (
+                    ) : filteredReceiving.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-gray-600">
-                          No receiving records found
+                          {receiving.length === 0 ? "No receiving records found" : "No receiving records in selected date range"}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      receiving.map((rec) => (
+                      filteredReceiving.map((rec) => (
                         <TableRow key={rec.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {rec.date
@@ -516,13 +1348,41 @@ export default function StockControlPage() {
                           <TableCell>{rec.supplier}</TableCell>
                           <TableCell>{rec.outlet_name}</TableCell>
                           <TableCell>{rec.total_items}</TableCell>
+                          <TableCell>
+                            {rec.item_preview || "-"}
+                            {rec.item_more_count > 0 && (
+                              <span className="text-xs text-muted-foreground"> +{rec.item_more_count} more</span>
+                            )}
+                          </TableCell>
                           <TableCell>{rec.total_quantity}</TableCell>
                           <TableCell>{rec.reason || "-"}</TableCell>
+                          <TableCell>{rec.user_name || "System"}</TableCell>
                           <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" className="border-gray-300">
-                              <Eye className="h-4 w-4 mr-1" />
-                              View
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="border-gray-300">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleView(rec, "receiving")}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleEdit(rec, "receiving")}>
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => handleDelete(rec, "receiving")}
+                                  className="text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))
@@ -539,7 +1399,7 @@ export default function StockControlPage() {
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Return History</h3>
                 <p className="text-sm text-gray-600">
-                  {returns.length} return{returns.length !== 1 ? "s" : ""} found
+                  {filteredReturns.length} of {returns.length} return{returns.length !== 1 ? "s" : ""} found
                 </p>
               </div>
               <div className="rounded-md border border-gray-300 bg-white">
@@ -551,7 +1411,8 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Reference</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Items</TableHead>
-                      <TableHead className="text-gray-900 font-semibold">Status</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">User</TableHead>
                       <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -562,14 +1423,14 @@ export default function StockControlPage() {
                           Loading returns...
                         </TableCell>
                       </TableRow>
-                    ) : returns.length === 0 ? (
+                    ) : filteredReturns.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-8 text-gray-600">
-                          No returns found
+                          {returns.length === 0 ? "No returns found" : "No returns in selected date range"}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      returns.map((returnItem) => (
+                      filteredReturns.map((returnItem) => (
                         <TableRow key={returnItem.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {returnItem.created_at
@@ -584,21 +1445,59 @@ export default function StockControlPage() {
                           </TableCell>
                           <TableCell>{returnItem.return_number || "-"}</TableCell>
                           <TableCell>
-                            {returnItem.outlet?.name || 
-                             (returnItem.outlet_id ? outlets.find(o => o.id === returnItem.outlet_id)?.name : null) || 
+                            {returnItem.outlet_name || returnItem.outlet?.name || 
+                             (returnItem.outlet_id && typeof returnItem.outlet_id === 'string' ? 
+                               outlets.find(o => String(o.id) === returnItem.outlet_id)?.name : 
+                               outlets.find(o => o.id === returnItem.outlet_id)?.name
+                             ) || 
                              "N/A"}
                           </TableCell>
                           <TableCell>{returnItem.items?.length || 0}</TableCell>
-                          <TableCell>
-                            <Badge variant={returnItem.status === "completed" ? "default" : "secondary"}>
-                              {returnItem.status || "Pending"}
-                            </Badge>
-                          </TableCell>
+                          <TableCell>{returnItem.reason || "-"}</TableCell>
+                          <TableCell>{returnItem.user_name || "System"}</TableCell>
                           <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" className="border-gray-300">
-                              <Eye className="h-4 w-4 mr-1" />
-                              View
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm" className="border-gray-300">
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleView(returnItem, "return")}>
+                                  <Eye className="h-4 w-4 mr-2" />
+                                  View
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleEdit(returnItem, "return")}>
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                {returnItem.return_type === "supplier" && (
+                                  <>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleSupplierApprove(returnItem)}
+                                      disabled={returnItem.status !== "pending"}
+                                    >
+                                      Approve
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => handleSupplierComplete(returnItem)}
+                                      disabled={returnItem.status !== "approved"}
+                                    >
+                                      Mark Returned
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => handleDelete(returnItem, "return")}
+                                  className="text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))
@@ -610,6 +1509,97 @@ export default function StockControlPage() {
           </TabsContent>
         </FilterableTabs>
       </PageLayout>
+
+      <StockAdjustmentModal
+        open={showAdjustmentModal}
+        onOpenChange={setShowAdjustmentModal}
+        onSuccess={() => {
+          loadAdjustments()
+          setShowAdjustmentModal(false)
+        }}
+      />
+
+      <TransferStockModal
+        open={showTransferModal}
+        onOpenChange={setShowTransferModal}
+        onSuccess={() => {
+          loadTransfers()
+          setShowTransferModal(false)
+        }}
+      />
+
+      <ReceiveStockModal
+        open={showReceiveModal}
+        onOpenChange={setShowReceiveModal}
+        onSuccess={() => {
+          loadReceiving()
+          setShowReceiveModal(false)
+        }}
+      />
+
+      <NewReturnModal
+        open={showReturnModal}
+        onOpenChange={setShowReturnModal}
+        onReturnCreated={() => {
+          loadReturns()
+          setShowReturnModal(false)
+        }}
+      />
+
+      <Dialog
+        open={detailsDialogOpen}
+        onOpenChange={(open) => {
+          setDetailsDialogOpen(open)
+          if (!open) setDetailsPayload(null)
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {detailsPayload?.mode === "edit" ? "Edit" : "View"}{" "}
+              {detailsPayload?.type ?? "Item"}
+            </DialogTitle>
+            <DialogDescription>
+              {detailsPayload?.mode === "edit"
+                ? "Editing is not available yet. Review the item details below."
+                : "Item details"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-md border bg-muted/30 p-4">
+            {detailsPayload?.mode === "edit" ? renderEditContent() : renderDetailsContent()}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>
+              Close
+            </Button>
+            {detailsPayload?.mode === "edit" && isEditableType(detailsPayload?.type) && (
+              <Button onClick={handleSaveEdit} disabled={isSavingEdit}>
+                {isSavingEdit ? "Saving..." : "Save"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will remove the selected {pendingDelete?.type ?? "item"} from the
+              list.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingDelete(null)}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   )
 }

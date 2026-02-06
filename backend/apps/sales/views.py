@@ -5,10 +5,11 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
 from django.template import engines
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from .models import Sale, SaleItem, Receipt, ReceiptTemplate
 from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer
@@ -738,9 +739,22 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     
     def _generate_receipt_number(self, tenant):
         """Generate unique receipt number"""
-        prefix = tenant.name[:3].upper().replace(' ', '')
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        return f"{prefix}-{timestamp}"
+        # Numeric-only receipt numbers (no date/prefix). Use global max to keep uniqueness.
+        recent_numbers = Sale.objects.order_by('-created_at').values_list('receipt_number', flat=True)[:1000]
+        max_numeric = 0
+        for number in recent_numbers:
+            if number and str(number).isdigit():
+                max_numeric = max(max_numeric, int(number))
+
+        if max_numeric == 0:
+            max_id = Sale.objects.aggregate(max_id=Max('id')).get('max_id') or 0
+            max_numeric = max_id
+
+        next_number = max_numeric + 1
+        while Sale.objects.filter(receipt_number=str(next_number)).exists():
+            next_number += 1
+
+        return str(next_number)
     
     @action(detail=True, methods=['post'])
     def refund(self, request, pk=None):

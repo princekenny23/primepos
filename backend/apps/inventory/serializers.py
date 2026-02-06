@@ -35,31 +35,20 @@ class BatchSerializer(serializers.ModelSerializer):
 
 
 class StockMovementSerializer(serializers.ModelSerializer):
-    """Stock movement serializer with variation and batch support"""
+    """Stock movement serializer - UNITS ONLY ARCHITECTURE (no variations)"""
     batch = BatchSerializer(read_only=True)
     batch_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='batch', queryset=Batch.objects.all())
     product = ProductSerializer(read_only=True)
     product_name = serializers.SerializerMethodField()
-    # REMOVED: variation = ItemVariationSerializer(read_only=True)
-    variation_name = serializers.SerializerMethodField()
     product_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='product', queryset=Product.objects.all())
-    # REMOVED: variation_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='variation', queryset=ItemVariation.objects.all())
     user_name = serializers.SerializerMethodField()
     outlet_name = serializers.SerializerMethodField()
     
     def get_product_name(self, obj):
-        """Get product name from variation or product"""
-        if obj.variation:
-            return obj.variation.product.name
+        """Get product name"""
         if obj.product:
             return obj.product.name
         return "Unknown"
-    
-    def get_variation_name(self, obj):
-        """Get variation name if exists"""
-        if obj.variation:
-            return obj.variation.name
-        return None
     
     def get_user_name(self, obj):
         """Get user name safely, handling null users"""
@@ -90,75 +79,48 @@ class StockMovementSerializer(serializers.ModelSerializer):
         fields = ('id', 'tenant', 'batch', 'batch_id', 'product', 'product_id', 'product_name', 
                   'outlet', 'outlet_name', 'user', 'user_name', 
                   'movement_type', 'quantity', 'reason', 'reference_id', 'created_at')
-        read_only_fields = ('id', 'created_at', 'product_name', 'user_name', 'outlet_name')
+        read_only_fields = ('id', 'created_at', 'product_name', 'user_name', 'outlet_name', 'batch')
 
 
 class StockTakeItemSerializer(serializers.ModelSerializer):
-    """Stock take item serializer with variation support"""
+    """Stock take item serializer - UNITS ONLY ARCHITECTURE (no variations)"""
     product = ProductSerializer(read_only=True)
     product_name = serializers.SerializerMethodField()
-    # REMOVED: variation = ItemVariationSerializer(read_only=True)
-    variation_name = serializers.SerializerMethodField()
     product_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='product', queryset=Product.objects.all())
-    # REMOVED: variation_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='variation', queryset=ItemVariation.objects.all())
     
     def get_product_name(self, obj):
-        """Get product name from variation or product"""
-        if obj.variation:
-            return obj.variation.product.name
+        """Get product name"""
         if obj.product:
             return obj.product.name
         return "Unknown"
     
-    def get_variation_name(self, obj):
-        """Get variation name if exists"""
-        if obj.variation:
-            return obj.variation.name
-        return None
-    
     def validate(self, attrs):
-        """Ensure either product or variation is set"""
+        """Ensure product is set"""
         instance = getattr(self, 'instance', None)
-
-        # Allow partial updates: if instance exists, fall back to its product/variation
         product = attrs.get('product') or (instance.product if instance else None)
-        variation = attrs.get('variation') or (instance.variation if instance else None)
 
-        if not product and not variation:
-            raise serializers.ValidationError("Either product or variation must be set")
-        if product and variation:
-            raise serializers.ValidationError("Cannot set both product and variation. Use variation for new records.")
-
-        # Auto-set product from variation if needed
-        if variation and not product:
-            attrs['product'] = variation.product
+        if not product:
+            raise serializers.ValidationError("product is required")
 
         return attrs
     
     class Meta:
         model = StockTakeItem
-        fields = ('id', 'stock_take', 'product', 'product_id', 'product_name', 'variation', 'variation_id',
-                  'variation_name', 'expected_quantity', 'counted_quantity',
+        fields = ('id', 'stock_take', 'product', 'product_id', 'product_name', 
+                  'expected_quantity', 'counted_quantity',
                   'difference', 'notes', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'difference', 'product_name', 'variation_name', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'difference', 'product_name', 'created_at', 'updated_at')
 
 
 class LocationStockSerializer(serializers.ModelSerializer):
-    """Location stock serializer"""
-    # REMOVED: variation = ItemVariationSerializer(read_only=True)
-    # REMOVED: variation_id = serializers.PrimaryKeyRelatedField(write_only=True, source='variation', queryset=ItemVariation.objects.all())
+    """Location stock serializer - UNITS ONLY ARCHITECTURE (no variations)"""
     outlet_name = serializers.CharField(source='outlet.name', read_only=True)
-    product_name = serializers.SerializerMethodField()
-    
-    def get_product_name(self, obj):
-        """Get product name from variation"""
-        if obj.variation:
-            return obj.variation.product.name
-        return "Unknown"
+    product_name = serializers.CharField(source='product.name', read_only=True)
+    product_id = serializers.PrimaryKeyRelatedField(write_only=True, source='product', queryset=Product.objects.all(), required=False)
     
     class Meta:
         model = LocationStock
-        fields = ('id', 'tenant', 'variation', 'variation_id', 'outlet', 'outlet_name', 
+        fields = ('id', 'tenant', 'product', 'product_id', 'outlet', 'outlet_name', 
                   'quantity', 'product_name', 'updated_at')
         read_only_fields = ('id', 'tenant', 'updated_at', 'product_name', 'outlet_name')
 
@@ -166,11 +128,17 @@ class LocationStockSerializer(serializers.ModelSerializer):
 class StockTakeSerializer(serializers.ModelSerializer):
     """Stock take serializer"""
     items = StockTakeItemSerializer(many=True, read_only=True)
+    user_name = serializers.SerializerMethodField()
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return obj.user.name if hasattr(obj.user, 'name') else (obj.user.email if hasattr(obj.user, 'email') else str(obj.user))
+        return "System"
     
     class Meta:
         model = StockTake
-        fields = ('id', 'tenant', 'outlet', 'user', 'operating_date', 'status',
-                  'description', 'items', 'created_at', 'completed_at')
+        fields = ('id', 'tenant', 'outlet', 'user', 'user_name', 'operating_date', 'status',
+              'description', 'items', 'created_at', 'completed_at')
         read_only_fields = ('id', 'tenant', 'user', 'status', 'created_at', 'completed_at')
     
     def validate_outlet(self, value):

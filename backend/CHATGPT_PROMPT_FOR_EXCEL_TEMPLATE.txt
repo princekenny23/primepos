@@ -5,112 +5,151 @@ FILE REQUIREMENTS:
 - File Name: product_import_template.xlsx
 - Sheet Name: "Products"
 - Encoding: UTF-8
+- Architecture: UNITS ONLY (No variations/ItemVariation model)
 
-COLUMN STRUCTURE (11 columns in this exact order):
-1. Name (Required, Text, max 255 chars) - Example: "Coca Cola 500ml"
-2. Price (Required, Number, 2 decimals, min 0.01) - Example: 1500.00
-3. Stock (Optional, Integer, default 0) - Example: 100
-4. Unit (Optional, Text, default "pcs") - Valid values: pcs, kg, g, l, ml, box, pack
-5. SKU (Optional, Text, max 100 chars) - Leave empty for auto-generation
-6. Category (Optional, Text, max 255 chars) - Example: "Beverages"
-7. Barcode (Optional, Text, max 100 chars) - Example: "1234567890123"
-8. Cost (Optional, Number, 2 decimals, min 0) - Example: 1000.00
-9. Description (Optional, Text) - Example: "Carbonated soft drink"
-10. Low Stock Threshold (Optional, Integer, default 0) - Example: 10
-11. Is Active (Optional, Text, default "Yes") - Valid values: "Yes" or "No"
+COLUMN STRUCTURE (14 columns in this exact order):
+1. Product Name (Required, Text, max 255 chars) - Example: "Coca Cola 500ml"
+2. Retail Price (Required, Number, 2 decimals, min 0.01) - Example: 1500.00
+3. Unit Name (Optional, Text, default "pcs") - Example: "bottle", "case", "kg"
+4. Conversion Factor (Optional, Number, decimal, min 1.0) - Example: 12 (for case of 12 bottles)
+5. Wholesale Price (Optional, Number, 2 decimals) - Example: 1200.00
+6. SKU (Optional, Text, max 100 chars) - Leave empty for auto-generation
+7. Category (Optional, Text, max 255 chars) - Example: "Beverages"
+8. Barcode (Optional, Text, max 100 chars) - Example: "1234567890123"
+9. Cost (Optional, Number, 2 decimals, min 0) - Example: 1000.00
+10. Description (Optional, Text) - Example: "Carbonated soft drink"
+11. Low Stock Threshold (Optional, Integer, default 0) - Example: 10
+12. Initial Stock Qty (Optional, Integer, default 0) - Initial batch quantity to receive
+13. Batch Expiry Date (Optional, Date, format YYYY-MM-DD) - Example: "2026-08-04"
+14. Is Active (Optional, Text, default "Yes") - Valid values: "Yes" or "No"
 
 HEADER ROW (Row 1):
-- Column headers: Name | Price | Stock | Unit | SKU | Category | Barcode | Cost | Description | Low Stock Threshold | Is Active
+- Column headers: Product Name | Retail Price | Unit Name | Conversion Factor | Wholesale Price | SKU | Category | Barcode | Cost | Description | Low Stock Threshold | Initial Stock Qty | Batch Expiry Date | Is Active
 - Format: Bold text, light blue background (#D9E1F2), centered, with borders
 - Font size: 11pt
 
-SAMPLE DATA (Rows 2-6, 5 products):
+SAMPLE DATA (Rows 2-6, 5 products with units):
 
-Row 2:
-Name: "Coca Cola 500ml"
-Price: 1500.00
-Stock: 100
-Unit: "pcs"
+Row 2 (Single unit product):
+Product Name: "Coca Cola 500ml"
+Retail Price: 1500.00
+Unit Name: "bottle"
+Conversion Factor: 1.0
+Wholesale Price: 1200.00
 SKU: (empty)
 Category: "Beverages"
 Barcode: "1234567890123"
 Cost: 1000.00
-Description: "Carbonated soft drink"
+Description: "Carbonated soft drink 500ml"
 Low Stock Threshold: 10
+Initial Stock Qty: 100
+Batch Expiry Date: "2026-08-04"
 Is Active: "Yes"
 
-Row 3:
-Name: "Pizza Margherita"
-Price: 5000.00
-Stock: 50
-Unit: "pcs"
+Row 3 (Multi-unit product - case of 12):
+Product Name: "Coca Cola 500ml"
+Retail Price: 1500.00
+Unit Name: "case"
+Conversion Factor: 12.0
+Wholesale Price: 15000.00
+SKU: (empty)
+Category: "Beverages"
+Barcode: "1234567890124"
+Cost: 11000.00
+Description: "Case of 12 x 500ml bottles"
+Low Stock Threshold: 2
+Initial Stock Qty: 50
+Batch Expiry Date: "2026-08-04"
+Is Active: "Yes"
+
+Row 4:
+Product Name: "Pizza Margherita"
+Retail Price: 5000.00
+Unit Name: "pcs"
+Conversion Factor: 1.0
+Wholesale Price: 4000.00
 SKU: (empty)
 Category: "Main Dishes"
 Barcode: "9876543210987"
 Cost: 3000.00
 Description: "Classic pizza with tomato and mozzarella"
 Low Stock Threshold: 5
-Is Active: "Yes"
-
-Row 4:
-Name: "Caesar Salad"
-Price: 3000.00
-Stock: 30
-Unit: "pcs"
-SKU: (empty)
-Category: "Appetizers"
-Barcode: "5555555555555"
-Cost: 1500.00
-Description: "Fresh romaine lettuce with caesar dressing"
-Low Stock Threshold: 10
+Initial Stock Qty: 50
+Batch Expiry Date: "2026-02-15"
 Is Active: "Yes"
 
 Row 5:
-Name: "Chocolate Cake"
-Price: 2500.00
-Stock: 20
-Unit: "pcs"
+Product Name: "Flour - Bulk"
+Retail Price: 500.00
+Unit Name: "kg"
+Conversion Factor: 1.0
+Wholesale Price: 400.00
+SKU: (empty)
+Category: "Baking Supplies"
+Barcode: "5555555555555"
+Cost: 300.00
+Description: "All-purpose wheat flour per kilogram"
+Low Stock Threshold: 20
+Initial Stock Qty: 100
+Batch Expiry Date: "2026-12-31"
+Is Active: "Yes"
+
+Row 6:
+Product Name: "Chocolate Cake"
+Retail Price: 2500.00
+Unit Name: "pcs"
+Conversion Factor: 1.0
+Wholesale Price: 2000.00
 SKU: (empty)
 Category: "Desserts"
 Barcode: "1111111111111"
 Cost: 1200.00
-Description: "Rich chocolate layer cake"
+Description: "Rich chocolate layer cake (whole)"
 Low Stock Threshold: 5
-Is Active: "Yes"
-
-Row 6:
-Name: "French Fries"
-Price: 1500.00
-Stock: 200
-Unit: "pcs"
-SKU: (empty)
-Category: "Sides"
-Barcode: "2222222222222"
-Cost: 500.00
-Description: "Crispy golden fries"
-Low Stock Threshold: 50
+Initial Stock Qty: 20
+Batch Expiry Date: "2026-03-30"
 Is Active: "Yes"
 
 FORMATTING REQUIREMENTS:
 - Header row: Bold, light blue background (#D9E1F2), centered, borders on all cells
 - Data rows: Regular text, white background, borders on all cells
-- Column widths: Name (25), Price (12), Stock (10), Unit (8), SKU (15), Category (20), Barcode (15), Cost (12), Description (40), Low Stock Threshold (18), Is Active (12)
-- Number formatting: Price and Cost with 2 decimal places, Stock and Low Stock Threshold as integers
+- Column widths: Product Name (25), Retail Price (12), Unit Name (12), Conversion Factor (16), Wholesale Price (14), SKU (15), Category (20), Barcode (15), Cost (12), Description (40), Low Stock Threshold (18), Initial Stock Qty (14), Batch Expiry Date (15), Is Active (12)
+- Number formatting: 
+  * Retail Price, Wholesale Price, Cost: 2 decimal places
+  * Conversion Factor: 1-2 decimal places (allow 1.0, 12.0, 0.5)
+  * Stock/Threshold: Whole numbers (integers)
+  * Batch Expiry Date: YYYY-MM-DD format
 - Freeze header row (Row 1)
 
 DATA VALIDATION:
-- Price: Decimal, minimum 0.01
-- Stock: Whole number, minimum 0
-- Unit: List (pcs, kg, g, l, ml, box, pack)
-- Is Active: List (Yes, No)
+- Retail Price: Decimal, minimum 0.01
+- Wholesale Price: Decimal, minimum 0 (optional)
+- Conversion Factor: Decimal, minimum 0.01, maximum 999.99
+- Initial Stock Qty: Whole number, minimum 0
 - Low Stock Threshold: Whole number, minimum 0
+- Unit Name: List (pcs, bottle, case, kg, g, l, ml, box, pack, unit, each)
+- Batch Expiry Date: Date format YYYY-MM-DD (optional, future dates only)
+- Is Active: List (Yes, No)
 
-IMPORTANT NOTES:
-- SKU column should be empty in sample rows (for auto-generation)
+IMPORTANT NOTES - UNITS ONLY ARCHITECTURE:
+- NO VARIATION_NAME FIELD (ItemVariation model removed in migration 0016)
+- Each product can have MULTIPLE UNITS (e.g., bottle, case) via Unit Name + Conversion Factor
+- Unit Name: The unit of measurement for THIS row's product entry (bottle, kg, case, etc.)
+- Conversion Factor: How many base units = this unit (e.g., 12 bottles = 1 case)
+- If importing same product with different units, create separate rows with same Product Name
+- Batch Expiry Date creates a batch record automatically on import
+- If Batch Expiry Date is empty, batch will have no expiry (WARNING: stock never expires)
 - Categories will be auto-created if they don't exist
 - Column names are case-insensitive but use exact names for headers
 - First row must be headers
 - Maximum 1000 rows per import
+- SKU column should be empty in sample rows (for auto-generation)
+
+EXAMPLE: Multi-unit Product (Coca Cola)
+- Row 2: Unit="bottle", Conversion=1, Price=1500 (retail per bottle)
+- Row 3: Unit="case", Conversion=12, Price=15000 (retail per case of 12)
+- System will create: Product "Coca Cola 500ml" with ProductUnit records for bottle and case
+- Creating a sale with "case" unit will deduct 12x the base quantity
 
 Create the Excel file with these exact specifications and save it as product_import_template.xlsx
 

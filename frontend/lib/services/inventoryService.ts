@@ -15,6 +15,8 @@ export interface StockTransferData {
   to_outlet_id: string
   quantity: number
   reason?: string
+  is_return?: boolean
+  return_number?: string
 }
 
 export interface StockReceivingData {
@@ -101,6 +103,10 @@ export const inventoryService = {
     }
   },
 
+  async updateMovement(id: string, data: Record<string, any>): Promise<any> {
+    return api.patch(`${apiEndpoints.inventory.movements}${id}/`, data)
+  },
+
   // Stock Takes
   async getStockTakes(filters?: {
     outlet?: string
@@ -147,6 +153,10 @@ export const inventoryService = {
 
   async completeStockTake(id: string): Promise<any> {
     return api.post(apiEndpoints.inventory.stockTakeComplete(id))
+  },
+
+  async deleteStockTake(id: string): Promise<void> {
+    await api.delete(`${apiEndpoints.inventory.stockTakes}${id}/`)
   },
 }
 

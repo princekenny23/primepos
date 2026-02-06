@@ -116,15 +116,49 @@ export function DataExchangeModal({
         }
       })
 
-      const response = await fetch(config.apiEndpoints.import, {
+      // Get auth token from localStorage
+      const token = typeof window !== "undefined" 
+        ? localStorage.getItem("authToken") 
+        : null
+      
+      // Get current outlet ID if available
+      const outletId = typeof window !== "undefined"
+        ? localStorage.getItem("currentOutletId")
+        : null
+
+      // Build headers
+      const headers: Record<string, string> = {}
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`
+      }
+      if (outletId) {
+        headers["X-Outlet-ID"] = outletId
+      }
+
+      // Build full URL
+      const baseURL = process.env.NEXT_PUBLIC_API_URL || "https://primepos-5mf6.onrender.com/api/v1"
+      const importPath = config.apiEndpoints.import.startsWith("/api/v1") 
+        ? config.apiEndpoints.import.replace("/api/v1", "")
+        : config.apiEndpoints.import
+      const importUrl = `${baseURL}${importPath}`
+
+      console.log("Import URL debug:", {
+        baseURL,
+        configEndpoint: config.apiEndpoints.import,
+        importPath,
+        finalUrl: importUrl
+      })
+
+      const response = await fetch(importUrl, {
         method: "POST",
         body: formData,
+        headers,
       })
 
       const data = await response.json()
 
       if (!response.ok) {
-        throw new Error(data.error || "Import failed")
+        throw new Error(data.error || `Import failed: ${response.status}`)
       }
 
       setResult(data)
@@ -160,6 +194,16 @@ export function DataExchangeModal({
     setIsLoading(true)
 
     try {
+      // Get auth token from localStorage
+      const token = typeof window !== "undefined" 
+        ? localStorage.getItem("authToken") 
+        : null
+      
+      // Get current outlet ID if available
+      const outletId = typeof window !== "undefined"
+        ? localStorage.getItem("currentOutletId")
+        : null
+
       const params = new URLSearchParams({
         format,
       })
@@ -170,13 +214,36 @@ export function DataExchangeModal({
         }
       })
 
-      const response = await fetch(
-        `${config.apiEndpoints.export}?${params.toString()}`,
-        { method: "GET" }
-      )
+      // Build headers
+      const headers: Record<string, string> = {}
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`
+      }
+      if (outletId) {
+        headers["X-Outlet-ID"] = outletId
+      }
+
+      // Build full URL
+      const baseURL = process.env.NEXT_PUBLIC_API_URL || "https://primepos-5mf6.onrender.com/api/v1"
+      const exportPath = config.apiEndpoints.export.startsWith("/api/v1") 
+        ? config.apiEndpoints.export.replace("/api/v1", "")
+        : config.apiEndpoints.export
+      const exportUrl = `${baseURL}${exportPath}`
+
+      console.log("Export URL debug:", {
+        baseURL,
+        configEndpoint: config.apiEndpoints.export,
+        exportPath,
+        finalUrl: `${exportUrl}?${params.toString()}`
+      })
+
+      const response = await fetch(`${exportUrl}?${params.toString()}`, {
+        method: "GET",
+        headers,
+      })
 
       if (!response.ok) {
-        throw new Error("Export failed")
+        throw new Error(`Export failed: ${response.status}`)
       }
 
       const blob = await response.blob()
