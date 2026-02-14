@@ -186,7 +186,7 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />
@@ -198,7 +198,7 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
         </DialogHeader>
         
         <form onSubmit={handleSubmit}>
-          <div className="space-y-4 py-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="name">Full Name *</Label>
               <div className="relative">
@@ -269,7 +269,7 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
             </div>
 
             {!user && (
-              <>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
                 <div className="space-y-2">
                   <Label htmlFor="password">Password *</Label>
                   <Input
@@ -293,7 +293,7 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
                     required={!user}
                   />
                 </div>
-              </>
+              </div>
             )}
           </div>
 

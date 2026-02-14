@@ -121,6 +121,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'wholesale_price', 'wholesale_enabled', 'minimum_wholesale_quantity', 
             'stock', 'low_stock_threshold', 'unit', 'image', 'is_active', 
             'is_low_stock', 'selling_units', 'selling_units_data',
+            'track_expiration', 'manufacturing_date', 'expiry_date',
+            'preparation_time', 'volume_ml', 'alcohol_percentage',
             'created_at', 'updated_at'
         )
         read_only_fields = ('id', 'tenant', 'outlet', 'created_at', 'updated_at', 'price', 'cost_price', 'selling_units')

@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/table"
 import { ReportFilters } from "@/components/reports/report-filters"
 import { Package, ArrowUp, ArrowDown, RefreshCw } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { inventoryService } from "@/lib/services/inventoryService"
 import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
 import { PrintReportModal } from "@/components/modals/print-report-modal"
 import { ReportSettingsModal } from "@/components/modals/report-settings-modal"
@@ -24,22 +25,42 @@ export default function StockMovementReportsPage() {
   const [showPrint, setShowPrint] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
-  // Mock stock movement data
-  const stockMovements = [
-    { product: "Product A", type: "Sale", quantity: -25, date: "2024-01-15", balance: 45 },
-    { product: "Product A", type: "Purchase", quantity: 50, date: "2024-01-14", balance: 70 },
-    { product: "Product B", type: "Sale", quantity: -12, date: "2024-01-15", balance: 8 },
-    { product: "Product B", type: "Adjustment", quantity: -3, date: "2024-01-13", balance: 20 },
-    { product: "Product C", type: "Transfer In", quantity: 30, date: "2024-01-12", balance: 30 },
-    { product: "Product C", type: "Transfer Out", quantity: -15, date: "2024-01-11", balance: 0 },
-  ]
+  const [stockMovements, setStockMovements] = useState<any[]>([])
+  const [movementSummary, setMovementSummary] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  const movementSummary = [
-    { type: "Sales", count: 125, quantity: -1250 },
-    { type: "Purchases", count: 45, quantity: 5000 },
-    { type: "Adjustments", count: 12, quantity: -50 },
-    { type: "Transfers", count: 8, quantity: 200 },
-  ]
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      setIsLoading(true)
+      try {
+        const resp = await inventoryService.getMovements({ limit: 100 })
+        const list = Array.isArray(resp) ? resp : resp.results || []
+        if (!mounted) return
+        setStockMovements(list)
+
+        // derive summary by movement_type
+        const summaryMap: Record<string, { type: string; count: number; quantity: number }> = {}
+        for (const m of list) {
+          const type = String(m.movement_type || m.type || "unknown")
+          const qty = Number(m.quantity || m.qty || 0)
+          if (!summaryMap[type]) summaryMap[type] = { type, count: 0, quantity: 0 }
+          summaryMap[type].count += 1
+          summaryMap[type].quantity += qty
+        }
+        const summary = Object.values(summaryMap)
+        setMovementSummary(summary)
+      } catch (error) {
+        console.error("Failed to load stock movements:", error)
+        setStockMovements([])
+        setMovementSummary([])
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    load()
+    return () => { mounted = false }
+  }, [])
 
   return (
     <DashboardLayout>
@@ -62,7 +83,7 @@ export default function StockMovementReportsPage() {
               <RefreshCw className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">190</div>
+              <div className="text-2xl font-bold">{isLoading ? "—" : stockMovements.length}</div>
               <p className="text-xs text-muted-foreground">This period</p>
             </CardContent>
           </Card>
@@ -73,7 +94,7 @@ export default function StockMovementReportsPage() {
               <ArrowUp className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">+5,200</div>
+              <div className="text-2xl font-bold text-green-600">{isLoading ? "—" : movementSummary.filter(s => s.quantity > 0).reduce((sum, s) => sum + s.quantity, 0)}</div>
               <p className="text-xs text-muted-foreground">Units received</p>
             </CardContent>
           </Card>
@@ -84,7 +105,7 @@ export default function StockMovementReportsPage() {
               <ArrowDown className="h-4 w-4 text-red-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-red-600">-1,300</div>
+              <div className="text-2xl font-bold text-red-600">{isLoading ? "—" : movementSummary.filter(s => s.quantity < 0).reduce((sum, s) => sum + s.quantity, 0)}</div>
               <p className="text-xs text-muted-foreground">Units sold</p>
             </CardContent>
           </Card>
@@ -95,8 +116,8 @@ export default function StockMovementReportsPage() {
               <Package className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-blue-600">+3,900</div>
-              <p className="text-xs text-muted-foreground">Net increase</p>
+              <div className="text-2xl font-bold text-blue-600">{isLoading ? "—" : movementSummary.reduce((sum, s) => sum + s.quantity, 0)}</div>
+              <p className="text-xs text-muted-foreground">Net change</p>
             </CardContent>
           </Card>
         </div>
@@ -108,7 +129,7 @@ export default function StockMovementReportsPage() {
             <CardDescription>Stock movements by type</CardDescription>
           </CardHeader>
           <CardContent>
-            <Table>
+              <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Type</TableHead>
@@ -117,17 +138,25 @@ export default function StockMovementReportsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {movementSummary.map((item, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell className="font-medium">{item.type}</TableCell>
-                    <TableCell>{item.count}</TableCell>
-                    <TableCell className={`font-semibold ${
-                      item.quantity > 0 ? "text-green-600" : "text-red-600"
-                    }`}>
-                      {item.quantity > 0 ? "+" : ""}{item.quantity}
-                    </TableCell>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center py-8">Loading...</TableCell>
                   </TableRow>
-                ))}
+                ) : movementSummary.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-center py-8">No movement data</TableCell>
+                  </TableRow>
+                ) : (
+                  movementSummary.map((item, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell className="font-medium">{item.type}</TableCell>
+                      <TableCell>{item.count}</TableCell>
+                      <TableCell className={`font-semibold ${item.quantity > 0 ? "text-green-600" : "text-red-600"}`}>
+                        {item.quantity > 0 ? "+" : ""}{item.quantity}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

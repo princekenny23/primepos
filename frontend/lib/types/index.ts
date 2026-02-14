@@ -139,6 +139,18 @@ export interface Product {
   wholesaleEnabled?: boolean
   minimum_wholesale_quantity?: number
   minimumWholesaleQuantity?: number
+  
+  // Expiry tracking fields
+  track_expiration?: boolean
+  manufacturing_date?: string
+  expiry_date?: string
+  
+  // Restaurant-specific fields
+  preparation_time?: number
+  
+  // Bar-specific fields
+  volume_ml?: number
+  alcohol_percentage?: number
 }
 
 export interface Category {

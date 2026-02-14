@@ -19,7 +19,7 @@ class SaleItemSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'product', 'product_id', 'unit_id', 
             'product_name', 'unit_name', 
-            'quantity', 'quantity_in_base_units', 'price', 'total', 
+            'quantity', 'quantity_in_base_units', 'price', 'discount', 'total', 
             'kitchen_status', 'notes', 'prepared_at', 'created_at'
         )
         read_only_fields = ('id', 'product', 'product_name', 'unit_name', 'quantity_in_base_units', 'prepared_at', 'created_at')
@@ -69,10 +69,15 @@ class SaleSerializer(serializers.ModelSerializer):
             'subtotal', 'tax', 'discount', 'total', 'payment_method', 'status',
             'cash_received', 'change_given',
             'due_date', 'amount_paid', 'payment_status',
+            # breakdown fields (read-only)
+            'cash_amount', 'card_amount', 'mobile_amount', 'bank_transfer_amount', 'other_amount', 'tab_amount', 'credit_amount',
             'table', 'table_id', 'guests', 'priority',
             'notes', 'items', 'items_data', 'kitchen_tickets', 'created_at', 'updated_at'
         )
-        read_only_fields = ('id', 'tenant', 'user', 'receipt_number', 'due_date', 'amount_paid', 'payment_status', 'table', 'created_at', 'updated_at')
+        read_only_fields = (
+            'id', 'tenant', 'user', 'receipt_number', 'due_date', 'amount_paid', 'payment_status', 'table', 'created_at', 'updated_at',
+            'cash_amount', 'card_amount', 'mobile_amount', 'bank_transfer_amount', 'other_amount', 'tab_amount', 'credit_amount',
+        )
     
     def get_outlet_detail(self, obj):
         """Return outlet details as nested object"""
@@ -252,7 +257,7 @@ class SaleSerializer(serializers.ModelSerializer):
                     attrs[field] = value
                 except (InvalidOperation, ValueError, TypeError):
                     raise serializers.ValidationError({field: f"{field} must be a valid number"})
-        
+
         # Ensure payment_method is valid
         if 'payment_method' in attrs:
             valid_methods = ['cash', 'card', 'mobile', 'tab', 'credit']
@@ -260,8 +265,32 @@ class SaleSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "payment_method": f"Invalid payment method. Must be one of: {', '.join(valid_methods)}"
                 })
-        
+
         return attrs
+
+    def update(self, instance, validated_data):
+        """Assign FK ids for write-only fields before default update."""
+        outlet_id = validated_data.pop('outlet', None)
+        if outlet_id is not None:
+            instance.outlet_id = outlet_id
+
+        shift_id = validated_data.pop('shift', None)
+        if shift_id is not None:
+            instance.shift_id = shift_id
+
+        customer_id = validated_data.pop('customer', None)
+        if customer_id is not None:
+            instance.customer_id = customer_id
+
+        till_id = validated_data.pop('till', None)
+        if till_id is not None:
+            instance.till_id = till_id
+
+        table_id = validated_data.pop('table_id', None)
+        if table_id is not None:
+            instance.table_id = table_id
+
+        return super().update(instance, validated_data)
 
 
 class ReceiptSerializer(serializers.ModelSerializer):

@@ -1,4 +1,4 @@
-import { api, apiEndpoints } from "@/lib/api"
+import { api, apiEndpoints, apiConfig } from "@/lib/api"
 
 export interface SalesReportData {
   date: string
@@ -7,11 +7,25 @@ export interface SalesReportData {
   revenue: number
 }
 
+export interface SalesReportSummary {
+  total_sales: number
+  total_transactions: number
+  total_revenue: number
+  total_tax: number
+  total_discount: number
+  by_payment_method?: { payment_method: string; count: number; total: number }[]
+  top_products?: { product_name: string; total_quantity: number; total_revenue: number }[]
+}
+
 export interface ProductReportData {
-  name: string
-  sales: number
-  quantity: number
-  revenue: number
+  product_id: number
+  product_name: string
+  product_sku: string
+  category: string
+  total_sold: number
+  total_revenue: number
+  current_stock: number
+  is_low_stock: boolean
 }
 
 export interface ReportFilters {
@@ -30,6 +44,7 @@ export interface InventoryValuationItem {
   cost_price: number
   category: string
   category_id: number | null
+  low_stock_threshold: number
   open_qty: number
   open_value: number
   received_qty: number
@@ -85,7 +100,7 @@ export interface InventoryValuationReport {
 }
 
 export const reportService = {
-  async getSalesReport(filters?: ReportFilters): Promise<SalesReportData[]> {
+  async getSalesReport(filters?: ReportFilters): Promise<SalesReportSummary | null> {
     const params = new URLSearchParams()
     if (filters?.tenant) params.append("tenant", filters.tenant)
     if (filters?.outlet) params.append("outlet", filters.outlet)
@@ -94,11 +109,10 @@ export const reportService = {
     
     const query = params.toString()
     try {
-      const response = await api.get<any>(`${apiEndpoints.reports.sales}${query ? `?${query}` : ""}`)
-      return Array.isArray(response) ? response : response.results || []
+      return await api.get<any>(`${apiEndpoints.reports.sales}${query ? `?${query}` : ""}`)
     } catch (error) {
       console.error("Failed to fetch sales report:", error)
-      return []
+      return null
     }
   },
 
@@ -113,7 +127,9 @@ export const reportService = {
     const query = params.toString()
     try {
       const response = await api.get<any>(`${apiEndpoints.reports.products}${query ? `?${query}` : ""}`)
-      return Array.isArray(response) ? response : response.results || []
+      if (Array.isArray(response)) return response
+      if (response.products) return response.products
+      return response.results || []
     } catch (error) {
       console.error("Failed to fetch product report:", error)
       return []
@@ -130,7 +146,9 @@ export const reportService = {
     const query = params.toString()
     try {
       const response = await api.get<any>(`${apiEndpoints.reports.customers}${query ? `?${query}` : ""}`)
-      return Array.isArray(response) ? response : response.results || []
+      if (Array.isArray(response)) return response
+      if (response.customers) return response.customers
+      return response.results || []
     } catch (error) {
       console.error("Failed to fetch customer report:", error)
       return []
@@ -169,9 +187,12 @@ export const reportService = {
     }
   },
 
-  async getDailySales(date?: string): Promise<any> {
+  async getDailySales(filters?: { date?: string; start_date?: string; end_date?: string; outlet?: string }): Promise<any> {
     const params = new URLSearchParams()
-    if (date) params.append("date", date)
+    if (filters?.date) params.append("date", filters.date)
+    if (filters?.start_date) params.append("start_date", filters.start_date)
+    if (filters?.end_date) params.append("end_date", filters.end_date)
+    if (filters?.outlet) params.append("outlet", filters.outlet)
     
     const query = params.toString()
     try {
@@ -184,6 +205,7 @@ export const reportService = {
 
   async getTopProducts(filters?: ReportFilters, limit = 10): Promise<any> {
     const params = new URLSearchParams()
+    if (filters?.outlet) params.append("outlet", filters.outlet)
     if (filters?.start_date) params.append("start_date", filters.start_date)
     if (filters?.end_date) params.append("end_date", filters.end_date)
     params.append("limit", limit.toString())
@@ -212,6 +234,7 @@ export const reportService = {
 
   async getShiftSummary(filters?: ReportFilters): Promise<any> {
     const params = new URLSearchParams()
+    if (filters?.outlet) params.append("outlet", filters.outlet)
     if (filters?.start_date) params.append("start_date", filters.start_date)
     if (filters?.end_date) params.append("end_date", filters.end_date)
     
@@ -222,6 +245,55 @@ export const reportService = {
       console.error("Failed to fetch shift summary report:", error)
       return null
     }
+  },
+
+  async getExpensesReport(filters?: ReportFilters): Promise<any> {
+    const params = new URLSearchParams()
+    if (filters?.outlet) params.append("outlet", filters.outlet)
+    if (filters?.start_date) params.append("start_date", filters.start_date)
+    if (filters?.end_date) params.append("end_date", filters.end_date)
+
+    const query = params.toString()
+    try {
+      return await api.get<any>(`${apiEndpoints.reports.expenses}${query ? `?${query}` : ""}`)
+    } catch (error) {
+      console.error("Failed to fetch expenses report:", error)
+      return null
+    }
+  },
+
+  async downloadReport(endpoint: string, params?: Record<string, string>, filename?: string): Promise<void> {
+    if (typeof window === "undefined") return
+
+    const url = new URL(`${apiConfig.baseURL}${endpoint}`)
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          url.searchParams.append(key, value)
+        }
+      })
+    }
+
+    const token = localStorage.getItem("authToken")
+    const outletId = localStorage.getItem("currentOutletId")
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    if (outletId) headers["X-Outlet-ID"] = outletId
+
+    const response = await fetch(url.toString(), { headers })
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(text || `Failed to download report: ${response.status}`)
+    }
+
+    const blob = await response.blob()
+    const link = document.createElement("a")
+    link.href = window.URL.createObjectURL(blob)
+    link.download = filename || "report"
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(link.href)
   },
 }
 

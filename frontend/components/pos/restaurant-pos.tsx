@@ -15,6 +15,16 @@ import {
   DialogHeader, 
   DialogTitle 
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { 
   Select, 
@@ -31,9 +41,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { useBusinessStore } from "@/stores/businessStore"
 import { productService, categoryService } from "@/lib/services/productService"
-import { tabService, type Tab, type TabListItem, type BarTable, type TabItem } from "@/lib/services/barTabService"
+import { tabService, type Tab, type TabListItem, type TabItem } from "@/lib/services/barTabService"
+import { tableService, type Table as RestaurantTable } from "@/lib/services/tableService"
 import { saleService } from "@/lib/services/saleService"
 import { kitchenService } from "@/lib/services/kitchenService"
 import { formatCurrency } from "@/lib/utils/currency"
@@ -48,6 +67,7 @@ import {
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
 import { SaleDiscountModal, type SaleDiscount } from "@/components/modals/sale-discount-modal"
+import { RefundReturnModal } from "@/components/modals/refund-return-modal"
 import { TabFinderModal } from "@/components/modals/tab-finder-modal"
 import { AddEditCustomerModal } from "@/components/modals/add-edit-customer-modal"
 import { printReceipt } from "@/lib/print"
@@ -71,13 +91,11 @@ interface CartItem {
   total: number
 }
 
-const drinkCategories = [
-  { id: "all", name: "All", icon: Wine },
-  { id: "beer", name: "Beer", icon: Wine },
-  { id: "spirits", name: "Spirits", icon: Wine },
-  { id: "wine", name: "Wine", icon: Wine },
-  { id: "soft", name: "Soft Drinks", icon: Wine },
-]
+type HeldSale = {
+  id: string
+  cart: CartItem[]
+  timestamp: string
+}
 
 // ==================== Component ====================
 
@@ -113,8 +131,9 @@ export function RestaurantPOS() {
   const [isLoadingTabs, setIsLoadingTabs] = useState(true)
   
   // Tables
-  const [tables, setTables] = useState<BarTable[]>([])
+  const [tables, setTables] = useState<RestaurantTable[]>([])
   const [isLoadingTables, setIsLoadingTables] = useState(true)
+  const [tableLinkMap, setTableLinkMap] = useState<Record<string, string>>({})
 
   // Cart (for current tab or quick sale)
   const [cart, setCart] = useState<CartItem[]>([])
@@ -139,13 +158,19 @@ export function RestaurantPOS() {
   const [showTabHistory, setShowTabHistory] = useState(false)
   const [showTabFinder, setShowTabFinder] = useState(false)
 
+  const [showHoldSales, setShowHoldSales] = useState(false)
+  const [heldSales, setHeldSales] = useState<HeldSale[]>([])
+  const [pendingHoldId, setPendingHoldId] = useState<string | null>(null)
+  const [showReplaceCartConfirm, setShowReplaceCartConfirm] = useState(false)
+
   // Processing states
   const [isProcessing, setIsProcessing] = useState(false)
   const [isSendingToKitchen, setIsSendingToKitchen] = useState(false)
   const [activeView, setActiveView] = useState<"products" | "tables">("products")
+  const [isCategoryOpen, setIsCategoryOpen] = useState(true)
 
-  // Tab discount state (for SaleDiscountModal)
-  const [tabDiscount, setTabDiscount] = useState<SaleDiscount | null>(null)
+  // Sale discount state (retail-style flow)
+  const [saleDiscount, setSaleDiscount] = useState<SaleDiscount | null>(null)
 
   // Customer search
   const [customerSearchTerm, setCustomerSearchTerm] = useState("")
@@ -235,8 +260,22 @@ export function RestaurantPOS() {
     
     setIsLoadingTables(true)
     try {
-      const response = await tabService.listTables({ outlet: outlet.id, is_active: true })
-      setTables(response.results || [])
+      const [restaurantResponse, barResponse] = await Promise.all([
+        tableService.list({ outlet: String(outlet.id), is_active: true }),
+        tabService.listTables({ outlet: String(outlet.id), is_active: true }),
+      ])
+      const restaurantTables = restaurantResponse.results || []
+      const barTables = barResponse.results || []
+      setTables(restaurantTables)
+
+      const nextMap: Record<string, string> = {}
+      restaurantTables.forEach((table) => {
+        const match = barTables.find((barTable) => barTable.number === table.number)
+        if (match) {
+          nextMap[table.id] = match.id
+        }
+      })
+      setTableLinkMap(nextMap)
     } catch (error) {
       console.error("Failed to load tables:", error)
       setTables([])
@@ -245,10 +284,54 @@ export function RestaurantPOS() {
     }
   }, [outlet])
 
+  const resolveBarTableId = useCallback(
+    async (restaurantTableId?: string) => {
+      if (!restaurantTableId || !outlet) return undefined
+
+      const existing = tableLinkMap[restaurantTableId]
+      if (existing) return existing
+
+      const restaurantTable = tables.find((table) => table.id === restaurantTableId)
+      if (!restaurantTable) return undefined
+
+      try {
+        const barTables = await tabService.listTables({ outlet: String(outlet.id), is_active: true })
+        const match = (barTables.results || []).find(
+          (barTable) => barTable.number === restaurantTable.number
+        )
+        if (match) {
+          setTableLinkMap((prev) => ({ ...prev, [restaurantTableId]: match.id }))
+          return match.id
+        }
+
+        const created = await tabService.createTable({
+          outlet: String(outlet.id),
+          number: restaurantTable.number,
+          capacity: restaurantTable.capacity,
+          status: restaurantTable.status,
+          location: restaurantTable.location,
+          table_type: "table",
+          is_active: true,
+        })
+        setTableLinkMap((prev) => ({ ...prev, [restaurantTableId]: created.id }))
+        return created.id
+      } catch (error) {
+        console.error("Failed to resolve bar table:", error)
+        return undefined
+      }
+    },
+    [outlet, tableLinkMap, tables]
+  )
+
   const loadTabDetails = useCallback(async (tabId: string) => {
     try {
       const tab = await tabService.get(tabId)
       setCurrentTab(tab)
+      if (tab.discount && tab.discount > 0) {
+        setSaleDiscount({ type: "amount", value: tab.discount })
+      } else {
+        setSaleDiscount(null)
+      }
       
       // Sync cart with tab items
       const cartItems: CartItem[] = tab.items
@@ -303,65 +386,13 @@ export function RestaurantPOS() {
     return () => clearTimeout(timer)
   }, [customerSearchTerm, searchCustomers])
 
-  // ==================== Apply Discount ====================
-  const handleApplyDiscount = async (discount: SaleDiscount) => {
-    if (!currentTab) return
-    
-    setIsProcessing(true)
-    try {
-      const response = await tabService.applyDiscount(currentTab.id, {
-        discount: discount.value,
-        discount_type: discount.type === "percentage" ? "percentage" : "fixed",
-        reason: discount.reason,
-      })
-      
-      // Update local tab state with new discount
-      setCurrentTab(response.tab)
-      setTabDiscount(discount)
-      
-      toast({
-        title: "Discount Applied",
-        description: `${discount.type === "percentage" ? discount.value + "%" : formatCurrency(discount.value, currentBusiness)} discount applied`,
-      })
-    } catch (error: any) {
-      console.error("Failed to apply discount:", error)
-      toast({
-        title: "Error",
-        description: error.message || "Failed to apply discount",
-        variant: "destructive",
-      })
-    } finally {
-      setIsProcessing(false)
+  // ==================== Discount (Retail-style) ====================
+  const calculateDiscountAmount = (subtotal: number) => {
+    if (!saleDiscount) return 0
+    if (saleDiscount.type === "percentage") {
+      return (subtotal * saleDiscount.value) / 100
     }
-  }
-
-  const handleRemoveDiscount = async () => {
-    if (!currentTab) return
-    
-    setIsProcessing(true)
-    try {
-      const response = await tabService.applyDiscount(currentTab.id, {
-        discount: 0,
-        discount_type: "fixed",
-      })
-      
-      setCurrentTab(response.tab)
-      setTabDiscount(null)
-      
-      toast({
-        title: "Discount Removed",
-        description: "Discount has been removed from the tab",
-      })
-    } catch (error: any) {
-      console.error("Failed to remove discount:", error)
-      toast({
-        title: "Error",
-        description: error.message || "Failed to remove discount",
-        variant: "destructive",
-      })
-    } finally {
-      setIsProcessing(false)
-    }
+    return saleDiscount.value
   }
 
   // Initial load
@@ -422,6 +453,92 @@ export function RestaurantPOS() {
 
   const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0)
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
+  const discountAmount = calculateDiscountAmount(currentTab?.subtotal ?? cartSubtotal)
+
+  // ==================== Held Sales ====================
+
+  const getHoldTotal = (hold: HeldSale) =>
+    hold.cart.reduce((sum, item) => sum + (item.total ?? item.price * item.quantity), 0)
+
+  const getHoldItemCount = (hold: HeldSale) =>
+    hold.cart.reduce((sum, item) => sum + (item.quantity || 0), 0)
+
+  const loadHeldSales = () => {
+    if (typeof window === "undefined") return
+    const holds: HeldSale[] = []
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("pos_hold_")) {
+        try {
+          const data = JSON.parse(localStorage.getItem(key) || "{}")
+          if (data?.id && data?.cart) {
+            holds.push(data)
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+    }
+    holds.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    setHeldSales(holds)
+  }
+
+  useEffect(() => {
+    if (showHoldSales) {
+      loadHeldSales()
+    }
+  }, [showHoldSales])
+
+  const handleHoldSale = () => {
+    if (cart.length === 0) {
+      toast({ title: "Hold Sale", description: "Cart is empty." })
+      return
+    }
+    const holdId = `hold_${Date.now()}`
+    const holdData: HeldSale = {
+      id: holdId,
+      cart,
+      timestamp: new Date().toISOString(),
+    }
+    localStorage.setItem(`pos_hold_${holdId}`, JSON.stringify(holdData))
+    setCart([])
+    setSaleDiscount(null)
+    setSelectedCustomer(null)
+    toast({ title: "Hold Sale", description: `Sale held: ${holdId}` })
+    loadHeldSales()
+  }
+
+  const handleRetrieveHoldSale = (holdId: string) => {
+    if (cart.length > 0) {
+      setPendingHoldId(holdId)
+      setShowReplaceCartConfirm(true)
+      return
+    }
+    const holdData = localStorage.getItem(`pos_hold_${holdId}`)
+    if (holdData) {
+      const parsed = JSON.parse(holdData)
+      setCart(parsed.cart || [])
+      localStorage.removeItem(`pos_hold_${holdId}`)
+    }
+    setShowHoldSales(false)
+    toast({ title: "Hold Sale", description: "Hold sale retrieved." })
+  }
+
+  const handleConfirmReplaceCart = () => {
+    if (!pendingHoldId) return
+    handleRetrieveHoldSale(pendingHoldId)
+    setShowReplaceCartConfirm(false)
+    setPendingHoldId(null)
+  }
+
+  const handleCancelReplaceCart = () => {
+    setShowReplaceCartConfirm(false)
+    setPendingHoldId(null)
+  }
+
+  const handleDeleteHoldSale = (holdId: string) => {
+    localStorage.removeItem(`pos_hold_${holdId}`)
+    setHeldSales((prev) => prev.filter((hold) => hold.id !== holdId))
+  }
 
   // ==================== Tab Operations ====================
 
@@ -430,12 +547,20 @@ export function RestaurantPOS() {
     
     setIsProcessing(true)
     try {
+      const selectedTable = openTabForm.table_id
+        ? tables.find((table) => table.id === openTabForm.table_id)
+        : undefined
+      const barTableId = await resolveBarTableId(openTabForm.table_id || undefined)
+      const combinedNotes = [openTabForm.notes, selectedTable ? `Table ${selectedTable.number}` : undefined]
+        .filter(Boolean)
+        .join(" · ")
+
       const newTab = await tabService.open({
         customer_name: openTabForm.customer_name || undefined,
         customer_phone: openTabForm.customer_phone || undefined,
         customer_id: openTabForm.customer_id || undefined, // Link to CRM customer
-        table_id: openTabForm.table_id || undefined,
-        notes: openTabForm.notes || undefined,
+        table_id: barTableId,
+        notes: combinedNotes || undefined,
       })
       
       toast({
@@ -569,10 +694,13 @@ export function RestaurantPOS() {
   }
 
   const handleVoidItem = async (itemId: string) => {
-    if (!currentTab) return
-    
+    if (!currentTab) {
+      setCart(prev => prev.filter(ci => ci.id !== itemId))
+      return
+    }
+
     try {
-      await tabService.voidItem(currentTab.id, itemId, "Removed by bartender")
+      await tabService.voidItem(currentTab.id, itemId, "Removed by staff")
       await loadTabDetails(currentTab.id)
       
       toast({
@@ -584,6 +712,66 @@ export function RestaurantPOS() {
       toast({
         title: "Error",
         description: error.message || "Failed to remove item",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleVoidSale = async () => {
+    if (cart.length === 0) {
+      toast({ title: "Void Sale", description: "Cart is already empty." })
+      return
+    }
+
+    if (!outlet) {
+      toast({ title: "Void Sale", description: "Outlet not available.", variant: "destructive" })
+      return
+    }
+
+    try {
+      const subtotal = Math.round(cartSubtotal * 100) / 100
+      const discount = Math.round(discountAmount * 100) / 100
+      const tax = 0
+      const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+      const items_data = cart.map((item) => ({
+        product_id: item.productId,
+        unit_id: (item as any).unitId || undefined,
+        quantity: item.quantity,
+        price: Math.round(item.price * 100) / 100,
+        notes: item.notes || "",
+      }))
+
+      const voidSale = await saleService.void({
+        outlet: outlet.id,
+        shift: activeShift?.id,
+        customer: selectedCustomer?.id || undefined,
+        items_data,
+        subtotal,
+        tax,
+        discount,
+        total,
+        payment_method: "cash",
+        notes: "Voided sale from POS",
+      })
+
+      const receiptNumber =
+        voidSale._raw?.receipt_number ||
+        ("receipt_number" in voidSale ? (voidSale as any).receipt_number : undefined) ||
+        voidSale.id
+      toast({
+        title: "Void Sale",
+        description: `Sale voided. Receipt #${receiptNumber}`,
+      })
+
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+    } catch (error: any) {
+      console.error("Void sale error:", error)
+      toast({
+        title: "Void Sale Failed",
+        description: error.message || "Unable to record void sale.",
         variant: "destructive",
       })
     }
@@ -602,6 +790,9 @@ export function RestaurantPOS() {
       const result = await tabService.close(currentTab.id, {
         payment_method: method,
         cash_received: method === "cash" ? amount : undefined,
+        discount: discountAmount,
+        discount_type: saleDiscount?.type === "percentage" ? "percentage" : saleDiscount ? "fixed" : undefined,
+        discount_reason: saleDiscount?.reason,
         notes: "",
       })
       
@@ -621,7 +812,7 @@ export function RestaurantPOS() {
             total: i.total,
           })),
           subtotal: currentTab.subtotal,
-          discount: currentTab.discount,
+          discount: discountAmount,
           tax: currentTab.tax,
           total: result.sale.total,
           sale: result.sale,
@@ -636,7 +827,7 @@ export function RestaurantPOS() {
       setCloseTabForm({ payment_method: "cash", cash_received: "", notes: "" })
       setCurrentTab(null)
       setCart([])
-      setTabDiscount(null)
+      setSaleDiscount(null)
       
       await loadTabs()
       await loadTables()
@@ -676,6 +867,9 @@ export function RestaurantPOS() {
       const result = await tabService.close(currentTab.id, {
         payment_method: closeTabForm.payment_method,
         cash_received: cashReceived,
+        discount: discountAmount,
+        discount_type: saleDiscount?.type === "percentage" ? "percentage" : saleDiscount ? "fixed" : undefined,
+        discount_reason: saleDiscount?.reason,
         notes: closeTabForm.notes,
       })
       
@@ -695,7 +889,7 @@ export function RestaurantPOS() {
             total: i.total,
           })),
           subtotal: currentTab.subtotal,
-          discount: currentTab.discount,
+          discount: discountAmount,
           tax: currentTab.tax,
           total: result.sale.total,
           sale: result.sale,
@@ -709,7 +903,7 @@ export function RestaurantPOS() {
       setCloseTabForm({ payment_method: "cash", cash_received: "", notes: "" })
       setCurrentTab(null)
       setCart([])
-      setTabDiscount(null)
+      setSaleDiscount(null)
       
       await loadTabs()
       await loadTables()
@@ -730,8 +924,17 @@ export function RestaurantPOS() {
     
     setIsProcessing(true)
     try {
+      const resolvedTableId = transferTableId ? await resolveBarTableId(transferTableId) : null
+      if (transferTableId && !resolvedTableId) {
+        toast({
+          title: "Transfer failed",
+          description: "Unable to resolve destination table.",
+          variant: "destructive",
+        })
+        return
+      }
       await tabService.transfer(currentTab.id, {
-        to_table_id: transferTableId || null,
+        to_table_id: resolvedTableId || null,
       })
       
       toast({
@@ -819,14 +1022,18 @@ export function RestaurantPOS() {
 
     setIsSendingToKitchen(true)
     try {
-      const discountValue = currentTab ? currentTab.discount : 0
+      const discountValue = discountAmount
+
+      const discountType: "percentage" | "amount" | undefined = discountValue > 0
+        ? (saleDiscount?.type === "percentage" ? "percentage" : "amount")
+        : undefined
 
       const salePayload = {
         outlet: String(outlet.id),
         shift: activeShift?.id ? String(activeShift.id) : undefined,
         customer: currentTab?.customer ? String(currentTab.customer) : undefined,
         items_data: items.map((item) => ({
-          product_id: 'product' in item ? (item as TabItem).product : (item as CartItem).productId,
+          product_id: String('product' in item ? (item as TabItem).product : (item as CartItem).productId),
           quantity: item.quantity,
           price: item.price,
           notes: item.notes || undefined,
@@ -835,7 +1042,7 @@ export function RestaurantPOS() {
         subtotal: currentTab ? currentTab.subtotal : cartSubtotal,
         tax: currentTab ? currentTab.tax : 0,
         discount: discountValue,
-        discount_type: (discountValue > 0 ? "amount" : undefined) as "amount" | undefined,
+        discount_type: discountType,
         total: currentTab ? currentTab.total : cartSubtotal,
         payment_method: "tab" as const,
         table_id: currentTab?.table ? String(currentTab.table) : undefined,
@@ -843,6 +1050,10 @@ export function RestaurantPOS() {
       }
 
       const sale = await saleService.create(salePayload)
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sale-completed"))
+      }
 
       await kitchenService.create({
         sale_id: parseInt(String(sale.id), 10),
@@ -870,15 +1081,35 @@ export function RestaurantPOS() {
     await loadTabDetails(tabId)
   }
 
-  const handleSelectTable = async (table: BarTable) => {
-    if (table.current_tab_summary) {
-      // Table has a tab - load it
-      await loadTabDetails(table.current_tab_summary.id)
-    } else if (table.status === "available") {
-      // Open new tab for this table
+  const getTableStatus = useCallback(
+    (table: RestaurantTable) => {
+      const linkedBarTableId = tableLinkMap[table.id]
+      const hasActiveTab = linkedBarTableId ? tabs.some((tab) => tab.table === linkedBarTableId) : false
+      if (hasActiveTab) return "occupied" as const
+      return table.status
+    },
+    [tableLinkMap, tabs]
+  )
+
+  const handleSelectTable = async (table: RestaurantTable) => {
+    const linkedBarTableId = tableLinkMap[table.id]
+    const existingTab = linkedBarTableId ? tabs.find((tab) => tab.table === linkedBarTableId) : undefined
+    if (existingTab) {
+      await loadTabDetails(existingTab.id)
+      return
+    }
+
+    if (getTableStatus(table) === "available") {
       setOpenTabForm(prev => ({ ...prev, table_id: table.id }))
       setShowOpenTab(true)
+      return
     }
+
+    toast({
+      title: "Table unavailable",
+      description: "This table is currently not available.",
+      variant: "destructive",
+    })
   }
 
   const handleClearSelection = () => {
@@ -915,7 +1146,7 @@ export function RestaurantPOS() {
       {/* Header Bar - View Toggle + Open Tabs - FIXED */}
       <div className="border-b bg-card flex-shrink-0">
         <div className="px-3 py-2 flex items-center gap-3 overflow-x-auto">
-          {/* Drinks/Tables Toggle */}
+          {/* Menu/Tables Toggle */}
           <div className="flex bg-muted rounded-lg p-1 shrink-0">
             
             <Button
@@ -925,7 +1156,7 @@ export function RestaurantPOS() {
               className="rounded-md"
             >
               <Wine className="h-4 w-4 mr-2" />
-              Drinks
+              Menu
             </Button>
             <Button
               variant={activeView === "tables" ? "default" : "ghost"}
@@ -984,7 +1215,7 @@ export function RestaurantPOS() {
       </div>
 
       {/* Main Content - fills remaining space */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
         {/* Left Panel - Tables/Products */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
@@ -997,7 +1228,7 @@ export function RestaurantPOS() {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     ref={searchInputRef}
-                    placeholder="Search drinks by name, SKU, or barcode..."
+                    placeholder="Search menu by name, SKU, or barcode..."
                     className="pl-9"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -1049,87 +1280,106 @@ export function RestaurantPOS() {
                 </div>
               </div>
 
-              {/* Category Filter - FIXED */}
-              <div className="border-b p-3 flex-shrink-0">
-                {isLoadingCategories ? (
-                  <div className="grid grid-cols-5 gap-2">
-                    {Array.from({ length: 5 }).map((_, idx) => (
-                      <div key={idx} className="h-16 bg-muted animate-pulse rounded" />
-                    ))}
-                  </div>
-                ) : categoriesError ? (
-                  <div className="text-sm text-destructive">{categoriesError}</div>
-                ) : (
-                  <div className="grid grid-cols-5 gap-2">
+              <div className="flex-1 flex min-h-0 overflow-hidden">
+                {/* Category Sidebar */}
+                <div
+                  className={cn(
+                    "border-r bg-gray-200 overflow-y-auto flex-shrink-0 transition-all duration-200",
+                    isCategoryOpen ? "w-40 p-3" : "w-12 p-2"
+                  )}
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className={cn("text-xs font-medium", !isCategoryOpen && "sr-only")}>
+                      Categories
+                    </span>
                     <Button
-                      key="all"
-                      variant={selectedCategory === "all" ? "default" : "outline"}
-                      className={cn(
-                        "h-16 flex flex-col items-center justify-center gap-1",
-                        selectedCategory === "all" && "ring-2 ring-primary"
-                      )}
-                      onClick={() => setSelectedCategory("all")}
+                      variant="outline"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => setIsCategoryOpen((prev) => !prev)}
+                      title={isCategoryOpen ? "Collapse categories" : "Expand categories"}
                     >
-                      <Wine className="h-5 w-5" />
-                      <span className="text-xs font-medium">All</span>
+                      {isCategoryOpen ? "«" : "»"}
                     </Button>
-                    {categories.map(cat => (
+                  </div>
+                  {isLoadingCategories ? (
+                    <div className="space-y-2">
+                      {Array.from({ length: 6 }).map((_, idx) => (
+                        <div key={idx} className="h-10 bg-muted animate-pulse rounded" />
+                      ))}
+                    </div>
+                  ) : categoriesError ? (
+                    <div className="text-xs text-destructive">{categoriesError}</div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
                       <Button
-                        key={cat.id}
-                        variant={selectedCategory === cat.id ? "default" : "outline"}
+                        key="all"
+                        variant={selectedCategory === "all" ? "default" : "outline"}
                         className={cn(
-                          "h-16 flex flex-col items-center justify-center gap-1",
-                          selectedCategory === cat.id && "ring-2 ring-primary"
+                          "h-10 justify-start px-3 text-sm",
+                          selectedCategory === "all" && "ring-2 ring-primary",
+                          !isCategoryOpen && "hidden"
                         )}
-                        onClick={() => setSelectedCategory(cat.id)}
+                        onClick={() => setSelectedCategory("all")}
                       >
-                        <Wine className="h-5 w-5" />
-                        <span className="text-xs font-medium">{cat.name}</span>
+                        All
                       </Button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      {categories.map(cat => (
+                        <Button
+                          key={cat.id}
+                          variant={selectedCategory === cat.id ? "default" : "outline"}
+                          className={cn(
+                            "h-10 justify-start px-3 text-sm",
+                            selectedCategory === cat.id && "ring-2 ring-primary",
+                            !isCategoryOpen && "hidden"
+                          )}
+                          onClick={() => setSelectedCategory(cat.id)}
+                        >
+                          {cat.name}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-              {/* Product Grid - SCROLLABLE */}
-              <ScrollArea className="flex-1 min-h-0">
-                {isLoadingProducts ? (
-                  <div className="flex items-center justify-center h-64">
-                    <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : productsError ? (
-                  <div className="flex flex-col items-center justify-center h-64">
-                    <AlertCircle className="h-8 w-8 text-destructive mb-2" />
-                    <p className="text-destructive mb-2">{productsError}</p>
-                    <Button variant="outline" onClick={loadProducts}>Retry</Button>
-                  </div>
-                ) : filteredProducts.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-                    <Wine className="h-12 w-12 mb-2 opacity-50" />
-                    <p>No products found</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-2 p-4">
-                    {filteredProducts.map(product => (
-                      <Card 
-                        key={product.id} 
-                        className="cursor-pointer hover:shadow-md transition-shadow"
-                        onClick={() => handleAddItemToTab(product)}
-                      >
-                        <CardContent className="p-2">
-                          <div className="aspect-square bg-muted rounded-lg flex items-center justify-center mb-1">
-                            <Wine className="h-6 w-6 text-muted-foreground" />
-                          </div>
-                          <h3 className="font-medium text-xs truncate">{product.name}</h3>
-                          <p className="font-bold text-primary text-xs">
-                            {formatCurrency(product.price, currentBusiness)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </ScrollArea>
+                {/* Product Grid - SCROLLABLE */}
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-gray-200">
+                  <ScrollArea className="flex-1 min-h-0">
+                    {isLoadingProducts ? (
+                      <div className="flex items-center justify-center h-64">
+                        <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : productsError ? (
+                      <div className="flex flex-col items-center justify-center h-64">
+                        <AlertCircle className="h-8 w-8 text-destructive mb-2" />
+                        <p className="text-destructive mb-2">{productsError}</p>
+                        <Button variant="outline" onClick={loadProducts}>Retry</Button>
+                      </div>
+                    ) : filteredProducts.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                        <Wine className="h-12 w-12 mb-2 opacity-50" />
+                        <p>No products found</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-3 p-5">
+                        {filteredProducts.map(product => (
+                          <Card
+                            key={product.id}
+                            className="cursor-pointer hover:shadow-md transition-shadow border border-muted"
+                            onClick={() => handleAddItemToTab(product)}
+                          >
+                            <CardContent className="p-3">
+                              <div className="flex flex-col gap-1">
+                                <h3 className="text-sm leading-tight whitespace-normal break-normal">{product.name}</h3>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1166,37 +1416,42 @@ export function RestaurantPOS() {
                   <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
                     <Table2 className="h-12 w-12 mb-2 opacity-50" />
                     <p>No tables configured</p>
-                    <p className="text-xs">Add tables in Bar Settings</p>
+                    <p className="text-xs">Add tables in Table Management</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                    {tables.map(table => (
-                      <Card
-                        key={table.id}
-                        className={cn(
-                          "cursor-pointer transition-all hover:scale-105 hover:shadow-md",
-                          table.status === "available" && "border-green-500 bg-green-50 dark:bg-green-950",
-                          table.status === "occupied" && "border-red-500 bg-red-50 dark:bg-red-950",
-                          table.status === "reserved" && "border-yellow-500 bg-yellow-50 dark:bg-yellow-950",
-                          table.status === "out_of_service" && "border-gray-400 bg-gray-100 dark:bg-gray-900 opacity-50"
-                        )}
-                        onClick={() => handleSelectTable(table)}
-                      >
-                        <CardContent className="p-3 text-center">
-                          <Table2 className="h-8 w-8 mx-auto mb-1 opacity-70" />
-                          <p className="font-bold text-sm">{table.number}</p>
-                          <p className="text-xs text-muted-foreground capitalize">{table.status.replace('_', ' ')}</p>
-                          {table.current_tab_summary && (
-                            <>
-                              <p className="text-xs truncate mt-1">{table.current_tab_summary.customer_name}</p>
-                              <p className="text-sm font-bold text-primary">
-                                {formatCurrency(table.current_tab_summary.total, currentBusiness)}
-                              </p>
-                            </>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                    {tables.map(table => {
+                      const linkedBarTableId = tableLinkMap[table.id]
+                      const activeTab = linkedBarTableId ? tabs.find((tab) => tab.table === linkedBarTableId) : undefined
+                      const displayStatus = getTableStatus(table)
+                      return (
+                        <Card
+                          key={table.id}
+                          className={cn(
+                            "cursor-pointer transition-all hover:scale-105 hover:shadow-md",
+                            displayStatus === "available" && "border-green-500 bg-green-50 dark:bg-green-950",
+                            displayStatus === "occupied" && "border-red-500 bg-red-50 dark:bg-red-950",
+                            displayStatus === "reserved" && "border-yellow-500 bg-yellow-50 dark:bg-yellow-950",
+                            displayStatus === "out_of_service" && "border-gray-400 bg-gray-100 dark:bg-gray-900 opacity-50"
                           )}
-                        </CardContent>
-                      </Card>
-                    ))}
+                          onClick={() => handleSelectTable(table)}
+                        >
+                          <CardContent className="p-3 text-center">
+                            <Table2 className="h-8 w-8 mx-auto mb-1 opacity-70" />
+                            <p className="font-bold text-sm">{table.number}</p>
+                            <p className="text-xs text-muted-foreground capitalize">{displayStatus.replace('_', ' ')}</p>
+                            {activeTab && (
+                              <>
+                                <p className="text-xs truncate mt-1">{activeTab.customer_name}</p>
+                                <p className="text-sm font-bold text-primary">
+                                  {formatCurrency(activeTab.total, currentBusiness)}
+                                </p>
+                              </>
+                            )}
+                          </CardContent>
+                        </Card>
+                      )
+                    })}
                   </div>
                 )}
                 </div>
@@ -1206,7 +1461,7 @@ export function RestaurantPOS() {
         </div>
 
         {/* Right Panel - Cart - Fixed layout, only cart items scroll */}
-        <div className="w-96 border-l bg-card flex flex-col min-h-0 overflow-hidden">
+        <div className="flex-1 lg:flex-none w-full lg:w-[520px] border-t lg:border-t-0 lg:border-l bg-card flex flex-col min-h-0 overflow-hidden">
           {/* Tab Header */}
           <div className="p-3 border-b flex-shrink-0">
             {currentTab ? (
@@ -1231,56 +1486,68 @@ export function RestaurantPOS() {
               <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
                 <Wine className="h-10 w-10 mb-2 opacity-50" />
                 <p className="text-sm">
-                  {currentTab ? "Add drinks to this tab" : "Add drinks for quick sale"}
+                  {currentTab ? "Add menu items to this tab" : "Add menu items for quick sale"}
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {cart.map(item => (
-                  <Card key={item.id} className="border rounded bg-background">
-                    <CardContent className="p-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate" title={item.name}>{item.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatCurrency(item.price, currentBusiness)} each
-                          </p>
-                          <div className="mt-2 inline-flex items-center gap-2 rounded-md border px-2 py-1 bg-muted/50">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-xs"
-                              onClick={() => handleDecrementItem(item)}
-                            >
-                              -
-                            </Button>
-                            <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-xs"
-                              onClick={() => handleIncrementItem(item)}
-                            >
-                              +
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold text-sm whitespace-nowrap">{formatCurrency(item.total, currentBusiness)}</p>
+              <Table>
+                <TableHeader className="sticky top-0 bg-muted/50">
+                  <TableRow className="border-b">
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold">Product</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-16">Price</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-12">Qty</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-20">Subtotal</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-center w-8"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {cart.map(item => (
+                    <TableRow key={item.id} className="border-b hover:bg-muted/40 h-10">
+                      <TableCell className="px-2 py-1 text-xs font-medium truncate" title={item.name}>
+                        {item.name}
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-xs text-right">
+                        {formatCurrency(item.price, currentBusiness)}
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-right">
+                        <div className="flex items-center justify-end gap-1">
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
-                            className="h-6 px-2 text-xs text-destructive"
-                            onClick={() => handleVoidItem(item.id)}
+                            className="h-5 w-5 p-0"
+                            onClick={() => handleDecrementItem(item)}
+                            disabled={item.quantity <= 1}
                           >
-                            Remove
+                            −
+                          </Button>
+                          <span className="text-xs font-medium w-6 text-center">{item.quantity}</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-5 w-5 p-0"
+                            onClick={() => handleIncrementItem(item)}
+                          >
+                            +
                           </Button>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-xs text-right font-semibold">
+                        {formatCurrency(item.total, currentBusiness)}
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-5 w-5 p-0"
+                          onClick={() => handleVoidItem(item.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
             </div>
           </ScrollArea>
@@ -1291,10 +1558,10 @@ export function RestaurantPOS() {
               <span>Items</span>
               <span>{cartItemCount}</span>
             </div>
-            {currentTab && (currentTab.discount ?? 0) > 0 && (
+            {discountAmount > 0 && (
               <div className="flex justify-between text-sm text-green-600">
                 <span>Discount</span>
-                <span>-{formatCurrency(currentTab.discount ?? 0, currentBusiness)}</span>
+                <span>-{formatCurrency(discountAmount, currentBusiness)}</span>
               </div>
             )}
             <div className="flex justify-between font-bold text-xl">
@@ -1314,7 +1581,7 @@ export function RestaurantPOS() {
             {/* Main Buttons */}
             <div className="flex gap-2">
               <Button
-                className="flex-1 h-14 text-lg bg-green-600 hover:bg-green-700"
+                className="flex-1 h-14 text-lg bg-blue-900 hover:bg-blue-800"
                 onClick={() => setShowPaymentModal(true)}
                 disabled={cart.length === 0}
               >
@@ -1345,36 +1612,29 @@ export function RestaurantPOS() {
                     <MoreHorizontal className="h-5 w-5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuContent align="end" className="w-40">
                   <DropdownMenuItem disabled={cart.length === 0} onClick={() => setShowDiscountModal(true)}>
-                    <Percent className="h-4 w-4 mr-2" />
-                    Apply Discount
+                    Discount
                   </DropdownMenuItem>
-                  {currentTab && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => setShowTransferTab(true)}>
-                        <ArrowRightLeft className="h-4 w-4 mr-2" />
-                        Transfer Tab
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setShowMergeTabs(true)}>
-                        <Merge className="h-4 w-4 mr-2" />
-                        Merge Tabs
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setShowSplitTab(true)}>
-                        <Split className="h-4 w-4 mr-2" />
-                        Split Tab
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                    </>
-                  )}
-                  <DropdownMenuItem disabled={cart.length === 0} onClick={() => setCart([])}>
-                    <X className="h-4 w-4 mr-2" />
-                    Clear Cart
+                  <DropdownMenuItem disabled={cart.length === 0} onClick={() => setShowRefundModal(true)}>
+                    Refund / Return
                   </DropdownMenuItem>
-                  <DropdownMenuItem disabled={cart.length === 0} onClick={() => setShowPaymentModal(true)}>
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    Close & Pay
+                  <DropdownMenuItem
+                    disabled={cart.length === 0}
+                    onClick={handleHoldSale}
+                  >
+                    Hold Sale
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setShowHoldSales(true)}
+                  >
+                    Retrieve Hold
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowCloseRegister(true)}>
+                    Close Register
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={cart.length === 0} onClick={handleVoidSale} className="text-red-600">
+                    Void Sale
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1569,9 +1829,9 @@ export function RestaurantPOS() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Walk-up (no table)</SelectItem>
-                  {tables.filter(t => t.status === "available").map(table => (
+                  {tables.filter(t => getTableStatus(t) === "available").map(table => (
                     <SelectItem key={table.id} value={table.id}>
-                      {table.number} - {table.location || table.table_type}
+                      {table.number} - {table.location || "Table"}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1650,10 +1910,10 @@ export function RestaurantPOS() {
             )}
 
             {/* Show applied discount info */}
-            {currentTab && currentTab.discount > 0 && (
+            {discountAmount > 0 && (
               <div className="p-2 bg-green-50 dark:bg-green-950 rounded-lg text-sm">
                 <span className="text-green-600 dark:text-green-400">
-                  Discount applied: {formatCurrency(currentTab.discount, currentBusiness)}
+                  Discount applied: {formatCurrency(discountAmount, currentBusiness)}
                 </span>
               </div>
             )}
@@ -1686,10 +1946,10 @@ export function RestaurantPOS() {
               <SelectContent>
                 <SelectItem value="none">Walk-up (no table)</SelectItem>
                 {tables
-                  .filter(t => t.status === "available" && t.id !== currentTab?.table)
+                  .filter(t => getTableStatus(t) === "available" && tableLinkMap[t.id] !== currentTab?.table)
                   .map(table => (
                     <SelectItem key={table.id} value={table.id}>
-                      {table.number} - {table.location || table.table_type}
+                      {table.number} - {table.location || "Table"}
                     </SelectItem>
                   ))}
               </SelectContent>
@@ -1963,70 +2223,94 @@ export function RestaurantPOS() {
           open={showDiscountModal}
           onOpenChange={setShowDiscountModal}
           subtotal={currentTab?.subtotal || cartSubtotal}
-          currentDiscount={tabDiscount}
+          currentDiscount={saleDiscount}
           business={currentBusiness}
-          onApply={handleApplyDiscount}
-          onRemove={handleRemoveDiscount}
+          onApply={(discount) => setSaleDiscount(discount)}
+          onRemove={() => setSaleDiscount(null)}
         />
       )}
 
       {/* Refund Modal */}
-      <Dialog open={showRefundModal} onOpenChange={setShowRefundModal}>
-        <DialogContent>
+      <RefundReturnModal
+        open={showRefundModal}
+        onOpenChange={setShowRefundModal}
+      />
+
+      <Dialog open={showHoldSales} onOpenChange={setShowHoldSales}>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-600">
-              <ShieldAlert className="h-5 w-5" />
-              Process Refund
-            </DialogTitle>
-            <DialogDescription>
-              This action requires manager authorization
-            </DialogDescription>
+            <DialogTitle>Held Sales</DialogTitle>
+            <DialogDescription>Select a held sale to retrieve.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="bg-red-50 dark:bg-red-950 p-4 rounded-lg">
-              <p className="text-sm text-red-600 dark:text-red-400">
-                ⚠️ Refunds are logged and require manager PIN approval
-              </p>
+
+          {heldSales.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No held sales found.</div>
+          ) : (
+            <div className="rounded-md border border-gray-200 overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="text-xs font-semibold">Hold ID</TableHead>
+                    <TableHead className="text-xs font-semibold">Items</TableHead>
+                    <TableHead className="text-xs font-semibold">Total</TableHead>
+                    <TableHead className="text-xs font-semibold">Time</TableHead>
+                    <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {heldSales.map((hold) => (
+                    <TableRow key={hold.id}>
+                      <TableCell className="text-xs">{hold.id}</TableCell>
+                      <TableCell className="text-xs">{getHoldItemCount(hold)}</TableCell>
+                      <TableCell className="text-xs">
+                        {formatCurrency(getHoldTotal(hold), currentBusiness)}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {new Date(hold.timestamp).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button size="sm" onClick={() => handleRetrieveHoldSale(hold.id)}>
+                            Load
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleDeleteHoldSale(hold.id)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-            <div>
-              <Label>Receipt Number</Label>
-              <Input placeholder="Enter receipt number to refund" />
-            </div>
-            <div>
-              <Label>Refund Type</Label>
-              <Select defaultValue="full">
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="full">Full Refund</SelectItem>
-                  <SelectItem value="partial">Partial Refund</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Manager PIN</Label>
-              <Input type="password" placeholder="Enter manager PIN" />
-            </div>
-            <div>
-              <Label>Reason</Label>
-              <Input placeholder="Reason for refund (required)" />
-            </div>
-          </div>
+          )}
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRefundModal(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => {
-              toast({
-                title: "Refund Processed",
-                description: "Refund has been processed successfully",
-              })
-              setShowRefundModal(false)
-            }}>
-              Process Refund
+            <Button variant="outline" onClick={() => setShowHoldSales(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={showReplaceCartConfirm} onOpenChange={setShowReplaceCartConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace Current Cart?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Retrieving a held sale will replace the current cart. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelReplaceCart}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmReplaceCart}>
+              Continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Tab History Modal */}
       <Dialog open={showTabHistory} onOpenChange={setShowTabHistory}>
@@ -2120,10 +2404,10 @@ export function RestaurantPOS() {
                       <span>Subtotal:</span>
                       <span>{formatCurrency(currentTab.subtotal, currentBusiness)}</span>
                     </div>
-                    {currentTab.discount > 0 && (
+                    {discountAmount > 0 && (
                       <div className="flex justify-between text-green-600">
                         <span>Discount:</span>
-                        <span>-{formatCurrency(currentTab.discount, currentBusiness)}</span>
+                        <span>-{formatCurrency(discountAmount, currentBusiness)}</span>
                       </div>
                     )}
                     {currentTab.tax > 0 && (

@@ -64,15 +64,37 @@ export default function ProductsPage() {
 
   useBarcodeScanner({
     onScan: async (code) => {
-      // Open create product modal prefilled with scanned barcode
-      setInitialBarcode(code)
-      setShowAddProduct(true)
-    }
-  });
+      const term = String(code || "").trim()
+      if (!term) return
+
+      try {
+        const { products: matchedProducts } = await productService.lookup(term)
+        if (matchedProducts && matchedProducts.length > 0) {
+          setInitialBarcode(undefined)
+          setSelectedProduct(matchedProducts[0])
+          setShowAddProduct(true)
+          return
+        }
+
+        setSelectedProduct(null)
+        setInitialBarcode(term)
+        setShowAddProduct(true)
+      } catch (error: any) {
+        console.error("Barcode lookup failed:", error)
+        toast({
+          title: "Scan Error",
+          description: error?.message || "Failed to lookup barcode",
+          variant: "destructive",
+        })
+      }
+    },
+  })
 
   const [searchTerm, setSearchTerm] = useState("")
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
   const [activeTab, setActiveTab] = useState("all")
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 15
 
   const [products, setProducts] = useState<any[]>([])
   const [categories, setCategories] = useState<any[]>([])
@@ -85,7 +107,7 @@ export default function ProductsPage() {
   const [productToDelete, setProductToDelete] = useState<any>(null)
   const [showOrderModal, setShowOrderModal] = useState(false)
   const [productToOrder, setProductToOrder] = useState<any>(null)
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { toast } = useToast()
   
   // Determine business type for conditional rendering
@@ -136,11 +158,24 @@ export default function ProductsPage() {
       setIsLoading(true)
     }
     try {
-      const [productsResponse, categoriesResponse] = await Promise.all([
-        productService.list({ is_active: true }),
-        categoryService.list(),
-      ])
-      setProducts(Array.isArray(productsResponse) ? productsResponse : productsResponse.results || [])
+      const categoriesPromise = categoryService.list()
+      const allProducts: any[] = []
+      let page = 1
+      let next: string | undefined = undefined
+
+      do {
+        const response = await productService.list({
+          is_active: true,
+          page,
+          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+        })
+        allProducts.push(...(response.results || []))
+        next = response.next
+        page += 1
+      } while (next)
+
+      const categoriesResponse = await categoriesPromise
+      setProducts(allProducts)
       setCategories(Array.isArray(categoriesResponse) ? categoriesResponse : categoriesResponse || [])
     } catch (error) {
       console.error("Failed to load products:", error)
@@ -155,7 +190,7 @@ export default function ProductsPage() {
       setIsLoading(false)
       setIsAutoRefreshing(false)
     }
-  }, [currentBusiness, toast])
+  }, [currentBusiness, currentOutlet, toast])
 
   useEffect(() => {
     loadData(false)
@@ -312,6 +347,53 @@ export default function ProductsPage() {
     return baseFilteredProducts
   }, [baseFilteredProducts, activeTab])
 
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize))
+  const paginatedProducts = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize
+    return filteredProducts.slice(startIndex, startIndex + pageSize)
+  }, [filteredProducts, currentPage, pageSize])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [activeTab, searchTerm, categoryFilter])
+
+  useEffect(() => {
+    setCurrentPage((prev) => Math.min(prev, totalPages))
+  }, [totalPages])
+
+  const renderPagination = () => {
+    if (filteredProducts.length <= pageSize) return null
+
+    const startIndex = (currentPage - 1) * pageSize + 1
+    const endIndex = Math.min(currentPage * pageSize, filteredProducts.length)
+
+    return (
+      <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
+        <p className="text-sm text-gray-600">
+          Showing {startIndex}-{endIndex} of {filteredProducts.length}
+        </p>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   // Calculate stats for tabs
   const stats = useMemo(() => {
     const allCount = baseFilteredProducts.length
@@ -425,10 +507,10 @@ export default function ProductsPage() {
           >
 
             {/* Button Toolbar */}
-            <div className="px-6 py-3 border-b border-gray-300 flex gap-3">
+            <div className="px-6 py-3 border-b border-gray-300 flex gap-3 justify-end">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                  <Button className="bg-blue-900 hover:bg-blue-800 text-white">
                     <Upload className="mr-2 h-4 w-4" />
                     Import / Export
                   </Button>
@@ -445,7 +527,7 @@ export default function ProductsPage() {
                 </DropdownMenuContent>
               </DropdownMenu>
               <Link href="/dashboard/inventory/products/categories">
-                <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                <Button className="bg-blue-900 hover:bg-blue-800 text-white">
                   <Folder className="mr-2 h-4 w-4" />
                   Categories
                 </Button>
@@ -455,7 +537,7 @@ export default function ProductsPage() {
                   setSelectedProduct(null)
                   setShowAddProduct(true)
                 }}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-blue-900 hover:bg-blue-800 text-white"
               >
                 <Plus className="mr-2 h-4 w-4" />
                 Add Product
@@ -549,7 +631,7 @@ export default function ProductsPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredProducts.map((product) => {
+                        {paginatedProducts.map((product) => {
                   const status = getProductStatus(product)
                   const categoryName = product.category?.name || (product.categoryId ? categories.find(c => c.id === product.categoryId)?.name : "N/A")
                   const businessFields = parseBusinessFields(product)
@@ -656,6 +738,7 @@ export default function ProductsPage() {
                     })}
                       </TableBody>
                     </Table>
+                    {renderPagination()}
                   </div>
                 )}
                 </div>
@@ -702,7 +785,7 @@ export default function ProductsPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredProducts.map((product) => {
+                      paginatedProducts.map((product) => {
                         const status = getProductStatus(product)
                         const categoryName = product.category?.name || (product.categoryId ? categories.find(c => c.id === product.categoryId)?.name : "N/A")
                         const stock = typeof product.stock === 'string' ? parseFloat(product.stock) : (product.stock || 0)
@@ -770,6 +853,7 @@ export default function ProductsPage() {
                     )}
                       </TableBody>
                     </Table>
+                    {renderPagination()}
                   </div>
                 )}
                 </div>
@@ -817,7 +901,7 @@ export default function ProductsPage() {
                             </TableCell>
                           </TableRow>
                         ) : (
-                          filteredProducts.map((product) => {
+                          paginatedProducts.map((product) => {
                             const categoryName = product.category?.name || (product.categoryId ? categories.find(c => c.id === product.categoryId)?.name : "N/A")
                             const expiryStatus = getExpiryStatus(product.expiry_date)
                             
@@ -890,6 +974,7 @@ export default function ProductsPage() {
                     )}
                       </TableBody>
                     </Table>
+                    {renderPagination()}
                   </div>
                 )}
                 </div>

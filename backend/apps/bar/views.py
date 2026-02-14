@@ -13,6 +13,7 @@ from decimal import Decimal
 from apps.tenants.permissions import TenantFilterMixin
 from apps.customers.models import Customer
 from apps.sales.models import Sale, SaleItem
+from apps.products.models import Product, ProductUnit
 from apps.shifts.models import Shift
 
 from .models import BarTable, Tab, TabItem, TabTransfer, TabMerge
@@ -136,7 +137,7 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
         
         return queryset.select_related(
             'customer', 'table', 'opened_by', 'closed_by'
-        ).prefetch_related('items__product', 'items__variation', 'items__added_by')
+        ).prefetch_related('items__product', 'items__added_by')
     
     # ==================== OPEN TAB ====================
     @action(detail=False, methods=['post'])
@@ -222,7 +223,6 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
         item = TabItem.objects.create(
             tab=tab,
             product=product,
-            variation=None,
             unit=unit,
             quantity=data['quantity'],
             price=price,
@@ -440,9 +440,18 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
             # Payment status for credit
             payment_status = 'paid'
             amount_paid = tab.total
+            cash_amount = Decimal('0')
+            card_amount = Decimal('0')
+            mobile_amount = Decimal('0')
             if payment_method == 'credit':
                 payment_status = 'unpaid'
                 amount_paid = Decimal('0')
+            elif payment_method == 'cash':
+                cash_amount = tab.total
+            elif payment_method == 'card':
+                card_amount = tab.total
+            elif payment_method == 'mobile':
+                mobile_amount = tab.total
             
             # Create sale record
             sale = Sale.objects.create(
@@ -463,6 +472,9 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                 due_date=data.get('due_date'),
                 amount_paid=amount_paid,
                 payment_status=payment_status,
+                cash_amount=cash_amount,
+                card_amount=card_amount,
+                mobile_amount=mobile_amount,
                 notes=f"From Tab #{tab.tab_number}. {data.get('notes', '')}",
             )
             
@@ -471,7 +483,6 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                 SaleItem.objects.create(
                     sale=sale,
                     product=tab_item.product,
-                    variation=tab_item.variation,
                     unit=tab_item.unit,
                     quantity=tab_item.quantity,
                     price=tab_item.price,
@@ -479,6 +490,14 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                     total=tab_item.total,
                     notes=tab_item.notes,
                 )
+
+            try:
+                from apps.sales.services import ReceiptService
+                ReceiptService.generate_receipt(sale, format='pdf', user=request.user)
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to auto-generate receipt for tab sale {sale.id}: {str(e)}")
             
             # Close the tab
             tab.status = 'closed'
@@ -600,7 +619,6 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                     TabItem.objects.create(
                         tab=target_tab,
                         product=item.product,
-                        variation=item.variation,
                         unit=item.unit,
                         quantity=item.quantity,
                         price=item.price,
@@ -694,7 +712,6 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                             TabItem.objects.create(
                                 tab=new_tab,
                                 product=item.product,
-                                variation=item.variation,
                                 unit=item.unit,
                                 quantity=item.quantity,
                                 price=item.price,

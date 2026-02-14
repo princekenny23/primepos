@@ -43,7 +43,6 @@ class Shift(models.Model):
         verbose_name = 'Shift'
         verbose_name_plural = 'Shifts'
         ordering = ['-start_time']
-        unique_together = ['outlet', 'till', 'operating_date', 'status']
         indexes = [
             models.Index(fields=['outlet']),
             models.Index(fields=['till']),

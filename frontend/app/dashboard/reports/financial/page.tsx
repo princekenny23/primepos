@@ -78,8 +78,8 @@ export default function FinancialReportsPage() {
   return (
     <DashboardLayout>
       <PageLayout
-        title="Financial Report"
-        description="Profit & loss, expenses, and comprehensive financial analysis"
+        title="Cash Summary"
+        description="High-level view of cash inflows, outflows, and margin"
       >
 
         <ReportFilters

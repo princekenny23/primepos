@@ -15,6 +15,16 @@ import {
   DialogHeader, 
   DialogTitle 
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
 import { 
   Select, 
@@ -31,9 +41,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { useBusinessStore } from "@/stores/businessStore"
 import { productService, categoryService } from "@/lib/services/productService"
 import { tabService, type Tab, type TabListItem, type BarTable, type TabItem } from "@/lib/services/barTabService"
+import { saleService } from "@/lib/services/saleService"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Product, Category } from "@/lib/types"
 import { 
@@ -46,6 +65,7 @@ import {
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
 import { SaleDiscountModal, type SaleDiscount } from "@/components/modals/sale-discount-modal"
+import { RefundReturnModal } from "@/components/modals/refund-return-modal"
 import { TabFinderModal } from "@/components/modals/tab-finder-modal"
 import { AddEditCustomerModal } from "@/components/modals/add-edit-customer-modal"
 import { printReceipt } from "@/lib/print"
@@ -67,6 +87,12 @@ interface CartItem {
   variationName?: string
   notes?: string
   total: number
+}
+
+type HeldSale = {
+  id: string
+  cart: CartItem[]
+  timestamp: string
 }
 
 const drinkCategories = [
@@ -137,12 +163,18 @@ export function BarPOS() {
   const [showTabHistory, setShowTabHistory] = useState(false)
   const [showTabFinder, setShowTabFinder] = useState(false)
 
+  const [showHoldSales, setShowHoldSales] = useState(false)
+  const [heldSales, setHeldSales] = useState<HeldSale[]>([])
+  const [pendingHoldId, setPendingHoldId] = useState<string | null>(null)
+  const [showReplaceCartConfirm, setShowReplaceCartConfirm] = useState(false)
+
   // Processing states
   const [isProcessing, setIsProcessing] = useState(false)
   const [activeView, setActiveView] = useState<"products" | "tables">("products")
+  const [isCategoryOpen, setIsCategoryOpen] = useState(true)
 
-  // Tab discount state (for SaleDiscountModal)
-  const [tabDiscount, setTabDiscount] = useState<SaleDiscount | null>(null)
+  // Sale discount state (retail-style flow)
+  const [saleDiscount, setSaleDiscount] = useState<SaleDiscount | null>(null)
 
   // Customer search
   const [customerSearchTerm, setCustomerSearchTerm] = useState("")
@@ -246,6 +278,11 @@ export function BarPOS() {
     try {
       const tab = await tabService.get(tabId)
       setCurrentTab(tab)
+      if (tab.discount && tab.discount > 0) {
+        setSaleDiscount({ type: "amount", value: tab.discount })
+      } else {
+        setSaleDiscount(null)
+      }
       
       // Sync cart with tab items
       const cartItems: CartItem[] = tab.items
@@ -300,65 +337,13 @@ export function BarPOS() {
     return () => clearTimeout(timer)
   }, [customerSearchTerm, searchCustomers])
 
-  // ==================== Apply Discount ====================
-  const handleApplyDiscount = async (discount: SaleDiscount) => {
-    if (!currentTab) return
-    
-    setIsProcessing(true)
-    try {
-      const response = await tabService.applyDiscount(currentTab.id, {
-        discount: discount.value,
-        discount_type: discount.type === "percentage" ? "percentage" : "fixed",
-        reason: discount.reason,
-      })
-      
-      // Update local tab state with new discount
-      setCurrentTab(response.tab)
-      setTabDiscount(discount)
-      
-      toast({
-        title: "Discount Applied",
-        description: `${discount.type === "percentage" ? discount.value + "%" : formatCurrency(discount.value, currentBusiness)} discount applied`,
-      })
-    } catch (error: any) {
-      console.error("Failed to apply discount:", error)
-      toast({
-        title: "Error",
-        description: error.message || "Failed to apply discount",
-        variant: "destructive",
-      })
-    } finally {
-      setIsProcessing(false)
+  // ==================== Discount (Retail-style) ====================
+  const calculateDiscountAmount = (subtotal: number) => {
+    if (!saleDiscount) return 0
+    if (saleDiscount.type === "percentage") {
+      return (subtotal * saleDiscount.value) / 100
     }
-  }
-
-  const handleRemoveDiscount = async () => {
-    if (!currentTab) return
-    
-    setIsProcessing(true)
-    try {
-      const response = await tabService.applyDiscount(currentTab.id, {
-        discount: 0,
-        discount_type: "fixed",
-      })
-      
-      setCurrentTab(response.tab)
-      setTabDiscount(null)
-      
-      toast({
-        title: "Discount Removed",
-        description: "Discount has been removed from the tab",
-      })
-    } catch (error: any) {
-      console.error("Failed to remove discount:", error)
-      toast({
-        title: "Error",
-        description: error.message || "Failed to remove discount",
-        variant: "destructive",
-      })
-    } finally {
-      setIsProcessing(false)
-    }
+    return saleDiscount.value
   }
 
   // Initial load
@@ -419,6 +404,92 @@ export function BarPOS() {
 
   const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0)
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0)
+  const discountAmount = calculateDiscountAmount(currentTab?.subtotal ?? cartSubtotal)
+
+  // ==================== Held Sales ====================
+
+  const getHoldTotal = (hold: HeldSale) =>
+    hold.cart.reduce((sum, item) => sum + (item.total ?? item.price * item.quantity), 0)
+
+  const getHoldItemCount = (hold: HeldSale) =>
+    hold.cart.reduce((sum, item) => sum + (item.quantity || 0), 0)
+
+  const loadHeldSales = () => {
+    if (typeof window === "undefined") return
+    const holds: HeldSale[] = []
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith("pos_hold_")) {
+        try {
+          const data = JSON.parse(localStorage.getItem(key) || "{}")
+          if (data?.id && data?.cart) {
+            holds.push(data)
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+    }
+    holds.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    setHeldSales(holds)
+  }
+
+  useEffect(() => {
+    if (showHoldSales) {
+      loadHeldSales()
+    }
+  }, [showHoldSales])
+
+  const handleHoldSale = () => {
+    if (cart.length === 0) {
+      toast({ title: "Hold Sale", description: "Cart is empty." })
+      return
+    }
+    const holdId = `hold_${Date.now()}`
+    const holdData: HeldSale = {
+      id: holdId,
+      cart,
+      timestamp: new Date().toISOString(),
+    }
+    localStorage.setItem(`pos_hold_${holdId}`, JSON.stringify(holdData))
+    setCart([])
+    setSaleDiscount(null)
+    setSelectedCustomer(null)
+    toast({ title: "Hold Sale", description: `Sale held: ${holdId}` })
+    loadHeldSales()
+  }
+
+  const handleRetrieveHoldSale = (holdId: string) => {
+    if (cart.length > 0) {
+      setPendingHoldId(holdId)
+      setShowReplaceCartConfirm(true)
+      return
+    }
+    const holdData = localStorage.getItem(`pos_hold_${holdId}`)
+    if (holdData) {
+      const parsed = JSON.parse(holdData)
+      setCart(parsed.cart || [])
+      localStorage.removeItem(`pos_hold_${holdId}`)
+    }
+    setShowHoldSales(false)
+    toast({ title: "Hold Sale", description: "Hold sale retrieved." })
+  }
+
+  const handleConfirmReplaceCart = () => {
+    if (!pendingHoldId) return
+    handleRetrieveHoldSale(pendingHoldId)
+    setShowReplaceCartConfirm(false)
+    setPendingHoldId(null)
+  }
+
+  const handleCancelReplaceCart = () => {
+    setShowReplaceCartConfirm(false)
+    setPendingHoldId(null)
+  }
+
+  const handleDeleteHoldSale = (holdId: string) => {
+    localStorage.removeItem(`pos_hold_${holdId}`)
+    setHeldSales((prev) => prev.filter((hold) => hold.id !== holdId))
+  }
 
   // ==================== Tab Operations ====================
 
@@ -586,6 +657,66 @@ export function BarPOS() {
     }
   }
 
+  const handleVoidSale = async () => {
+    if (cart.length === 0) {
+      toast({ title: "Void Sale", description: "Cart is already empty." })
+      return
+    }
+
+    if (!outlet) {
+      toast({ title: "Void Sale", description: "Outlet not available.", variant: "destructive" })
+      return
+    }
+
+    try {
+      const subtotal = Math.round(cartSubtotal * 100) / 100
+      const discount = Math.round(discountAmount * 100) / 100
+      const tax = 0
+      const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+      const items_data = cart.map((item) => ({
+        product_id: item.productId,
+        unit_id: (item as any).unitId || undefined,
+        quantity: item.quantity,
+        price: Math.round(item.price * 100) / 100,
+        notes: item.notes || "",
+      }))
+
+      const voidSale = await saleService.void({
+        outlet: outlet.id,
+        shift: activeShift?.id,
+        customer: selectedCustomer?.id || undefined,
+        items_data,
+        subtotal,
+        tax,
+        discount,
+        total,
+        payment_method: "cash",
+        notes: "Voided sale from POS",
+      })
+
+      const receiptNumber =
+        voidSale._raw?.receipt_number ||
+        ("receipt_number" in voidSale ? (voidSale as any).receipt_number : undefined) ||
+        voidSale.id
+      toast({
+        title: "Void Sale",
+        description: `Sale voided. Receipt #${receiptNumber}`,
+      })
+
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+    } catch (error: any) {
+      console.error("Void sale error:", error)
+      toast({
+        title: "Void Sale Failed",
+        description: error.message || "Unable to record void sale.",
+        variant: "destructive",
+      })
+    }
+  }
+
   // Close tab with payment data from PaymentMethodModal
   const handleCloseTabWithPayment = async (
     method: "cash" | "card" | "mobile" | "credit",
@@ -599,6 +730,9 @@ export function BarPOS() {
       const result = await tabService.close(currentTab.id, {
         payment_method: method,
         cash_received: method === "cash" ? amount : undefined,
+        discount: discountAmount,
+        discount_type: saleDiscount?.type === "percentage" ? "percentage" : saleDiscount ? "fixed" : undefined,
+        discount_reason: saleDiscount?.reason,
         notes: "",
       })
       
@@ -606,6 +740,10 @@ export function BarPOS() {
         title: "Tab Closed",
         description: `Receipt #${result.sale.receipt_number}${change && change > 0 ? ` - Change: ${formatCurrency(change, currentBusiness)}` : ''}`,
       })
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sale-completed"))
+      }
       
       // Try to print receipt
       try {
@@ -618,7 +756,7 @@ export function BarPOS() {
             total: i.total,
           })),
           subtotal: currentTab.subtotal,
-          discount: currentTab.discount,
+          discount: discountAmount,
           tax: currentTab.tax,
           total: result.sale.total,
           sale: result.sale,
@@ -633,7 +771,7 @@ export function BarPOS() {
       setCloseTabForm({ payment_method: "cash", cash_received: "", notes: "" })
       setCurrentTab(null)
       setCart([])
-      setTabDiscount(null)
+      setSaleDiscount(null)
       
       await loadTabs()
       await loadTables()
@@ -673,6 +811,9 @@ export function BarPOS() {
       const result = await tabService.close(currentTab.id, {
         payment_method: closeTabForm.payment_method,
         cash_received: cashReceived,
+        discount: discountAmount,
+        discount_type: saleDiscount?.type === "percentage" ? "percentage" : saleDiscount ? "fixed" : undefined,
+        discount_reason: saleDiscount?.reason,
         notes: closeTabForm.notes,
       })
       
@@ -680,6 +821,10 @@ export function BarPOS() {
         title: "Tab Closed",
         description: `Receipt #${result.sale.receipt_number} - Change: ${formatCurrency(result.sale.change_given, currentBusiness)}`,
       })
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sale-completed"))
+      }
       
       // Try to print receipt
       try {
@@ -692,7 +837,7 @@ export function BarPOS() {
             total: i.total,
           })),
           subtotal: currentTab.subtotal,
-          discount: currentTab.discount,
+          discount: discountAmount,
           tax: currentTab.tax,
           total: result.sale.total,
           sale: result.sale,
@@ -706,7 +851,7 @@ export function BarPOS() {
       setCloseTabForm({ payment_method: "cash", cash_received: "", notes: "" })
       setCurrentTab(null)
       setCart([])
-      setTabDiscount(null)
+      setSaleDiscount(null)
       
       await loadTabs()
       await loadTables()
@@ -908,7 +1053,7 @@ export function BarPOS() {
       </div>
 
       {/* Main Content - fills remaining space */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
         {/* Left Panel - Tables/Products */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
@@ -973,87 +1118,106 @@ export function BarPOS() {
                 </div>
               </div>
 
-              {/* Category Filter - FIXED */}
-              <div className="border-b p-3 flex-shrink-0">
-                {isLoadingCategories ? (
-                  <div className="grid grid-cols-5 gap-2">
-                    {Array.from({ length: 5 }).map((_, idx) => (
-                      <div key={idx} className="h-16 bg-muted animate-pulse rounded" />
-                    ))}
-                  </div>
-                ) : categoriesError ? (
-                  <div className="text-sm text-destructive">{categoriesError}</div>
-                ) : (
-                  <div className="grid grid-cols-5 gap-2">
+              <div className="flex-1 flex min-h-0 overflow-hidden">
+                {/* Category Sidebar */}
+                <div
+                  className={cn(
+                    "border-r bg-gray-200 overflow-y-auto flex-shrink-0 transition-all duration-200",
+                    isCategoryOpen ? "w-40 p-3" : "w-12 p-2"
+                  )}
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className={cn("text-xs font-medium", !isCategoryOpen && "sr-only")}>
+                      Categories
+                    </span>
                     <Button
-                      key="all"
-                      variant={selectedCategory === "all" ? "default" : "outline"}
-                      className={cn(
-                        "h-16 flex flex-col items-center justify-center gap-1",
-                        selectedCategory === "all" && "ring-2 ring-primary"
-                      )}
-                      onClick={() => setSelectedCategory("all")}
+                      variant="outline"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => setIsCategoryOpen((prev) => !prev)}
+                      title={isCategoryOpen ? "Collapse categories" : "Expand categories"}
                     >
-                      <Wine className="h-5 w-5" />
-                      <span className="text-xs font-medium">All</span>
+                      {isCategoryOpen ? "«" : "»"}
                     </Button>
-                    {categories.map(cat => (
+                  </div>
+                  {isLoadingCategories ? (
+                    <div className="space-y-2">
+                      {Array.from({ length: 6 }).map((_, idx) => (
+                        <div key={idx} className="h-10 bg-muted animate-pulse rounded" />
+                      ))}
+                    </div>
+                  ) : categoriesError ? (
+                    <div className="text-xs text-destructive">{categoriesError}</div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
                       <Button
-                        key={cat.id}
-                        variant={selectedCategory === cat.id ? "default" : "outline"}
+                        key="all"
+                        variant={selectedCategory === "all" ? "default" : "outline"}
                         className={cn(
-                          "h-16 flex flex-col items-center justify-center gap-1",
-                          selectedCategory === cat.id && "ring-2 ring-primary"
+                          "h-10 justify-start px-3 text-sm",
+                          selectedCategory === "all" && "ring-2 ring-primary",
+                          !isCategoryOpen && "hidden"
                         )}
-                        onClick={() => setSelectedCategory(cat.id)}
+                        onClick={() => setSelectedCategory("all")}
                       >
-                        <Wine className="h-5 w-5" />
-                        <span className="text-xs font-medium">{cat.name}</span>
+                        All
                       </Button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      {categories.map(cat => (
+                        <Button
+                          key={cat.id}
+                          variant={selectedCategory === cat.id ? "default" : "outline"}
+                          className={cn(
+                            "h-10 justify-start px-3 text-sm",
+                            selectedCategory === cat.id && "ring-2 ring-primary",
+                            !isCategoryOpen && "hidden"
+                          )}
+                          onClick={() => setSelectedCategory(cat.id)}
+                        >
+                          {cat.name}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-              {/* Product Grid - SCROLLABLE */}
-              <ScrollArea className="flex-1 min-h-0">
-                {isLoadingProducts ? (
-                  <div className="flex items-center justify-center h-64">
-                    <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : productsError ? (
-                  <div className="flex flex-col items-center justify-center h-64">
-                    <AlertCircle className="h-8 w-8 text-destructive mb-2" />
-                    <p className="text-destructive mb-2">{productsError}</p>
-                    <Button variant="outline" onClick={loadProducts}>Retry</Button>
-                  </div>
-                ) : filteredProducts.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-                    <Wine className="h-12 w-12 mb-2 opacity-50" />
-                    <p>No products found</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-2 p-4">
-                    {filteredProducts.map(product => (
-                      <Card 
-                        key={product.id} 
-                        className="cursor-pointer hover:shadow-md transition-shadow"
-                        onClick={() => handleAddItemToTab(product)}
-                      >
-                        <CardContent className="p-2">
-                          <div className="aspect-square bg-muted rounded-lg flex items-center justify-center mb-1">
-                            <Wine className="h-6 w-6 text-muted-foreground" />
-                          </div>
-                          <h3 className="font-medium text-xs truncate">{product.name}</h3>
-                          <p className="font-bold text-primary text-xs">
-                            {formatCurrency(product.price, currentBusiness)}
-                          </p>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                )}
-              </ScrollArea>
+                {/* Product Grid - SCROLLABLE */}
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-gray-200">
+                  <ScrollArea className="flex-1 min-h-0">
+                    {isLoadingProducts ? (
+                      <div className="flex items-center justify-center h-64">
+                        <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : productsError ? (
+                      <div className="flex flex-col items-center justify-center h-64">
+                        <AlertCircle className="h-8 w-8 text-destructive mb-2" />
+                        <p className="text-destructive mb-2">{productsError}</p>
+                        <Button variant="outline" onClick={loadProducts}>Retry</Button>
+                      </div>
+                    ) : filteredProducts.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
+                        <Wine className="h-12 w-12 mb-2 opacity-50" />
+                        <p>No products found</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-3 p-5">
+                        {filteredProducts.map(product => (
+                          <Card
+                            key={product.id}
+                            className="cursor-pointer hover:shadow-md transition-shadow border border-muted"
+                            onClick={() => handleAddItemToTab(product)}
+                          >
+                            <CardContent className="p-3">
+                              <div className="flex flex-col gap-1">
+                                <h3 className="text-sm leading-tight whitespace-normal break-normal">{product.name}</h3>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </ScrollArea>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1093,7 +1257,7 @@ export function BarPOS() {
                     <p className="text-xs">Add tables in Bar Settings</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
                     {tables.map(table => (
                       <Card
                         key={table.id}
@@ -1130,7 +1294,7 @@ export function BarPOS() {
         </div>
 
         {/* Right Panel - Cart - Fixed layout, only cart items scroll */}
-        <div className="w-96 border-l bg-card flex flex-col min-h-0 overflow-hidden">
+        <div className="flex-1 lg:flex-none w-full lg:w-[520px] border-t lg:border-t-0 lg:border-l bg-card flex flex-col min-h-0 overflow-hidden">
           {/* Tab Header */}
           <div className="p-3 border-b flex-shrink-0">
             {currentTab ? (
@@ -1159,52 +1323,64 @@ export function BarPOS() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {cart.map(item => (
-                  <Card key={item.id} className="border rounded bg-background">
-                    <CardContent className="p-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate" title={item.name}>{item.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatCurrency(item.price, currentBusiness)} each
-                          </p>
-                          <div className="mt-2 inline-flex items-center gap-2 rounded-md border px-2 py-1 bg-muted/50">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-xs"
-                              onClick={() => handleDecrementItem(item)}
-                            >
-                              -
-                            </Button>
-                            <span className="w-8 text-center text-sm font-medium">{item.quantity}</span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-6 w-6 p-0 text-xs"
-                              onClick={() => handleIncrementItem(item)}
-                            >
-                              +
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-bold text-sm whitespace-nowrap">{formatCurrency(item.total, currentBusiness)}</p>
+              <Table>
+                <TableHeader className="sticky top-0 bg-muted/50">
+                  <TableRow className="border-b">
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold">Product</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-16">Price</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-12">Qty</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-right w-20">Subtotal</TableHead>
+                    <TableHead className="h-8 px-2 py-1 text-xs font-semibold text-center w-8"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {cart.map(item => (
+                    <TableRow key={item.id} className="border-b hover:bg-muted/40 h-10">
+                      <TableCell className="px-2 py-1 text-xs font-medium truncate" title={item.name}>
+                        {item.name}
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-xs text-right">
+                        {formatCurrency(item.price, currentBusiness)}
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-right">
+                        <div className="flex items-center justify-end gap-1">
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
-                            className="h-6 px-2 text-xs text-destructive"
-                            onClick={() => handleVoidItem(item.id)}
+                            className="h-5 w-5 p-0"
+                            onClick={() => handleDecrementItem(item)}
+                            disabled={item.quantity <= 1}
                           >
-                            Remove
+                            −
+                          </Button>
+                          <span className="text-xs font-medium w-6 text-center">{item.quantity}</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-5 w-5 p-0"
+                            onClick={() => handleIncrementItem(item)}
+                          >
+                            +
                           </Button>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-xs text-right font-semibold">
+                        {formatCurrency(item.total, currentBusiness)}
+                      </TableCell>
+                      <TableCell className="px-2 py-1 text-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-5 w-5 p-0"
+                          onClick={() => handleVoidItem(item.id)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             )}
             </div>
           </ScrollArea>
@@ -1215,10 +1391,10 @@ export function BarPOS() {
               <span>Items</span>
               <span>{cartItemCount}</span>
             </div>
-            {currentTab && (currentTab.discount ?? 0) > 0 && (
+            {discountAmount > 0 && (
               <div className="flex justify-between text-sm text-green-600">
                 <span>Discount</span>
-                <span>-{formatCurrency(currentTab.discount ?? 0, currentBusiness)}</span>
+                <span>-{formatCurrency(discountAmount, currentBusiness)}</span>
               </div>
             )}
             <div className="flex justify-between font-bold text-xl">
@@ -1238,7 +1414,7 @@ export function BarPOS() {
             {/* Main Buttons */}
             <div className="flex gap-2">
               <Button
-                className="flex-1 h-14 text-lg bg-green-600 hover:bg-green-700"
+                className="flex-1 h-14 text-lg bg-blue-900 hover:bg-blue-800"
                 onClick={() => setShowPaymentModal(true)}
                 disabled={cart.length === 0}
               >
@@ -1256,36 +1432,29 @@ export function BarPOS() {
                     <MoreHorizontal className="h-5 w-5" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuContent align="end" className="w-40">
                   <DropdownMenuItem disabled={cart.length === 0} onClick={() => setShowDiscountModal(true)}>
-                    <Percent className="h-4 w-4 mr-2" />
-                    Apply Discount
+                    Discount
                   </DropdownMenuItem>
-                  {currentTab && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => setShowTransferTab(true)}>
-                        <ArrowRightLeft className="h-4 w-4 mr-2" />
-                        Transfer Tab
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setShowMergeTabs(true)}>
-                        <Merge className="h-4 w-4 mr-2" />
-                        Merge Tabs
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setShowSplitTab(true)}>
-                        <Split className="h-4 w-4 mr-2" />
-                        Split Tab
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                    </>
-                  )}
-                  <DropdownMenuItem disabled={cart.length === 0} onClick={() => setCart([])}>
-                    <X className="h-4 w-4 mr-2" />
-                    Clear Cart
+                  <DropdownMenuItem disabled={cart.length === 0} onClick={() => setShowRefundModal(true)}>
+                    Refund / Return
                   </DropdownMenuItem>
-                  <DropdownMenuItem disabled={cart.length === 0} onClick={() => setShowPaymentModal(true)}>
-                    <CreditCard className="h-4 w-4 mr-2" />
-                    Close & Pay
+                  <DropdownMenuItem
+                    disabled={cart.length === 0}
+                    onClick={handleHoldSale}
+                  >
+                    Hold Sale
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setShowHoldSales(true)}
+                  >
+                    Retrieve Hold
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowCloseRegister(true)}>
+                    Close Register
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={cart.length === 0} onClick={handleVoidSale} className="text-red-600">
+                    Void Sale
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1561,10 +1730,10 @@ export function BarPOS() {
             )}
 
             {/* Show applied discount info */}
-            {currentTab && currentTab.discount > 0 && (
+            {discountAmount > 0 && (
               <div className="p-2 bg-green-50 dark:bg-green-950 rounded-lg text-sm">
                 <span className="text-green-600 dark:text-green-400">
-                  Discount applied: {formatCurrency(currentTab.discount, currentBusiness)}
+                  Discount applied: {formatCurrency(discountAmount, currentBusiness)}
                 </span>
               </div>
             )}
@@ -1762,7 +1931,7 @@ export function BarPOS() {
         onOpenChange={setShowPaymentModal}
         total={currentTab?.total || cartSubtotal}
         business={currentBusiness}
-        onConfirm={(method, amount, change) => {
+        onConfirm={async (method, amount, change) => {
           // Map "tab" (credit) to "credit" for backend
           const paymentMethod = method === "tab" ? "credit" : method
           
@@ -1770,13 +1939,92 @@ export function BarPOS() {
           if (currentTab) {
             handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "credit", amount, change)
           } else {
-            // Quick sale (no tab) - just show confirmation
-            toast({
-              title: "Payment Processed",
-              description: `${method.charAt(0).toUpperCase() + method.slice(1)} payment of ${formatCurrency(cartSubtotal, currentBusiness)} received${change && change > 0 ? `. Change: ${formatCurrency(change, currentBusiness)}` : ''}`,
-            })
-            setCart([])
-            setShowPaymentModal(false)
+            // Quick sale (no tab) - create a real sale
+            if (!outlet) {
+              toast({ title: "Error", description: "Outlet not available.", variant: "destructive" })
+              return
+            }
+            if (!activeShift) {
+              toast({ title: "Error", description: "No active shift. Please start a shift.", variant: "destructive" })
+              return
+            }
+            if (cart.length === 0) {
+              toast({ title: "Error", description: "Cart is empty.", variant: "destructive" })
+              return
+            }
+
+            setIsProcessing(true)
+            try {
+              const subtotal = Math.round(cartSubtotal * 100) / 100
+              const discount = Math.round(discountAmount * 100) / 100
+              const tax = 0
+              const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+              const items_data = cart.map((item) => ({
+                product_id: item.productId,
+                quantity: item.quantity,
+                price: Math.round(item.price * 100) / 100,
+                notes: item.notes || "",
+              }))
+
+              const sale = await saleService.create({
+                outlet: String(outlet.id),
+                shift: String(activeShift.id),
+                customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+                items_data,
+                subtotal,
+                tax,
+                discount,
+                discount_type: saleDiscount?.type,
+                discount_reason: saleDiscount?.reason,
+                total,
+                payment_method: paymentMethod as any,
+                notes: paymentMethod === "credit" ? "Credit sale" : "",
+              })
+
+              const saleAny = sale as any
+              const receiptNumber = saleAny._raw?.receipt_number || saleAny.receipt_number || sale.id
+              toast({
+                title: "Sale completed successfully",
+                description: `Receipt #${receiptNumber}`,
+              })
+
+              try {
+                await printReceipt(
+                  {
+                    cart: cart.map((i) => ({
+                      id: i.id,
+                      name: i.name,
+                      price: i.price,
+                      quantity: i.quantity,
+                      total: i.total,
+                    })),
+                    subtotal,
+                    discount,
+                    tax,
+                    total,
+                    sale,
+                  },
+                  outlet.id
+                )
+              } catch (printError) {
+                console.warn("Print failed:", printError)
+              }
+
+              setCart([])
+              setSaleDiscount(null)
+              setSelectedCustomer(null)
+              setShowPaymentModal(false)
+            } catch (error: any) {
+              console.error("Quick sale error:", error)
+              toast({
+                title: "Payment failed",
+                description: error.message || "Failed to process payment.",
+                variant: "destructive",
+              })
+            } finally {
+              setIsProcessing(false)
+            }
           }
         }}
       />
@@ -1874,70 +2122,94 @@ export function BarPOS() {
           open={showDiscountModal}
           onOpenChange={setShowDiscountModal}
           subtotal={currentTab?.subtotal || cartSubtotal}
-          currentDiscount={tabDiscount}
+          currentDiscount={saleDiscount}
           business={currentBusiness}
-          onApply={handleApplyDiscount}
-          onRemove={handleRemoveDiscount}
+          onApply={(discount) => setSaleDiscount(discount)}
+          onRemove={() => setSaleDiscount(null)}
         />
       )}
 
       {/* Refund Modal */}
-      <Dialog open={showRefundModal} onOpenChange={setShowRefundModal}>
-        <DialogContent>
+      <RefundReturnModal
+        open={showRefundModal}
+        onOpenChange={setShowRefundModal}
+      />
+
+      <Dialog open={showHoldSales} onOpenChange={setShowHoldSales}>
+        <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-600">
-              <ShieldAlert className="h-5 w-5" />
-              Process Refund
-            </DialogTitle>
-            <DialogDescription>
-              This action requires manager authorization
-            </DialogDescription>
+            <DialogTitle>Held Sales</DialogTitle>
+            <DialogDescription>Select a held sale to retrieve.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="bg-red-50 dark:bg-red-950 p-4 rounded-lg">
-              <p className="text-sm text-red-600 dark:text-red-400">
-                ⚠️ Refunds are logged and require manager PIN approval
-              </p>
+
+          {heldSales.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No held sales found.</div>
+          ) : (
+            <div className="rounded-md border border-gray-200 overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="text-xs font-semibold">Hold ID</TableHead>
+                    <TableHead className="text-xs font-semibold">Items</TableHead>
+                    <TableHead className="text-xs font-semibold">Total</TableHead>
+                    <TableHead className="text-xs font-semibold">Time</TableHead>
+                    <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {heldSales.map((hold) => (
+                    <TableRow key={hold.id}>
+                      <TableCell className="text-xs">{hold.id}</TableCell>
+                      <TableCell className="text-xs">{getHoldItemCount(hold)}</TableCell>
+                      <TableCell className="text-xs">
+                        {formatCurrency(getHoldTotal(hold), currentBusiness)}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {new Date(hold.timestamp).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button size="sm" onClick={() => handleRetrieveHoldSale(hold.id)}>
+                            Load
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleDeleteHoldSale(hold.id)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-            <div>
-              <Label>Receipt Number</Label>
-              <Input placeholder="Enter receipt number to refund" />
-            </div>
-            <div>
-              <Label>Refund Type</Label>
-              <Select defaultValue="full">
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="full">Full Refund</SelectItem>
-                  <SelectItem value="partial">Partial Refund</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Manager PIN</Label>
-              <Input type="password" placeholder="Enter manager PIN" />
-            </div>
-            <div>
-              <Label>Reason</Label>
-              <Input placeholder="Reason for refund (required)" />
-            </div>
-          </div>
+          )}
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowRefundModal(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => {
-              toast({
-                title: "Refund Processed",
-                description: "Refund has been processed successfully",
-              })
-              setShowRefundModal(false)
-            }}>
-              Process Refund
+            <Button variant="outline" onClick={() => setShowHoldSales(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={showReplaceCartConfirm} onOpenChange={setShowReplaceCartConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace Current Cart?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Retrieving a held sale will replace the current cart. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelReplaceCart}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmReplaceCart}>
+              Continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Tab History Modal */}
       <Dialog open={showTabHistory} onOpenChange={setShowTabHistory}>
@@ -2031,10 +2303,10 @@ export function BarPOS() {
                       <span>Subtotal:</span>
                       <span>{formatCurrency(currentTab.subtotal, currentBusiness)}</span>
                     </div>
-                    {currentTab.discount > 0 && (
+                    {discountAmount > 0 && (
                       <div className="flex justify-between text-green-600">
                         <span>Discount:</span>
-                        <span>-{formatCurrency(currentTab.discount, currentBusiness)}</span>
+                        <span>-{formatCurrency(discountAmount, currentBusiness)}</span>
                       </div>
                     )}
                     {currentTab.tax > 0 && (

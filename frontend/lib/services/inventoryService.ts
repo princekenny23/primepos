@@ -60,6 +60,7 @@ export const inventoryService = {
     movement_type?: string
     start_date?: string
     end_date?: string
+    limit?: number
   }): Promise<{ results: any[]; count?: number }> {
     const params = new URLSearchParams()
     if (filters?.product) params.append("product", filters.product)
@@ -67,6 +68,7 @@ export const inventoryService = {
     if (filters?.movement_type) params.append("movement_type", filters.movement_type)
     if (filters?.start_date) params.append("start_date", filters.start_date)
     if (filters?.end_date) params.append("end_date", filters.end_date)
+    if (typeof filters?.limit === "number") params.append("limit", String(filters.limit))
     
     const query = params.toString()
     const url = `${apiEndpoints.inventory.movements}${query ? `?${query}` : ""}`

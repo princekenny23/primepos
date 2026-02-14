@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
@@ -61,6 +61,47 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
+const LOCAL_PRINT_AGENT_URL =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_AGENT_TOKEN =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
+
+function encodeTextToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ""
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b)
+  })
+  return btoa(binary)
+}
+
+function htmlToText(html: string): string {
+  if (typeof window === "undefined") return html
+  const doc = new DOMParser().parseFromString(html, "text/html")
+  return doc.body?.innerText || html
+}
+
+async function printTextViaAgent(text: string, printer?: string): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (LOCAL_PRINT_AGENT_TOKEN) {
+    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
+  }
+  const contentBase64 = encodeTextToBase64(text)
+  const response = await fetch(`${LOCAL_PRINT_AGENT_URL}/print`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      printerName: printer || "",
+      contentBase64,
+      jobName: "PrimePOS Shift Report",
+    }),
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    throw new Error(body || response.statusText)
+  }
+}
+
 export default function ShiftManagementPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
@@ -80,6 +121,76 @@ export default function ShiftManagementPage() {
   const [shiftToClose, setShiftToClose] = useState<Shift | null>(null)
   const [shiftToView, setShiftToView] = useState<Shift | null>(null)
   const [isPrinting, setIsPrinting] = useState(false)
+
+  const buildHistoryFilters = () => {
+    const filters: any = {}
+    if (dateRange.from) {
+      filters.operating_date_from = format(dateRange.from, "yyyy-MM-dd")
+    }
+    if (dateRange.to) {
+      filters.operating_date_to = format(dateRange.to, "yyyy-MM-dd")
+    }
+    return filters
+  }
+
+  const loadShiftHistory = useCallback(async () => {
+    if (!currentBusiness) return
+
+    setIsLoading(true)
+    try {
+      const baseFilters = buildHistoryFilters()
+      let history: Shift[] = []
+
+      if (selectedOutlet !== "all") {
+        history = await shiftService.getHistory({ ...baseFilters, outlet: selectedOutlet })
+      } else if (outlets.length > 0) {
+        const results = await Promise.all(
+          outlets.map((outlet) => shiftService.getHistory({ ...baseFilters, outlet: outlet.id }))
+        )
+        history = results.flat()
+      } else {
+        history = await shiftService.getHistory(baseFilters)
+      }
+
+      const uniqueHistory = new Map<string, Shift>()
+      history.forEach((shift) => uniqueHistory.set(shift.id, shift))
+      setShifts(Array.from(uniqueHistory.values()))
+    } catch (error) {
+      console.error("Failed to load shift history:", error)
+      setShifts([])
+    } finally {
+      setIsLoading(false)
+    }
+  }, [currentBusiness, dateRange, selectedOutlet, outlets])
+
+  const loadOpenShifts = async () => {
+    if (!currentBusiness) return
+
+    setIsLoadingActive(true)
+    try {
+      let openShifts: Shift[] = []
+
+      if (selectedOutlet !== "all") {
+        openShifts = await shiftService.listOpen({ outlet: selectedOutlet })
+      } else if (outlets.length > 0) {
+        const results = await Promise.all(
+          outlets.map((outlet) => shiftService.listOpen({ outlet: outlet.id }))
+        )
+        openShifts = results.flat()
+      } else {
+        openShifts = await shiftService.listOpen()
+      }
+
+      const uniqueOpenShifts = new Map<string, Shift>()
+      openShifts.forEach((shift) => uniqueOpenShifts.set(shift.id, shift))
+      setActiveShifts(Array.from(uniqueOpenShifts.values()))
+    } catch (error) {
+      console.error("Failed to load active shifts:", error)
+      setActiveShifts([])
+    } finally {
+      setIsLoadingActive(false)
+    }
+  }
 
   // Load tills for all outlets
   useEffect(() => {
@@ -111,89 +222,18 @@ export default function ShiftManagementPage() {
 
   // Load shift history
   useEffect(() => {
-    const loadShifts = async () => {
-      if (!currentBusiness) return
-      
-      setIsLoading(true)
-      try {
-        const filters: any = {}
-        if (selectedOutlet !== "all") {
-          filters.outlet = selectedOutlet
-        }
-        if (dateRange.from) {
-          filters.operating_date_from = format(dateRange.from, "yyyy-MM-dd")
-        }
-        if (dateRange.to) {
-          filters.operating_date_to = format(dateRange.to, "yyyy-MM-dd")
-        }
-        
-        const history = await shiftService.getHistory(filters)
-        setShifts(history)
-      } catch (error) {
-        console.error("Failed to load shift history:", error)
-        setShifts([])
-      } finally {
-        setIsLoading(false)
-      }
-    }
-    
-    loadShifts()
-  }, [selectedOutlet, dateRange, currentBusiness])
+    loadShiftHistory()
+  }, [loadShiftHistory])
 
   // Load active shifts
   useEffect(() => {
-    const loadActiveShifts = async () => {
-      if (!currentBusiness) return
-      
-      setIsLoadingActive(true)
-      try {
-        const shifts = await shiftService.listOpen()
-        setActiveShifts(shifts)
-      } catch (error) {
-        console.error("Failed to load active shifts:", error)
-        setActiveShifts([])
-      } finally {
-        setIsLoadingActive(false)
-      }
-    }
-    
-    loadActiveShifts()
-  }, [currentBusiness])
+    loadOpenShifts()
+  }, [currentBusiness, selectedOutlet, outlets])
 
   const handleCloseSuccess = () => {
     // Reload both active shifts and history
-    const loadActiveShifts = async () => {
-      if (!currentBusiness) return
-      try {
-        const shifts = await shiftService.listOpen()
-        setActiveShifts(shifts)
-      } catch (error) {
-        console.error("Failed to load active shifts:", error)
-      }
-    }
-    
-    const loadShifts = async () => {
-      if (!currentBusiness) return
-      try {
-        const filters: any = {}
-        if (selectedOutlet !== "all") {
-          filters.outlet = selectedOutlet
-        }
-        if (dateRange.from) {
-          filters.operating_date_from = format(dateRange.from, "yyyy-MM-dd")
-        }
-        if (dateRange.to) {
-          filters.operating_date_to = format(dateRange.to, "yyyy-MM-dd")
-        }
-        const history = await shiftService.getHistory(filters)
-        setShifts(history)
-      } catch (error) {
-        console.error("Failed to load shift history:", error)
-      }
-    }
-    
-    loadActiveShifts()
-    loadShifts()
+    loadOpenShifts()
+    loadShiftHistory()
   }
 
   // Filter shifts for history tab - combine active and history shifts
@@ -338,8 +378,6 @@ export default function ShiftManagementPage() {
   const handlePrintShift = async (shift: Shift) => {
     setIsPrinting(true)
     try {
-      const qz = require('qz-tray')
-      
       // Generate shift report HTML content
       const reportHTML = `
         <html>
@@ -402,14 +440,8 @@ export default function ShiftManagementPage() {
         </html>
       `
 
-      // Connect to qz-tray and print
-      await qz.websocket.connect()
-      
-      const config = qz.configs.create(qz.printers.getDefault())
-      const html = [{type: 'html', format: 'plain', data: reportHTML}]
-      
-      await qz.print(config, html)
-      await qz.websocket.disconnect()
+      const reportText = htmlToText(reportHTML)
+      await printTextViaAgent(reportText)
     } catch (error) {
       console.error("Failed to print shift report:", error)
     } finally {

@@ -3,21 +3,18 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
-import { generateKPIData, generateChartData, generateActivityData, generateTopSellingItems } from "@/lib/utils/dashboard-stats"
+import { generateKPIData, generateChartData, generateTopSellingItems } from "@/lib/utils/dashboard-stats"
 import { productService } from "@/lib/services/productService"
-import { saleService } from "@/lib/services/saleService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { KPICards } from "@/components/dashboard/kpi-cards"
 import { SalesChart } from "@/components/dashboard/sales-chart"
-import { RecentActivity } from "@/components/dashboard/recent-activity"
 import { LowStockAlerts } from "@/components/dashboard/low-stock-alerts"
 import { TopSellingItems } from "@/components/dashboard/top-selling-items"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Store, Settings2 } from "lucide-react"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
-import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
 import { CustomizeDashboardModal } from "@/components/modals/customize-dashboard-modal"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 
@@ -26,16 +23,12 @@ export default function DashboardPage() {
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { currentOutlet: tenantOutlet, isLoading } = useTenant()
   const [showCustomize, setShowCustomize] = useState(false)
-  const [selectedSale, setSelectedSale] = useState<any>(null)
-  const [showSaleDetails, setShowSaleDetails] = useState(false)
   const [kpiData, setKpiData] = useState<any>(null)
   const [chartData, setChartData] = useState<any[]>([])
-  const [activities, setActivities] = useState<any[]>([])
   const [topItems, setTopItems] = useState<any[]>([])
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
   const [isLoadingData, setIsLoadingData] = useState(true)
   const loadingRef = useRef(false)
-  const intervalRef = useRef<NodeJS.Timeout | null>(null)
   
   // Memoize outlet ID to prevent unnecessary re-renders
   const outletId = useMemo(() => currentOutlet?.id || tenantOutlet?.id, [currentOutlet?.id, tenantOutlet?.id])
@@ -72,10 +65,9 @@ export default function DashboardPage() {
     loadingRef.current = true
     setIsLoadingData(true)
     try {
-      const [kpi, chart, activity, top, lowStockData] = await Promise.all([
+      const [kpi, chart, top, lowStockData] = await Promise.all([
         generateKPIData(currentBusiness.id, currentBusiness, outletId),
         generateChartData(currentBusiness.id, outletId),
-        generateActivityData(currentBusiness.id, outletId),
         generateTopSellingItems(currentBusiness.id, outletId),
         // Use getLowStock instead of loading all products
         productService.getLowStock(outletId).catch(() => []),
@@ -83,7 +75,6 @@ export default function DashboardPage() {
       
       setKpiData(kpi)
       setChartData(chart)
-      setActivities(activity)
       setTopItems(top)
       
       // Process low stock items
@@ -115,92 +106,9 @@ export default function DashboardPage() {
   
   useEffect(() => {
     if (!currentBusiness) return
-    
     loadDashboardData()
-    
-    // Auto-refresh dashboard data every 30 seconds for real-time updates
-    intervalRef.current = setInterval(() => {
-      loadDashboardData()
-    }, 30000)
-    
-    // Listen for outlet changes
-    const handleOutletChange = () => {
-      loadDashboardData()
-    }
-    
-    // Listen for sale completion events to refresh dashboard
-    const handleSaleCompleted = () => {
-      loadDashboardData()
-    }
-    
-    window.addEventListener("outlet-changed", handleOutletChange)
-    window.addEventListener("sale-completed", handleSaleCompleted)
-    
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
-      window.removeEventListener("outlet-changed", handleOutletChange)
-      window.removeEventListener("sale-completed", handleSaleCompleted)
-    }
   }, [currentBusiness, outletId, loadDashboardData])
 
-  const [recentSales, setRecentSales] = useState<any[]>([])
-  const recentSalesIntervalRef = useRef<NodeJS.Timeout | null>(null)
-
-  // Optimized recent sales loader
-  const loadRecentSales = useCallback(async () => {
-    if (!currentBusiness) return
-    
-    try {
-      const salesData = await saleService.list({ 
-        outlet: outletId,
-        status: "completed",
-        page: 1,
-      })
-      setRecentSales(Array.isArray(salesData) ? salesData : (salesData.results || []).slice(0, 10))
-    } catch (error) {
-      console.error("Failed to load recent sales:", error)
-      setRecentSales([])
-    }
-  }, [currentBusiness, outletId])
-
-  useEffect(() => {
-    if (!currentBusiness) return
-    
-    loadRecentSales()
-    
-    // Auto-refresh recent sales every 30 seconds for real-time updates
-    recentSalesIntervalRef.current = setInterval(() => {
-      loadRecentSales()
-    }, 30000)
-    
-    // Listen for sale completion events to refresh recent sales immediately
-    const handleSaleCompleted = () => {
-      loadRecentSales()
-    }
-    
-    window.addEventListener("sale-completed", handleSaleCompleted)
-    
-    return () => {
-      if (recentSalesIntervalRef.current) {
-        clearInterval(recentSalesIntervalRef.current)
-        recentSalesIntervalRef.current = null
-      }
-      window.removeEventListener("sale-completed", handleSaleCompleted)
-    }
-  }, [currentBusiness, outletId, loadRecentSales])
-
-  const handleViewSale = useCallback(async (saleId: string) => {
-    try {
-      const sale = await saleService.get(saleId)
-      setSelectedSale(sale)
-      setShowSaleDetails(true)
-    } catch (error) {
-      console.error("Failed to load sale:", error)
-    }
-  }, [])
   
   // Memoize default KPI data to prevent recreation
   const defaultKpiData = useMemo(() => ({
@@ -270,7 +178,7 @@ export default function DashboardPage() {
         {/* KPI Cards */}
         <KPICards data={displayKpiData} business={currentBusiness} />
 
-        {/* Charts and Activity */}
+        {/* Charts */}
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
             <CardHeader>
@@ -281,8 +189,6 @@ export default function DashboardPage() {
               <SalesChart data={chartData} type="area" />
             </CardContent>
           </Card>
-
-          <RecentActivity activities={activities} business={currentBusiness} />
         </div>
 
         {/* Low Stock and Top Selling */}
@@ -291,47 +197,10 @@ export default function DashboardPage() {
           <TopSellingItems items={topItems} business={currentBusiness} />
         </div>
 
-        {/* Recent Sales with Click to View */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent Sales</CardTitle>
-            <CardDescription>Click on any sale to view details</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {recentSales.length === 0 ? (
-                <p className="text-center text-muted-foreground py-8">No recent sales</p>
-              ) : (
-                recentSales.map((sale) => (
-                  <div
-                    key={sale.id}
-                    className="flex items-center justify-between border-b pb-4 last:border-0 last:pb-0 cursor-pointer hover:bg-accent/50 p-2 rounded transition-colors"
-                    onClick={() => handleViewSale(sale.id)}
-                  >
-                    <div>
-                      <p className="font-medium">Sale #{sale.receipt_number || sale.id.slice(-6)}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {new Date(sale.created_at || sale.createdAt).toLocaleString()}
-                      </p>
-                    </div>
-                    <p className="font-semibold">
-                      {currentBusiness?.currencySymbol || "MWK"} {sale.total.toFixed(2)}
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Modals */}
       <CustomizeDashboardModal open={showCustomize} onOpenChange={setShowCustomize} />
-      <ViewSaleDetailsModal
-        open={showSaleDetails}
-        onOpenChange={setShowSaleDetails}
-        sale={selectedSale}
-      />
     </DashboardLayout>
   )
 }

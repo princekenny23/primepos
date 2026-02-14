@@ -212,6 +212,10 @@ export function SingleProductPOS() {
 
       const sale = await saleService.create(saleData as any)
 
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sale-completed"))
+      }
+
       // Prepare receipt data
       const receiptCartItems = cart.map((item) => ({
         id: item.id,
@@ -311,7 +315,7 @@ export function SingleProductPOS() {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Main Product Selection Area */}
         <div className="flex-1 p-6 overflow-y-auto">
           <div className="max-w-2xl mx-auto space-y-6">
@@ -471,7 +475,7 @@ export function SingleProductPOS() {
         </div>
 
         {/* Cart Sidebar */}
-        <div className="w-96 border-l bg-card flex flex-col">
+        <div className="flex-1 lg:flex-none w-full lg:w-[520px] border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
           <div className="p-4 border-b">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <ShoppingCart className="h-5 w-5" />
@@ -548,7 +552,7 @@ export function SingleProductPOS() {
                 </span>
               </div>
               <Button
-                className="w-full h-12 text-base font-semibold"
+                className="w-full h-12 text-base font-semibold bg-blue-900 hover:bg-blue-800"
                 size="lg"
                 onClick={handleCheckout}
                 disabled={isProcessingPayment || cart.length === 0}

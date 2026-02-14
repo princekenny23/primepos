@@ -1,5 +1,5 @@
 from django.db import models
-from django.core.validators import MinValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
 from decimal import Decimal
 from apps.tenants.models import Tenant
 
@@ -53,6 +53,19 @@ class Product(models.Model):
     stock = models.IntegerField(default=0, validators=[MinValueValidator(0)])
     low_stock_threshold = models.IntegerField(default=0, validators=[MinValueValidator(0)])
     unit = models.CharField(max_length=50, default='pcs')
+    
+    # Expiry tracking fields
+    track_expiration = models.BooleanField(default=False, help_text="Whether to track expiration for this product")
+    manufacturing_date = models.DateField(null=True, blank=True, help_text="Product manufacturing date")
+    expiry_date = models.DateField(null=True, blank=True, help_text="Product expiry date")
+    
+    # Restaurant-specific fields
+    preparation_time = models.IntegerField(null=True, blank=True, help_text="Prep time in minutes for restaurant items")
+    
+    # Bar-specific fields
+    volume_ml = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal('0.01'))], help_text="Volume in milliliters for bar items")
+    alcohol_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('100'))], help_text="Alcohol percentage for bar items")
+    
     image = models.ImageField(upload_to='products/', blank=True, null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

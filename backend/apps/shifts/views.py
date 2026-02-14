@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.utils import timezone
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -183,11 +183,12 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        with transaction.atomic():
-            shift.closing_cash_balance = closing_cash_balance
-            shift.status = 'CLOSED'
-            shift.end_time = timezone.now()
-            shift.save()
+        try:
+            with transaction.atomic():
+                shift.closing_cash_balance = closing_cash_balance
+                shift.status = 'CLOSED'
+                shift.end_time = timezone.now()
+                shift.save()
             
             # Mark till as available (if till exists)
             if shift.till:
@@ -200,14 +201,19 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     logger.error(f"Failed to update till status: {str(e)}")
                     # Don't fail the shift close if till update fails
             
-            # Create notification for shift closed (Square POS-like)
-            try:
-                from apps.notifications.services import NotificationService
-                NotificationService.notify_shift_closed(shift)
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Failed to create shift closed notification: {str(e)}")
+                # Create notification for shift closed (Square POS-like)
+                try:
+                    from apps.notifications.services import NotificationService
+                    NotificationService.notify_shift_closed(shift)
+                except Exception as e:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"Failed to create shift closed notification: {str(e)}")
+        except IntegrityError:
+            return Response(
+                {"detail": "Unable to close shift due to a data conflict. Please retry or contact support."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
         
         response_serializer = ShiftSerializer(shift)
         return Response(response_serializer.data)

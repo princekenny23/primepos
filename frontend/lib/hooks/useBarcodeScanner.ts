@@ -1,154 +1,103 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from "react"
 
 export type BarcodeScannerOptions = {
   minLength?: number
-  suffixKey?: string // e.g., 'Enter'
-  scanTimeout?: number // ms between keystrokes to consider same scan
+  suffixKey?: string
+  scanTimeout?: number
+  maxScanDuration?: number
   onScan?: (code: string) => void
   enabled?: boolean
 }
 
-/**
- * Lightweight keyboard-wedge barcode scanner handler.
- * - Buffers fast keystrokes and emits a scan when suffixKey is detected or
- *   a timeout elapses after a burst of keystrokes.
- * - Also dispatches a global `barcode-scanned` CustomEvent on window so other
- *   components (modals) can listen without passing callbacks.
- */
 export function useBarcodeScanner(options: BarcodeScannerOptions = {}) {
-  // Merge defaults <- localStorage <- explicit options so the Settings UI takes effect
-  let stored: any = {}
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = localStorage.getItem('scanner_settings_v1')
-      if (raw) stored = JSON.parse(raw)
-    } catch (e) {
-      stored = {}
-    }
-  }
+  const {
+    minLength = 3,
+    suffixKey = "Enter",
+    scanTimeout = 300,
+    maxScanDuration = 1200,
+    onScan,
+    enabled = true,
+  } = options
 
-  const merged = {
-    minLength: 3,
-    suffixKey: 'Enter',
-    scanTimeout: 60,
-    enabled: true,
-    ...stored,
-    ...options,
-  }
-
-  const [config, setConfig] = useState(() => ({
-    minLength: merged.minLength,
-    suffixKey: merged.suffixKey,
-    scanTimeout: merged.scanTimeout,
-    enabled: merged.enabled,
-  }))
-
-  // Update config dynamically when settings change via a CustomEvent
-  useEffect(() => {
-    const handler = (e: any) => {
-      const payload = e?.detail || {}
-      setConfig(prev => ({ ...prev, ...payload }))
-    }
-    if (typeof window !== 'undefined') {
-      window.addEventListener('scanner-settings-changed', handler)
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('scanner-settings-changed', handler)
-      }
-    }
-  }, [])
-
-  const { minLength, suffixKey, scanTimeout, enabled } = config
-  const onScan = options.onScan
-  const bufferRef = useRef<string>('')
-  const lastTimeRef = useRef<number>(0)
+  const bufferRef = useRef("")
+  const lastTimeRef = useRef(0)
+  const startTimeRef = useRef(0)
   const timeoutRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!enabled) return
 
+    const resetBuffer = () => {
+      bufferRef.current = ""
+      startTimeRef.current = 0
+    }
+
+    const finalizeScan = (code: string) => {
+      const trimmed = code.trim()
+      if (trimmed.length < minLength) return
+      console.error("Barcode scan detected:", trimmed)
+      onScan?.(trimmed)
+    }
+
     const handleKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return
+
       const now = Date.now()
-      // Reset buffer if gap between keys is too large
-      if (lastTimeRef.current && now - lastTimeRef.current > scanTimeout) {
-        bufferRef.current = ''
+      const lastTime = lastTimeRef.current
+      const startTime = startTimeRef.current
+
+      if (lastTime && now - lastTime > scanTimeout) {
+        resetBuffer()
+      }
+
+      if (startTime && now - startTime > maxScanDuration) {
+        resetBuffer()
       }
 
       lastTimeRef.current = now
 
-      // Ignore modifier keys; guard against undefined/non-string keys
-      if (typeof e.key !== 'string') return
-      const key = e.key === 'NumpadEnter' ? 'Enter' : e.key
+      if (typeof e.key !== "string") return
+      const key = e.key === "NumpadEnter" ? "Enter" : e.key
       if (key.length > 1 && key !== suffixKey) return
 
-      // Append character (avoid interfering with typing into inputs)
-      const active = document.activeElement
-      const isInputFocused = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || (active as HTMLElement).isContentEditable)
-
-      // If an input is focused and it's not the global capture scenario, we still allow scans
-      // because barcode scanners typically direct their input to currently focused element.
-      // But for global handler, still capture even if input is focused.
-
-      // Append key
       if (key === suffixKey) {
-        // Suffix received - finalize buffer
-        const code = bufferRef.current.trim()
-        bufferRef.current = ''
-        if (code.length >= minLength) {
-          // Dispatch global event
-          dispatchScan(code)
-          if (onScan) onScan(code)
+        const code = bufferRef.current
+        if (timeoutRef.current) {
+          window.clearTimeout(timeoutRef.current)
+          timeoutRef.current = null
         }
+        resetBuffer()
+        finalizeScan(code)
         return
       }
 
-      // Append regular character
+      if (!startTimeRef.current) {
+        startTimeRef.current = now
+      }
       bufferRef.current += key
 
-      // Clear previous timeout
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current)
         timeoutRef.current = null
       }
 
-      // Set timeout to finalize scan if no more keys in scanTimeout ms
       timeoutRef.current = window.setTimeout(() => {
-        const code = bufferRef.current.trim()
-        bufferRef.current = ''
-        if (code.length >= minLength) {
-          dispatchScan(code)
-          if (onScan) onScan(code)
-        }
+        const code = bufferRef.current
+        resetBuffer()
+        finalizeScan(code)
       }, scanTimeout)
     }
 
-    const dispatchScan = (code: string) => {
-      try {
-        const ev = new CustomEvent('barcode-scanned', { detail: code })
-        window.dispatchEvent(ev)
-      } catch (err) {
-        // Some browsers may not support CustomEvent constructor in older contexts
-        try {
-          const ev = document.createEvent('CustomEvent')
-          ;(ev as any).initCustomEvent('barcode-scanned', true, true, code)
-          window.dispatchEvent(ev)
-        } catch (e) {
-          // give up silently
-        }
-      }
-    }
-
-    window.addEventListener('keydown', handleKey)
+    window.addEventListener("keydown", handleKey, true)
 
     return () => {
-      window.removeEventListener('keydown', handleKey)
+      window.removeEventListener("keydown", handleKey, true)
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current)
         timeoutRef.current = null
       }
     }
-  }, [minLength, suffixKey, scanTimeout, onScan, enabled])
+  }, [enabled, maxScanDuration, minLength, onScan, scanTimeout, suffixKey])
 }
 
 

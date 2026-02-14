@@ -81,10 +81,10 @@ export async function generateKPIData(
       returnsYesterday,
     ] = await Promise.all([
       requestCache.getOrSet(`stats-${outletId}-${todayStr}`, () => 
-        saleService.getStats({ start_date: todayStr, end_date: todayStr }).catch(() => ({ total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }))
+        saleService.getStats({ start_date: todayStr, end_date: todayStr, outlet: outletId }).catch(() => ({ total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }))
       ),
       requestCache.getOrSet(`stats-${outletId}-${yesterdayStr}`, () =>
-        saleService.getStats({ start_date: yesterdayStr, end_date: yesterdayStr }).catch(() => ({ total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }))
+        saleService.getStats({ start_date: yesterdayStr, end_date: yesterdayStr, outlet: outletId }).catch(() => ({ total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }))
       ),
       requestCache.getOrSet(`sales-${outletId}-${todayStr}`, () =>
         saleService.list({ outlet: outletId, status: "completed", start_date: todayStr, end_date: todayStr, page: 1 }).catch(() => ({ results: [], count: 0 }))

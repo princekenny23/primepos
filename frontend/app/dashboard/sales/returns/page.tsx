@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input"
 import { 
   Search,
   Menu,
-  CalendarIcon,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -25,17 +24,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { saleService } from "@/lib/services/saleService"
 import { useToast } from "@/components/ui/use-toast"
-import { format, subDays } from "date-fns"
+import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
 import type { Sale } from "@/lib/types"
@@ -65,24 +58,31 @@ interface SaleDetail extends Sale {
 
 export default function ReturnsPage() {
   const router = useRouter()
-  const { currentBusiness } = useBusinessStore()
-  const { currentOutlet } = useTenant()
+  const { currentBusiness, currentOutlet: storeOutlet } = useBusinessStore()
+  const { currentOutlet: tenantOutlet } = useTenant()
   const { toast } = useToast()
+
+  const outlet = tenantOutlet || storeOutlet
 
   const [returns, setReturns] = useState<SaleDetail[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
-  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({
-    from: subDays(new Date(), 30),
-    to: new Date(),
-  })
+  const [currentPage, setCurrentPage] = useState(1)
   const [selectedSale, setSelectedSale] = useState<SaleDetail | null>(null)
   const [showSaleDetails, setShowSaleDetails] = useState(false)
   const [isLoadingSaleDetails, setIsLoadingSaleDetails] = useState(false)
 
+  const PAGE_SIZE = 10
+
   // Load returns
   const loadReturns = useCallback(async () => {
-    if (!currentBusiness || !currentOutlet) {
+    if (!currentBusiness) {
+      setIsLoading(false)
+      return
+    }
+
+    const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+    if (!outletId) {
       setIsLoading(false)
       return
     }
@@ -91,14 +91,7 @@ export default function ReturnsPage() {
     try {
       const filters: any = {
         status: "refunded",
-        outlet: currentOutlet.id,
-      }
-      
-      if (dateRange.from) {
-        filters.date_from = format(dateRange.from, "yyyy-MM-dd")
-      }
-      if (dateRange.to) {
-        filters.date_to = format(dateRange.to, "yyyy-MM-dd")
+        outlet: outletId,
       }
 
       const response = await saleService.list(filters)
@@ -150,7 +143,7 @@ export default function ReturnsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, currentOutlet, dateRange, toast])
+  }, [currentBusiness, outlet, toast])
 
   const getUserDisplay = (sale: SaleDetail) => {
     const user = sale.user
@@ -161,7 +154,34 @@ export default function ReturnsPage() {
 
   useEffect(() => {
     loadReturns()
+
+    if (typeof window === "undefined") return
+
+    const handleRefresh = () => {
+      loadReturns()
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        loadReturns()
+      }
+    }
+
+    window.addEventListener("sale-completed", handleRefresh)
+    window.addEventListener("focus", handleRefresh)
+    document.addEventListener("visibilitychange", handleVisibility)
+
+    return () => {
+      window.removeEventListener("sale-completed", handleRefresh)
+      window.removeEventListener("focus", handleRefresh)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
   }, [loadReturns])
+
+  // Reset page on search
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm])
 
   const filteredReturns = useMemo(() => {
     if (!searchTerm) return returns
@@ -174,6 +194,11 @@ export default function ReturnsPage() {
       )
     })
   }, [returns, searchTerm])
+
+  const paginatedReturns = useMemo(() => {
+    const startIdx = (currentPage - 1) * PAGE_SIZE
+    return filteredReturns.slice(startIdx, startIdx + PAGE_SIZE)
+  }, [filteredReturns, currentPage])
 
   const handleViewSale = async (sale: SaleDetail) => {
     setIsLoadingSaleDetails(true)
@@ -198,6 +223,39 @@ export default function ReturnsPage() {
     }
   }
 
+  const renderPagination = () => {
+    const totalPages = Math.ceil(filteredReturns.length / PAGE_SIZE)
+    if (totalPages <= 1) return null
+
+    return (
+      <div className="flex items-center justify-between px-6 py-4 border-t border-gray-300 bg-gray-50">
+        <div className="text-sm text-gray-600">
+          Page {currentPage} of {totalPages}
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="border-gray-300"
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="border-gray-300"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full">
       <div className="px-6 pt-4 pb-2">
@@ -215,34 +273,6 @@ export default function ReturnsPage() {
                 className="pl-10 bg-white border-gray-300"
               />
             </div>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dateRange.from && dateRange.to
-                    ? `${format(dateRange.from, "MMM dd")} - ${format(dateRange.to, "MMM dd")}`
-                    : "Select date range"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <Calendar
-                  initialFocus
-                  mode="range"
-                  defaultMonth={dateRange.from}
-                  selected={{
-                    from: dateRange.from,
-                    to: dateRange.to,
-                  }}
-                  onSelect={(range) => {
-                    setDateRange({
-                      from: range?.from,
-                      to: range?.to,
-                    })
-                  }}
-                  numberOfMonths={2}
-                />
-              </PopoverContent>
-            </Popover>
           </div>
         </div>
 
@@ -258,7 +288,7 @@ export default function ReturnsPage() {
                   <TableRow className="bg-gray-50">
                     <TableHead className="text-gray-900 font-semibold">Receipt #</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Customer</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Date</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">Date & Time</TableHead>
                     <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Payment Method</TableHead>
@@ -268,14 +298,14 @@ export default function ReturnsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredReturns.map((ret) => (
+                  {paginatedReturns.map((ret) => (
                     <TableRow key={ret.id} className="border-gray-300">
                       <TableCell className="font-medium">
                         {ret._raw?.receipt_number || ret.receipt_number || ret.id.slice(-6)}
                       </TableCell>
                       <TableCell>{ret.customer?.name || "Walk-in"}</TableCell>
                       <TableCell>
-                        {format(new Date((ret as any).created_at || ret.createdAt), "MMM dd, yyyy")}
+                        {format(new Date((ret as any).created_at || ret.createdAt), "MMM dd, yyyy HH:mm")}
                       </TableCell>
                       <TableCell>{getUserDisplay(ret)}</TableCell>
                       <TableCell>{ret.outlet?.name || "N/A"}</TableCell>
@@ -313,6 +343,7 @@ export default function ReturnsPage() {
                   ))}
                 </TableBody>
               </Table>
+              {renderPagination()}
             </div>
           )}
         </div>

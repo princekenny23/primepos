@@ -103,6 +103,11 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         outlet_id = validated_data.pop('outlet_id')
         items_data = validated_data.pop('items_data', [])
         
+        # Pop fields that are set explicitly to avoid duplicate keyword args
+        validated_data.pop('tenant', None)
+        validated_data.pop('outlet', None)
+        validated_data.pop('created_by', None)
+        
         from apps.outlets.models import Outlet
         outlet = Outlet.objects.get(id=outlet_id)
         tenant = outlet.tenant  # Get tenant from outlet instead of validated_data
@@ -117,8 +122,8 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         po_count = PurchaseOrder.objects.filter(tenant=tenant, order_date__year=today.year).count() + 1
         po_number = f"PO-{today.strftime('%Y%m%d')}-{po_count:04d}"
         
-        # Determine initial status based on supplier
-        initial_status = validated_data.get('status', 'pending_supplier' if supplier is None else 'draft')
+        # Determine initial status based on supplier (pop to avoid duplicate keyword arg)
+        initial_status = validated_data.pop('status', 'pending_supplier' if supplier is None else 'draft')
         
         purchase_order = PurchaseOrder.objects.create(
             tenant=tenant,

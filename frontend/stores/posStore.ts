@@ -75,7 +75,16 @@ export const usePOSStore = create<POSState>()(
         set({
           cart: get().cart.map((item) =>
             item.id === id
-              ? { ...item, ...updates, total: (updates.quantity || item.quantity) * item.price }
+              ? (() => {
+                  const nextPrice = updates.price ?? item.price
+                  const nextQuantity = updates.quantity ?? item.quantity
+                  return {
+                    ...item,
+                    ...updates,
+                    price: nextPrice,
+                    total: nextPrice * nextQuantity,
+                  }
+                })()
               : item
           ),
         })

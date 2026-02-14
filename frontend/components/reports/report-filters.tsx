@@ -10,16 +10,17 @@ import {
 } from "@/components/ui/select"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { Button } from "@/components/ui/button"
-import { Download, Printer, Settings } from "lucide-react"
+import { ChevronDown, ChevronUp, Download, Printer, Settings } from "lucide-react"
 import { useState } from "react"
 
 interface ReportFiltersProps {
   onExport?: () => void
   onPrint?: () => void
   onSettings?: () => void
+  onDateRangeChange?: (range: { start: Date | undefined; end: Date | undefined }) => void
 }
 
-export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersProps) {
+export function ReportFilters({ onExport, onPrint, onSettings, onDateRangeChange }: ReportFiltersProps) {
   const [dateRange, setDateRange] = useState<{ start: Date | undefined; end: Date | undefined }>({
     start: new Date(new Date().setDate(new Date().getDate() - 30)),
     end: new Date(),
@@ -28,6 +29,7 @@ export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersPr
   const [staff, setStaff] = useState<string>("all")
   const [category, setCategory] = useState<string>("all")
   const [paymentMethod, setPaymentMethod] = useState<string>("all")
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   return (
     <Card>
@@ -36,59 +38,22 @@ export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersPr
           <div className="flex-1 min-w-[200px]">
             <label className="text-sm font-medium mb-2 block">Date Range</label>
             <DateRangeFilter
-              onRangeChange={setDateRange}
+              onRangeChange={(range) => {
+                setDateRange(range)
+                onDateRangeChange?.(range)
+              }}
             />
           </div>
 
-          <div className="w-[180px]">
-            <label className="text-sm font-medium mb-2 block">Outlet</label>
-            <Select value={outlet} onValueChange={setOutlet}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Outlets" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Outlets</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="w-[180px]">
-            <label className="text-sm font-medium mb-2 block">Staff</label>
-            <Select value={staff} onValueChange={setStaff}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Staff" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Staff</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="w-[180px]">
-            <label className="text-sm font-medium mb-2 block">Category</label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Categories" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="w-[180px]">
-            <label className="text-sm font-medium mb-2 block">Payment Method</label>
-            <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Methods" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Methods</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setShowAdvanced((prev) => !prev)}>
+              {showAdvanced ? (
+                <ChevronUp className="mr-2 h-4 w-4" />
+              ) : (
+                <ChevronDown className="mr-2 h-4 w-4" />
+              )}
+              {showAdvanced ? "Hide filters" : "Show filters"}
+            </Button>
             {onExport && (
               <Button variant="outline" onClick={onExport}>
                 <Download className="mr-2 h-4 w-4" />
@@ -109,6 +74,58 @@ export function ReportFilters({ onExport, onPrint, onSettings }: ReportFiltersPr
             )}
           </div>
         </div>
+
+        {showAdvanced && (
+          <div className="mt-4 flex flex-wrap gap-4 items-end">
+            <div className="w-[180px]">
+              <label className="text-sm font-medium mb-2 block">Outlet</label>
+              <Select value={outlet} onValueChange={setOutlet}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Outlets" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Outlets</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="w-[180px]">
+              <label className="text-sm font-medium mb-2 block">Staff</label>
+              <Select value={staff} onValueChange={setStaff}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Staff" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Staff</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="w-[180px]">
+              <label className="text-sm font-medium mb-2 block">Category</label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="w-[180px]">
+              <label className="text-sm font-medium mb-2 block">Payment Method</label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Methods" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Methods</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

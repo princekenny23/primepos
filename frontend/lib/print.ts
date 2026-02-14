@@ -1,11 +1,11 @@
-// Lightweight client-side print helper using QZ Tray
+// Lightweight client-side print helper using the Local Print Agent
 // Responsibilities:
 // - Resolve printer for an outlet
-// - Ensure QZ Tray connected
+// - Call local agent for printer discovery and ESC/POS printing
 // - Prefer backend-generated ESC/POS payloads (base64) and print them raw
-// - Use a minimal emergency fallback only if backend fails
 
-import { api, apiEndpoints, apiConfig } from "./api"
+import { api, apiEndpoints } from "./api"
+import { receiptService } from "./services/receiptService"
 
 type ReceiptPayload = {
   cart: Array<{ name: string; price: number; quantity: number; total: number; sku?: string }>
@@ -16,138 +16,32 @@ type ReceiptPayload = {
   sale: any // backend sale object (may contain outlet, business, payments, cashier, created_at, etc.)
 }
 
-// Optional backend endpoints to support certificate-based auto-approval in QZ Tray.
-// Backend should implement a secure signing endpoint and a certificate endpoint.
-const QZ_CERT_PEM_ENDPOINT = `${apiConfig.baseURL}/outlets/qz_certificate/`
-const QZ_SIGN_ENDPOINT = `${apiConfig.baseURL}/outlets/qz_sign/`
+const LOCAL_PRINT_AGENT_URL =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_AGENT_TOKEN =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 
-async function configureQzSecurity(): Promise<void> {
-  if (typeof window === "undefined") return
-  const anyWin: any = window
-  if (!anyWin.qz || !anyWin.qz.security) return
-
-  const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
-  const certHeaders: Record<string, string> = { "Content-Type": "text/plain" }
-  const signHeaders: Record<string, string> = { "Content-Type": "application/json" }
-  if (token) {
-    certHeaders.Authorization = `Bearer ${token}`
-    signHeaders.Authorization = `Bearer ${token}`
+function buildAgentHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (LOCAL_PRINT_AGENT_TOKEN) {
+    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
   }
-
-  try {
-    // Always attempt to probe endpoints. Even if previously configured, probes may
-    // fail (expired token, rotated key, etc.), so we overwrite the client-side hooks
-    // with safe no-op functions when probes fail to avoid unhandled runtime errors.
-
-    // Probe certificate endpoint first.
-    let pem: string | null = null
-    try {
-      const certResp = await fetch(QZ_CERT_PEM_ENDPOINT, { headers: certHeaders })
-      if (certResp.ok) {
-        pem = await certResp.text()
-      } else {
-        const body = await certResp.text().catch(() => '')
-        // eslint-disable-next-line no-console
-        console.warn(`QZ certificate probe failed (${certResp.status}): ${body}`)
-      }
-    } catch (err) {
-      // Network or CORS error - log and proceed to set safe fallbacks
-      // eslint-disable-next-line no-console
-      console.warn("QZ certificate probe network error", err)
-    }
-
-    // Probe sign endpoint with a lightweight probe to ensure signing is permitted
-    let signAvailable = false
-    try {
-      const probeResp = await fetch(QZ_SIGN_ENDPOINT, {
-        method: "POST",
-        headers: signHeaders,
-        body: JSON.stringify({ data: "probe-signature" }),
-      })
-      if (probeResp.ok) {
-        signAvailable = true
-      } else {
-        const body = await probeResp.text().catch(() => '')
-        // eslint-disable-next-line no-console
-        console.warn(`QZ signing probe failed (${probeResp.status}): ${body}`)
-      }
-    } catch (err) {
-      // Network or CORS error - log and proceed to set safe fallbacks
-      // eslint-disable-next-line no-console
-      console.warn("QZ signing probe network error", err)
-    }
-
-    // Register certificate promise (resolve to PEM if available, otherwise null)
-    anyWin.qz.security.setCertificatePromise(() => Promise.resolve(pem))
-
-    // Register signature promise. Always catch errors and return an empty string on failure
-    // to avoid unhandled runtime exceptions in QZ Tray. An empty signature indicates
-    // signing was not completed; QZ will fall back to manual approval flow.
-    anyWin.qz.security.setSignaturePromise(async (toSign: string) => {
-      try {
-        if (!signAvailable) {
-          // Signing not available - return empty string to avoid throwing
-          return ''
-        }
-        const r = await fetch(QZ_SIGN_ENDPOINT, {
-          method: "POST",
-          headers: signHeaders,
-          body: JSON.stringify({ data: toSign }),
-        })
-        if (!r.ok) {
-          const body = await r.text().catch(() => '')
-          // eslint-disable-next-line no-console
-          console.warn(`Failed to sign QZ payload (${r.status}): ${body}`)
-          return ''
-        }
-        return r.text()
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("QZ signing failed", err)
-        return ''
-      }
-    })
-
-    (anyWin as any).__qzSecurityConfigured = true
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn("QZ security configuration failed", err)
-  }
+  return headers
 }
 
-async function ensureQzConnected(): Promise<void> {
-  if (typeof window === "undefined") throw new Error("Must run in browser")
-  const anyWin: any = window
-  if (!anyWin.qz) {
-    // Load QZ Tray library if it's not already present
-    const script = document.createElement("script")
-    script.src = "https://unpkg.com/qz-tray/dist/qz-tray.js"
-    document.head.appendChild(script)
-    await new Promise<void>((resolve, reject) => {
-      script.onload = () => resolve()
-      script.onerror = () => reject(new Error("Failed to load QZ Tray library"))
-    })
+async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
+  const url = `${LOCAL_PRINT_AGENT_URL}${path}`
+  const headers = { ...buildAgentHeaders(), ...(init?.headers || {}) }
+  const response = await fetch(url, { ...init, headers })
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    throw new Error(`Local Print Agent error (${response.status}): ${body || response.statusText}`)
   }
-
-  // Configure optional security hooks so QZ Tray can auto-approve this client
-  // (requires server endpoints that return PEM cert and signatures)
-  await configureQzSecurity()
-
-  // Ensure websocket connected (with retries)
-  if (!anyWin.qz.websocket.isActive()) {
-    try {
-      await anyWin.qz.websocket.connect()
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn("QZ websocket connection failed", err)
-      // Let caller handle retry/backoff as appropriate
-      throw err
-    }
-  }
+  return response
 }
 
 /**
- * Scan available printers using QZ Tray and optionally persist a chosen default.
+ * Scan available printers using the Local Print Agent and optionally persist a chosen default.
  * - Returns an array of printer names.
  * - If `persistDefault` is true and printers exist, the first printer will be
  *   stored in localStorage under `defaultPrinter` (or you can call your own API
@@ -155,13 +49,14 @@ async function ensureQzConnected(): Promise<void> {
  */
 export async function scanPrinters(persistDefault = true): Promise<string[]> {
   if (typeof window === "undefined") return []
-  const anyWin: any = window
-  await ensureQzConnected()
   try {
-    const printers: string[] = await anyWin.qz.printers.find()
+    const response = await agentFetch("/printers", { method: "GET" })
+    const data = await response.json().catch(() => ({}))
+    const printers: string[] = Array.isArray(data?.printers) ? data.printers : []
+    const defaultPrinter = data?.default
     if (Array.isArray(printers) && printers.length > 0 && persistDefault) {
       try {
-        localStorage.setItem("defaultPrinter", printers[0])
+        localStorage.setItem("defaultPrinter", defaultPrinter || printers[0])
       } catch {
         // ignore localStorage errors
       }
@@ -169,7 +64,7 @@ export async function scanPrinters(persistDefault = true): Promise<string[]> {
     return printers || []
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn("Failed to scan printers via QZ Tray", err)
+    console.warn("Failed to scan printers via Local Print Agent", err)
     return []
   }
 }
@@ -196,26 +91,92 @@ async function getDefaultPrinterNameForOutlet(outletId: number | string): Promis
   return null
 }
 
-// Client-side formatting is intentionally removed to enforce Square-style rules:
-// Receipts are legal documents and must be generated and stored by the backend.
-// Any local/emergency formatting was a source of mismatch; do not add fallbacks here.
+type EscposPrintJob = {
+  printerName: string
+  contentBase64: string
+  copies?: number
+  jobName?: string
+}
+
+function buildPlainTextReceipt(payload: ReceiptPayload): string {
+  const sale = payload.sale || {}
+  const lines: string[] = []
+  const businessName =
+    sale.business?.name || sale.outlet?.business?.name || sale.tenant?.name || "Business"
+  const address = sale.outlet?.address || sale.business?.address || sale.tenant?.address || ""
+  const date = sale.created_at || new Date().toLocaleString()
+  const cashier = sale.cashier?.name || sale.cashier_name || sale.created_by_name || "Cashier"
+
+  lines.push(String(businessName).toUpperCase())
+  if (address) lines.push(String(address))
+  lines.push(`Receipt #: ${sale.receipt_number || sale.id || ""}`)
+  lines.push(`Date: ${date}`)
+  lines.push(`Cashier: ${cashier}`)
+  lines.push("-----------------------------")
+
+  payload.cart.forEach((item) => {
+    lines.push(`${item.name} x${item.quantity}  ${item.total.toFixed(2)}`)
+  })
+
+  lines.push("-----------------------------")
+  lines.push(`Subtotal: ${payload.subtotal.toFixed(2)}`)
+  if (payload.tax > 0) lines.push(`Tax: ${payload.tax.toFixed(2)}`)
+  if (payload.discount > 0) lines.push(`Discount: -${payload.discount.toFixed(2)}`)
+  lines.push(`Total: ${payload.total.toFixed(2)}`)
+  lines.push("Thank you for your business!")
+
+  return lines.join("\n")
+}
+
+async function getEscposPayload(saleIdOrReceipt: string): Promise<{ contentBase64: string; receiptNumber: string } | null> {
+  try {
+    let receipt
+    try {
+      receipt = await receiptService.getBySale(saleIdOrReceipt)
+    } catch {
+      receipt = await receiptService.getByNumber(saleIdOrReceipt)
+    }
+
+    if (receipt.format !== "escpos") {
+      receipt = await receiptService.regenerate(receipt.id, "escpos")
+    }
+    if (!receipt.content) return null
+    return { contentBase64: receipt.content, receiptNumber: receipt.receipt_number }
+  } catch (err) {
+    return null
+  }
+}
 
 /**
- * Print a receipt using QZ Tray.
+ * Print a receipt using the Local Print Agent.
  *
  * Behavior:
  *  - Always try the backend ESC/POS endpoint first (/escpos-receipt/).
- *  - If backend returns an ESC/POS base64 payload, print it raw via QZ Tray.
+ *  - If backend returns an ESC/POS base64 payload, print it raw via the Local Print Agent.
  *  - If backend call fails or returns no escpos payload, fall back to a minimal client-side receipt.
  *
  * Safety:
- *  - Preserves QZ Tray connection checks and printer resolution logic.
+ *  - Preserves printer resolution logic; local agent handles physical printing.
  */
 export async function printReceipt(payload: ReceiptPayload, outletId?: number | string): Promise<void> {
   if (typeof window === "undefined") throw new Error("Printing must be initiated from the browser")
 
-  let printerName = outletId
-    ? await getDefaultPrinterNameForOutlet(outletId)
+  const resolvedOutletId =
+    outletId ??
+    payload?.sale?.outlet?.id ??
+    payload?.sale?.outlet_id ??
+    payload?.sale?.outlet
+
+  if (resolvedOutletId && typeof window !== "undefined") {
+    try {
+      localStorage.setItem("currentOutletId", String(resolvedOutletId))
+    } catch {
+      // Ignore localStorage failures
+    }
+  }
+
+  let printerName = resolvedOutletId
+    ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
     : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
 
   // If no printer configured, attempt a scan and persist the first found printer locally
@@ -229,48 +190,33 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
 
   if (!printerName) throw new Error("No printer configured for this outlet")
 
-  await ensureQzConnected()
+  const saleId = String(payload?.sale?.id || "").trim()
+  let contentBase64: string | null = null
+  let receiptNumber = ""
 
-  const anyWin: any = window
-  const config = anyWin.qz.configs.create(printerName)
-
-  // 1) Prefer backend-generated ESC/POS payload
-  try {
-    const saleId = (payload.sale && (payload.sale.id || (payload.sale._raw && payload.sale._raw.id)))
-    if (saleId) {
-      // Try to GET an existing escpos payload
-      let esc: any = await api.get(`${apiEndpoints.sales.get(String(saleId))}escpos-receipt/`)
-      if (esc && esc.format === "escpos" && esc.content) {
-        // Print backend base64 ESC/POS raw bytes
-        await anyWin.qz.print(config, [{ type: "raw", format: "base64", data: esc.content }])
-        return
-      }
-
-      // If none, request server to generate one on-demand, then retry GET
-      try {
-        await api.post(`${apiEndpoints.sales.get(String(saleId))}generate-receipt/`, { format: 'escpos' })
-        esc = await api.get(`${apiEndpoints.sales.get(String(saleId))}escpos-receipt/`)
-        if (esc && esc.format === "escpos" && esc.content) {
-          await anyWin.qz.print(config, [{ type: "raw", format: "base64", data: esc.content }])
-          return
-        }
-      } catch (genErr) {
-        // Generation failed or not available
-        // eslint-disable-next-line no-console
-        console.warn('On-demand escpos generation failed', genErr)
-      }
+  if (saleId) {
+    const escpos = await getEscposPayload(saleId)
+    if (escpos) {
+      contentBase64 = escpos.contentBase64
+      receiptNumber = escpos.receiptNumber
     }
-
-    // If we reach here, no escpos payload was returned. Per Square-style rules,
-    // the frontend must NOT fabricate or fallback to local formatting. Throw a
-    // hard error so the POS can handle it explicitly (retry, notify user, etc.).
-    throw new Error('ESC/POS receipt missing: backend did not provide an ESC/POS payload')
-  } catch (err) {
-    // Bubble up the error to caller; printing must only succeed with server-provided ESC/POS
-    // eslint-disable-next-line no-console
-    console.error('Printing failed: ESC/POS payload unavailable or backend error', err)
-    throw err
   }
+
+  if (!contentBase64) {
+    const plainText = buildPlainTextReceipt(payload)
+    contentBase64 = btoa(unescape(encodeURIComponent(plainText)))
+  }
+
+  const job: EscposPrintJob = {
+    printerName: printerName,
+    contentBase64: contentBase64,
+    jobName: receiptNumber ? `PrimePOS Receipt ${receiptNumber}` : "PrimePOS Receipt",
+  }
+
+  await agentFetch("/print", {
+    method: "POST",
+    body: JSON.stringify(job),
+  })
 }
 
 export default printReceipt

@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input"
 import { 
   Search,
   Menu,
-  CalendarIcon,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -26,25 +25,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Calendar } from "@/components/ui/calendar"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { saleService } from "@/lib/services/saleService"
 import { useToast } from "@/components/ui/use-toast"
-import { format, subDays } from "date-fns"
+import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
+import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { creditPaymentService } from "@/lib/services/customerService"
@@ -76,18 +70,17 @@ interface SaleDetail extends Sale {
 
 export default function CreditsPage() {
   const router = useRouter()
-  const { currentBusiness } = useBusinessStore()
-  const { currentOutlet } = useTenant()
+  const { currentBusiness, currentOutlet: storeOutlet } = useBusinessStore()
+  const { currentOutlet: tenantOutlet } = useTenant()
   const { toast } = useToast()
+
+  const outlet = tenantOutlet || storeOutlet
 
   const [credits, setCredits] = useState<SaleDetail[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<"all" | "unpaid" | "partially_paid" | "paid" | "overdue">("all")
-  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({
-    from: subDays(new Date(), 30),
-    to: new Date(),
-  })
+  const [currentPage, setCurrentPage] = useState(1)
   const [selectedSale, setSelectedSale] = useState<SaleDetail | null>(null)
   const [showSaleDetails, setShowSaleDetails] = useState(false)
   const [isLoadingSaleDetails, setIsLoadingSaleDetails] = useState(false)
@@ -97,10 +90,20 @@ export default function CreditsPage() {
   const [paymentRef, setPaymentRef] = useState("")
   const [paymentNotes, setPaymentNotes] = useState("")
   const [isSavingPayment, setIsSavingPayment] = useState(false)
+  const [showAssignCustomerModal, setShowAssignCustomerModal] = useState(false)
+  const [assignSale, setAssignSale] = useState<SaleDetail | null>(null)
+
+  const PAGE_SIZE = 10
 
   // Load credits
   const loadCredits = useCallback(async () => {
-    if (!currentBusiness || !currentOutlet) {
+    if (!currentBusiness) {
+      setIsLoading(false)
+      return
+    }
+
+    const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+    if (!outletId) {
       setIsLoading(false)
       return
     }
@@ -108,18 +111,14 @@ export default function CreditsPage() {
     setIsLoading(true)
     try {
       const filters: any = {
-        outlet: currentOutlet.id,
-      }
-      
-      if (dateRange.from) {
-        filters.date_from = format(dateRange.from, "yyyy-MM-dd")
-      }
-      if (dateRange.to) {
-        filters.date_to = format(dateRange.to, "yyyy-MM-dd")
+        outlet: outletId,
       }
 
-      const response = await saleService.list({ ...filters, payment_method: "tab" })
-      const creditsData = response.results || []
+      const response = await saleService.list(filters)
+      const creditsData = (response.results || []).filter((sale: any) => {
+        const method = String(sale?._raw?.payment_method || sale?.payment_method || sale?.paymentMethod || "").toLowerCase()
+        return method === "tab" || method === "credit"
+      })
 
       const enrichedCredits = creditsData.map((credit: any) => {
         const creditDetail: SaleDetail = { ...credit, _raw: credit._raw || credit }
@@ -167,7 +166,7 @@ export default function CreditsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, currentOutlet, dateRange, toast])
+  }, [currentBusiness, outlet, toast])
 
   const getUserDisplay = (sale: SaleDetail) => {
     const user = sale.user
@@ -178,7 +177,34 @@ export default function CreditsPage() {
 
   useEffect(() => {
     loadCredits()
+
+    if (typeof window === "undefined") return
+
+    const handleRefresh = () => {
+      loadCredits()
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        loadCredits()
+      }
+    }
+
+    window.addEventListener("sale-completed", handleRefresh)
+    window.addEventListener("focus", handleRefresh)
+    document.addEventListener("visibilitychange", handleVisibility)
+
+    return () => {
+      window.removeEventListener("sale-completed", handleRefresh)
+      window.removeEventListener("focus", handleRefresh)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
   }, [loadCredits])
+
+  // Reset page on search or filter change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, statusFilter])
 
   const getAmountPaid = useCallback((sale: SaleDetail) => {
     const amountPaid =
@@ -231,6 +257,11 @@ export default function CreditsPage() {
     return filtered
   }, [credits, searchTerm, statusFilter, getPaymentStatus])
 
+  const paginatedCredits = useMemo(() => {
+    const startIdx = (currentPage - 1) * PAGE_SIZE
+    return filteredCredits.slice(startIdx, startIdx + PAGE_SIZE)
+  }, [filteredCredits, currentPage])
+
   const handleViewSale = async (sale: SaleDetail) => {
     setIsLoadingSaleDetails(true)
     try {
@@ -263,6 +294,40 @@ export default function CreditsPage() {
     setShowPaymentModal(true)
   }
 
+  const openAssignCustomerModal = (sale: SaleDetail) => {
+    setAssignSale(sale)
+    setShowAssignCustomerModal(true)
+  }
+
+  const handleAssignCustomer = async (customer: any) => {
+    if (!assignSale) return
+    try {
+      setIsLoadingSaleDetails(true)
+      const outletId =
+        assignSale.outlet?.id ||
+        assignSale._raw?.outlet_detail?.id ||
+        assignSale._raw?.outlet ||
+        assignSale._raw?.outlet_id ||
+        outlet?.id ||
+        (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+      // Patch sale to add customer
+      const { api, apiEndpoints } = await import("@/lib/api")
+      await api.patch(apiEndpoints.sales.update(assignSale.id), {
+        customer: customer.id,
+        outlet: outletId,
+      })
+      toast({ title: "Customer assigned", description: "Customer linked to sale." })
+      setShowAssignCustomerModal(false)
+      setAssignSale(null)
+      loadCredits()
+    } catch (error: any) {
+      console.error("Failed to assign customer:", error)
+      toast({ title: "Error", description: error.message || "Failed to assign customer", variant: "destructive" })
+    } finally {
+      setIsLoadingSaleDetails(false)
+    }
+  }
+
   const handleRecordPayment = async () => {
     if (!selectedSale) return
     const amount = Number(paymentAmount)
@@ -287,6 +352,10 @@ export default function CreditsPage() {
         notes: paymentNotes || undefined,
       })
 
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sale-completed"))
+      }
+
       toast({
         title: "Payment recorded",
         description: "Receivable updated successfully.",
@@ -307,6 +376,39 @@ export default function CreditsPage() {
     }
   }
 
+  const renderPagination = () => {
+    const totalPages = Math.ceil(filteredCredits.length / PAGE_SIZE)
+    if (totalPages <= 1) return null
+
+    return (
+      <div className="flex items-center justify-between px-6 py-4 border-t border-gray-300 bg-gray-50">
+        <div className="text-sm text-gray-600">
+          Page {currentPage} of {totalPages}
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="border-gray-300"
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="border-gray-300"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full">
       <div className="px-6 pt-4 pb-2">
@@ -324,34 +426,6 @@ export default function CreditsPage() {
                 className="pl-10 bg-white border-gray-300"
               />
             </div>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dateRange.from && dateRange.to
-                    ? `${format(dateRange.from, "MMM dd")} - ${format(dateRange.to, "MMM dd")}`
-                    : "Select date range"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <Calendar
-                  initialFocus
-                  mode="range"
-                  defaultMonth={dateRange.from}
-                  selected={{
-                    from: dateRange.from,
-                    to: dateRange.to,
-                  }}
-                  onSelect={(range) => {
-                    setDateRange({
-                      from: range?.from,
-                      to: range?.to,
-                    })
-                  }}
-                  numberOfMonths={2}
-                />
-              </PopoverContent>
-            </Popover>
             <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
               <SelectTrigger className="w-[180px] bg-white border-white text-[#1e3a8a] hover:bg-blue-50">
                 <SelectValue placeholder="Filter by status" />
@@ -379,7 +453,7 @@ export default function CreditsPage() {
                   <TableRow className="bg-gray-50">
                     <TableHead className="text-gray-900 font-semibold">Receipt #</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Customer</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Date</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">Date & Time</TableHead>
                     <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Amount</TableHead>
@@ -390,14 +464,14 @@ export default function CreditsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredCredits.map((credit) => (
+                  {paginatedCredits.map((credit) => (
                     <TableRow key={credit.id} className="border-gray-300">
                       <TableCell className="font-medium">
                         {credit._raw?.receipt_number || credit.receipt_number || credit.id.slice(-6)}
                       </TableCell>
                       <TableCell>{credit.customer?.name || "Walk-in"}</TableCell>
                       <TableCell>
-                        {format(new Date((credit as any).created_at || credit.createdAt), "MMM dd, yyyy")}
+                        {format(new Date((credit as any).created_at || credit.createdAt), "MMM dd, yyyy HH:mm")}
                       </TableCell>
                       <TableCell>{getUserDisplay(credit)}</TableCell>
                       <TableCell>{credit.outlet?.name || "N/A"}</TableCell>
@@ -437,9 +511,14 @@ export default function CreditsPage() {
                             >
                               View Details
                             </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openPaymentModal(credit)}>
-                              Record Payment
+                            <DropdownMenuItem onClick={() => openPaymentModal(credit)} disabled={!credit.customer?.id}>
+                              {credit.customer?.id ? 'Record Payment' : 'Assign customer to record payment'}
                             </DropdownMenuItem>
+                            {!credit.customer?.id && (
+                              <DropdownMenuItem onClick={() => openAssignCustomerModal(credit)}>
+                                Assign Customer
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -447,6 +526,7 @@ export default function CreditsPage() {
                   ))}
                 </TableBody>
               </Table>
+              {renderPagination()}
             </div>
           )}
         </div>
@@ -481,6 +561,13 @@ export default function CreditsPage() {
           }}
         />
       )}
+
+      <CustomerSelectModal
+        open={showAssignCustomerModal}
+        onOpenChange={setShowAssignCustomerModal}
+        onSelect={handleAssignCustomer}
+        selectedCustomer={assignSale?.customer || null}
+      />
 
       <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
         <DialogContent className="sm:max-w-[420px]" aria-describedby="record-payment-desc">

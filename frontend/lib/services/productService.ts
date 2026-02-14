@@ -131,6 +131,15 @@ function transformProduct(backendProduct: any): Product {
     wholesaleEnabled: backendProduct.wholesale_enabled || false,
     minimum_wholesale_quantity: backendProduct.minimum_wholesale_quantity || 1,
     minimumWholesaleQuantity: backendProduct.minimum_wholesale_quantity || 1,
+    // Expiry fields
+    track_expiration: backendProduct.track_expiration || false,
+    manufacturing_date: backendProduct.manufacturing_date || undefined,
+    expiry_date: backendProduct.expiry_date || undefined,
+    // Restaurant fields
+    preparation_time: backendProduct.preparation_time !== undefined ? Number(backendProduct.preparation_time) : undefined,
+    // Bar fields
+    volume_ml: backendProduct.volume_ml !== undefined ? Number(backendProduct.volume_ml) : undefined,
+    alcohol_percentage: backendProduct.alcohol_percentage !== undefined ? Number(backendProduct.alcohol_percentage) : undefined,
     createdAt: backendProduct.created_at || backendProduct.createdAt || new Date().toISOString(),
   }
 }
@@ -201,6 +210,30 @@ function transformProductToBackend(frontendProduct: Partial<Product>): any {
     data.outlet = typeof frontendProduct.outlet === 'object' ? frontendProduct.outlet.id : frontendProduct.outlet
   } else if ((frontendProduct as any).outletId) {
     data.outlet = (frontendProduct as any).outletId
+  }
+
+  // Include expiry fields if provided
+  if ((frontendProduct as any).track_expiration !== undefined) {
+    data.track_expiration = (frontendProduct as any).track_expiration
+  }
+  if ((frontendProduct as any).manufacturing_date) {
+    data.manufacturing_date = (frontendProduct as any).manufacturing_date
+  }
+  if ((frontendProduct as any).expiry_date) {
+    data.expiry_date = (frontendProduct as any).expiry_date
+  }
+
+  // Include restaurant fields if provided
+  if ((frontendProduct as any).preparation_time !== undefined && (frontendProduct as any).preparation_time !== null) {
+    data.preparation_time = parseInt((frontendProduct as any).preparation_time.toString())
+  }
+
+  // Include bar fields if provided
+  if ((frontendProduct as any).volume_ml !== undefined && (frontendProduct as any).volume_ml !== null) {
+    data.volume_ml = parseFloat((frontendProduct as any).volume_ml.toString())
+  }
+  if ((frontendProduct as any).alcohol_percentage !== undefined && (frontendProduct as any).alcohol_percentage !== null) {
+    data.alcohol_percentage = parseFloat((frontendProduct as any).alcohol_percentage.toString())
   }
 
   // NOTE: Units are now handled separately via unitService

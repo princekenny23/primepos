@@ -41,9 +41,6 @@ import {
 } from "@/components/ui/popover"
 import { ClipboardCheck, Search, Save, ArrowLeft, CheckCircle2 } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
-import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
-import { productService } from "@/lib/services/productService"
-import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 import { useRouter, useParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { inventoryService } from "@/lib/services/inventoryService"
@@ -78,40 +75,6 @@ export default function StockTakingDetailPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isCompleting, setIsCompleting] = useState(false)
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false)
-
-  // Modal / scanner states
-  const [showAddProduct, setShowAddProduct] = useState(false)
-  const [initialBarcode, setInitialBarcode] = useState<string | undefined>(undefined)
-
-  // Barcode scanner - increment counts or open create modal
-  useBarcodeScanner({
-    onScan: async (code) => {
-      try {
-        console.log("Scanned barcode:", code)
-        const { products } = await productService.lookup(code)
-        const product = (products && products.length > 0) ? products[0] : undefined
-
-        let matchedItem: StockTakingItem | undefined
-
-        if (product) {
-          matchedItem = items.find(i => i.product_id === product.id || i.barcode === product.barcode || i.barcode === code)
-        }
-
-        if (matchedItem) {
-          const newCount = (matchedItem.countedQty || 0) + 1
-          await handleCountChange(matchedItem.id, String(newCount))
-          toast({ title: "Scanned", description: `${matchedItem.product_name} incremented to ${newCount}` })
-        } else {
-          // No match in stock take - open add product modal with barcode prefilled
-          setInitialBarcode(code)
-          setShowAddProduct(true)
-        }
-      } catch (error) {
-        console.error("Barcode lookup failed:", error)
-        toast({ title: "Scan Error", description: "Failed to lookup barcode.", variant: "destructive" })
-      }
-    }
-  })
   useEffect(() => {
     loadStockTakeData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -693,22 +656,6 @@ export default function StockTakingDetailPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Add/Edit Product Modal for scanned barcodes */}
-      <ProductModalTabs
-        open={showAddProduct}
-        onOpenChange={(open) => {
-          setShowAddProduct(open)
-          if (!open) {
-            setInitialBarcode(undefined)
-            // Reload stock take data in case user created a product that should be counted
-            loadStockTakeData()
-          }
-        }}
-        product={undefined}
-        initialBarcode={initialBarcode}
-        onProductSaved={() => loadStockTakeData()}
-      />
 
       </PageLayout>
     </DashboardLayout>

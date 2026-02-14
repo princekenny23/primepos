@@ -73,7 +73,14 @@ export const purchaseOrderService = {
   },
 
   async create(data: Partial<PurchaseOrder>): Promise<PurchaseOrder> {
-    return api.post(apiEndpoints.purchaseOrders.create, data)
+    // Send outlet via query param as backend expects it from request context
+    const outletId = (data as any).outlet_id
+    if (!outletId) {
+      throw new Error("Outlet is required to create a purchase order")
+    }
+    
+    const url = `${apiEndpoints.purchaseOrders.create}?outlet=${outletId}`
+    return api.post(url, data)
   },
 
   async update(id: string, data: Partial<PurchaseOrder>): Promise<PurchaseOrder> {

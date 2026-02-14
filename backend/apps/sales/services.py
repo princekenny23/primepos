@@ -4,6 +4,7 @@ Handles creation and formatting of digital receipts
 Supports: PDF (for download/view) and ESC/POS (for thermal printing)
 """
 import logging
+import hashlib
 from django.template import engines, TemplateSyntaxError
 from django.core.files.base import ContentFile
 import json
@@ -22,6 +23,33 @@ from apps.tenants.models import Tenant
 from apps.accounts.models import User
 
 logger = logging.getLogger(__name__)
+
+# Compatibility patch: some OpenSSL builds do not support md5(usedforsecurity=...)
+_orig_md5 = hashlib.md5
+
+def _md5_compat(*args, **kwargs):
+    kwargs.pop('usedforsecurity', None)
+    return _orig_md5(*args, **kwargs)
+
+_needs_md5_compat = False
+try:
+    _orig_md5(usedforsecurity=False)
+except TypeError:
+    _needs_md5_compat = True
+
+if _needs_md5_compat:
+    hashlib.md5 = _md5_compat
+    try:
+        from reportlab.pdfbase import pdfdoc as _pdfdoc
+        _pdfdoc.md5 = _md5_compat
+    except Exception:
+        pass
+    try:
+        from reportlab.lib import utils as _rl_utils
+        if hasattr(_rl_utils, 'md5'):
+            _rl_utils.md5 = _md5_compat
+    except Exception:
+        pass
 
 
 class ReceiptService:
@@ -226,15 +254,20 @@ class ReceiptService:
         items_data = [['Item', 'Qty', 'Price', 'Total']]
         
         for item in sale.items.all():
-            item_name = item.product_name
+            base_name = item.product_name or (item.product.name if item.product else "Item")
+            item_name = base_name
             if item.unit_name:
-                item_name += f" {item.unit_name}"
-            
+                item_name = f"{item_name} {item.unit_name}"
+
+            safe_qty = item.quantity or 0
+            safe_price = item.price or Decimal('0')
+            safe_total = item.total or (safe_price * Decimal(safe_qty))
+
             items_data.append([
                 item_name,
-                str(item.quantity),
-                f"{currency} {item.price:,.2f}",
-                f"{currency} {item.total:,.2f}"
+                str(safe_qty),
+                f"{currency} {safe_price:,.2f}",
+                f"{currency} {safe_total:,.2f}"
             ])
         
         items_table = Table(items_data, colWidths=[80*mm, 25*mm, 30*mm, 35*mm])
@@ -328,12 +361,46 @@ class ReceiptService:
         payload.extend(b(f"Receipt #: {sale.receipt_number}"))
         payload.extend(b(f"Date: {sale.created_at.strftime('%Y-%m-%d %H:%M:%S')}"))
 
+        # Cashier info
+        cashier_name = None
+        if sale.user:
+            if hasattr(sale.user, 'get_full_name'):
+                full_name = sale.user.get_full_name()
+                if full_name and full_name.strip():
+                    cashier_name = full_name.strip()
+
+            if not cashier_name and hasattr(sale.user, 'first_name') and hasattr(sale.user, 'last_name'):
+                first = (sale.user.first_name or '').strip()
+                last = (sale.user.last_name or '').strip()
+                if first or last:
+                    cashier_name = f"{first} {last}".strip()
+
+            if not cashier_name and hasattr(sale.user, 'email') and sale.user.email:
+                cashier_name = sale.user.email
+
+            if not cashier_name and hasattr(sale.user, 'username') and sale.user.username:
+                cashier_name = sale.user.username
+
+        if cashier_name:
+            payload.extend(b(f"Cashier: {cashier_name}"))
+
+        # Customer info
+        if sale.customer:
+            payload.extend(b(f"Customer: {sale.customer.name or 'Walk-in'}"))
+            if sale.customer.phone:
+                payload.extend(b(f"Phone: {sale.customer.phone}"))
+            if sale.customer.email:
+                payload.extend(b(f"Email: {sale.customer.email}"))
+        else:
+            payload.extend(b("Customer: Walk-in"))
+
         # Items
         payload.extend(b("-----------------------------"))
         for item in sale.items.all():
-            name = item.product_name
-            qty = item.quantity
-            price = f"{currency} {item.total:,.2f}"
+            name = item.product_name or (item.product.name if item.product else "Item")
+            qty = item.quantity or 0
+            total = item.total or (item.price or Decimal('0')) * Decimal(qty)
+            price = f"{currency} {total:,.2f}"
             line = f"{name} x{qty}  {price}"
             payload.extend(b(line))
 
@@ -376,15 +443,15 @@ class ReceiptService:
     @staticmethod
     def get_receipt_by_sale(sale_id: int) -> Receipt:
         """Retrieve the current receipt for a sale (by sale ID)"""
-        try:
-            receipt = Receipt.objects.select_related('sale', 'tenant', 'generated_by').get(
-                sale_id=sale_id,
-                is_current=True,
-                voided=False,
-            )
-            return receipt
-        except Receipt.DoesNotExist:
+        receipt = Receipt.objects.select_related('sale', 'tenant', 'generated_by').filter(
+            sale_id=sale_id,
+            is_current=True,
+            voided=False,
+        ).order_by('-generated_at').first()
+        if not receipt:
             raise Receipt.DoesNotExist(f"Active receipt for sale {sale_id} not found")
+        receipt.increment_access()
+        return receipt
     
     @staticmethod
     def regenerate_receipt(receipt_id: int, format: str = 'pdf', user: User = None) -> Receipt:

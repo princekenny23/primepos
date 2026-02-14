@@ -35,7 +35,7 @@ interface ProductModalTabsProps {
   product?: any
   onProductSaved?: () => void
   initialBarcode?: string
-  initialTab?: "basic" | "units" | "pricing" | "stock"
+  initialTab?: "basic" | "units" | "pricing" | "stock" | "expiry" | "restaurant" | "bar"
 }
 
 export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
@@ -99,6 +99,24 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
     opening_stock: "0",
   })
 
+  // EXPIRY TAB - Expiry tracking
+  const [expiryForm, setExpiryForm] = useState({
+    track_expiration: false,
+    manufacturing_date: "",
+    expiry_date: "",
+  })
+
+  // RESTAURANT TAB - Restaurant-specific fields
+  const [restaurantForm, setRestaurantForm] = useState({
+    preparation_time: "",
+  })
+
+  // BAR TAB - Bar-specific fields
+  const [barForm, setBarForm] = useState({
+    volume_ml: "",
+    alcohol_percentage: "",
+  })
+
   // When reopening the modal, ensure the starting tab is the one requested by the parent
   useEffect(() => {
     if (open) {
@@ -153,6 +171,21 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         opening_stock: String(product.stock || 0),
       })
 
+      setExpiryForm({
+        track_expiration: product.track_expiration || false,
+        manufacturing_date: product.manufacturing_date || "",
+        expiry_date: product.expiry_date || "",
+      })
+
+      setRestaurantForm({
+        preparation_time: String(product.preparation_time || ""),
+      })
+
+      setBarForm({
+        volume_ml: String(product.volume_ml || ""),
+        alcohol_percentage: String(product.alcohol_percentage || ""),
+      })
+
       setActiveTab("basic")
     } else {
       // Create mode - reset all forms
@@ -179,6 +212,18 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         low_stock_threshold: "0",
         outletId: "",
         opening_stock: "0",
+      })
+      setExpiryForm({
+        track_expiration: false,
+        manufacturing_date: "",
+        expiry_date: "",
+      })
+      setRestaurantForm({
+        preparation_time: "",
+      })
+      setBarForm({
+        volume_ml: "",
+        alcohol_percentage: "",
       })
       setActiveTab("basic")
     }
@@ -296,6 +341,12 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         outletId: outletId,
         stock: parseInt(stockForm.opening_stock) || 0,
         image: basicForm.image || undefined,
+        track_expiration: expiryForm.track_expiration,
+        manufacturing_date: expiryForm.manufacturing_date || undefined,
+        expiry_date: expiryForm.expiry_date || undefined,
+        preparation_time: restaurantForm.preparation_time ? parseInt(restaurantForm.preparation_time) : undefined,
+        volume_ml: barForm.volume_ml ? parseFloat(barForm.volume_ml) : undefined,
+        alcohol_percentage: barForm.alcohol_percentage ? parseFloat(barForm.alcohol_percentage) : undefined,
       }
 
       let productId: string
@@ -372,11 +423,14 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value)} className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className={`grid w-full ${isRestaurant || isBar ? 'grid-cols-6' : 'grid-cols-5'}`}>
               <TabsTrigger value="basic">Basic</TabsTrigger>
               <TabsTrigger value="units">Units</TabsTrigger>
               <TabsTrigger value="pricing">Pricing</TabsTrigger>
               <TabsTrigger value="stock">Stock</TabsTrigger>
+              {isRestaurant && <TabsTrigger value="restaurant">Restaurant</TabsTrigger>}
+              {isBar && <TabsTrigger value="bar">Bar</TabsTrigger>}
+              <TabsTrigger value="expiry">Expiry</TabsTrigger>
             </TabsList>
 
             {/* BASIC TAB */}
@@ -783,6 +837,116 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                 </>
               )}
             </TabsContent>
+
+            {/* RESTAURANT TAB */}
+            {isRestaurant && (
+              <TabsContent value="restaurant" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="preparation_time">Preparation Time (minutes)</Label>
+                  <Input
+                    id="preparation_time"
+                    type="number"
+                    value={restaurantForm.preparation_time}
+                    onChange={(e) =>
+                      setRestaurantForm({ ...restaurantForm, preparation_time: e.target.value })
+                    }
+                    placeholder="e.g., 15"
+                    min="0"
+                  />
+                  <p className="text-xs text-gray-500">How many minutes does it take to prepare this item?</p>
+                </div>
+              </TabsContent>
+            )}
+
+            {/* BAR TAB */}
+            {isBar && (
+              <TabsContent value="bar" className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="volume_ml">Volume (ml)</Label>
+                  <Input
+                    id="volume_ml"
+                    type="number"
+                    step="0.01"
+                    value={barForm.volume_ml}
+                    onChange={(e) =>
+                      setBarForm({ ...barForm, volume_ml: e.target.value })
+                    }
+                    placeholder="e.g., 750"
+                    min="0"
+                  />
+                  <p className="text-xs text-gray-500">Volume in milliliters</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="alcohol_percentage">Alcohol Percentage (%)</Label>
+                  <Input
+                    id="alcohol_percentage"
+                    type="number"
+                    step="0.01"
+                    value={barForm.alcohol_percentage}
+                    onChange={(e) =>
+                      setBarForm({ ...barForm, alcohol_percentage: e.target.value })
+                    }
+                    placeholder="e.g., 5.5"
+                    min="0"
+                    max="100"
+                  />
+                  <p className="text-xs text-gray-500">Alcohol content percentage</p>
+                </div>
+              </TabsContent>
+            )}
+
+            {/* EXPIRY TAB */}
+            <TabsContent value="expiry" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    id="track_expiration"
+                    type="checkbox"
+                    checked={expiryForm.track_expiration}
+                    onChange={(e) =>
+                      setExpiryForm({ ...expiryForm, track_expiration: e.target.checked })
+                    }
+                    className="h-4 w-4"
+                    title="Enable expiration tracking"
+                  />
+                  <Label htmlFor="track_expiration" className="cursor-pointer">
+                    Track expiration for this product
+                  </Label>
+                </div>
+                <p className="text-xs text-gray-500">Enable expiry date tracking and alerts</p>
+              </div>
+
+              {expiryForm.track_expiration && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="manufacturing_date">Manufacturing Date</Label>
+                    <Input
+                      id="manufacturing_date"
+                      type="date"
+                      value={expiryForm.manufacturing_date}
+                      onChange={(e) =>
+                        setExpiryForm({ ...expiryForm, manufacturing_date: e.target.value })
+                      }
+                    />
+                    <p className="text-xs text-gray-500">When this product was manufactured</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="expiry_date">Expiry Date</Label>
+                    <Input
+                      id="expiry_date"
+                      type="date"
+                      value={expiryForm.expiry_date}
+                      onChange={(e) =>
+                        setExpiryForm({ ...expiryForm, expiry_date: e.target.value })
+                      }
+                    />
+                    <p className="text-xs text-gray-500">When this product expires</p>
+                  </div>
+                </>
+              )}
+            </TabsContent>
           </Tabs>
 
           <DialogFooter className="flex justify-between">
@@ -795,7 +959,12 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                   type="button"
                   variant="outline"
                   onClick={() => {
-                    const tabs = ["basic", "variations", "units", "pricing", "stock"]
+                    // Build tab order dynamically based on business type
+                    const tabs = ["basic", "units", "pricing", "stock"]
+                    if (isRestaurant) tabs.push("restaurant")
+                    if (isBar) tabs.push("bar")
+                    tabs.push("expiry")
+                    
                     const currentIdx = tabs.indexOf(activeTab)
                     if (currentIdx > 0) {
                       setActiveTab(tabs[currentIdx - 1])
@@ -805,11 +974,16 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                   Back
                 </Button>
               )}
-              {activeTab !== "stock" && (
+              {activeTab !== "expiry" && (
                 <Button
                   type="button"
                   onClick={() => {
-                    const tabs = ["basic", "variations", "units", "pricing", "stock"]
+                    // Build tab order dynamically based on business type
+                    const tabs = ["basic", "units", "pricing", "stock"]
+                    if (isRestaurant) tabs.push("restaurant")
+                    if (isBar) tabs.push("bar")
+                    tabs.push("expiry")
+                    
                     const currentIdx = tabs.indexOf(activeTab)
                     if (currentIdx < tabs.length - 1) {
                       setActiveTab(tabs[currentIdx + 1])
@@ -819,7 +993,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                   Next
                 </Button>
               )}
-              {activeTab === "stock" && (
+              {activeTab === "expiry" && (
                 <Button type="submit" disabled={isLoading}>
                   {isLoading ? "Saving..." : "Save Product"}
                 </Button>

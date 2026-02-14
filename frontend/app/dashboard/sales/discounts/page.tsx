@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input"
 import { 
   Search,
   Menu,
-  CalendarIcon,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -25,17 +24,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { saleService } from "@/lib/services/saleService"
 import { useToast } from "@/components/ui/use-toast"
-import { format, subDays } from "date-fns"
+import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
 import type { Sale } from "@/lib/types"
@@ -65,24 +58,42 @@ interface SaleDetail extends Sale {
 
 export default function DiscountsPage() {
   const router = useRouter()
-  const { currentBusiness } = useBusinessStore()
-  const { currentOutlet } = useTenant()
+  const { currentBusiness, currentOutlet: storeOutlet } = useBusinessStore()
+  const { currentOutlet: tenantOutlet } = useTenant()
   const { toast } = useToast()
+
+  const outlet = tenantOutlet || storeOutlet
 
   const [discountedSales, setDiscountedSales] = useState<SaleDetail[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
-  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({
-    from: subDays(new Date(), 30),
-    to: new Date(),
-  })
+  const [currentPage, setCurrentPage] = useState(1)
   const [selectedSale, setSelectedSale] = useState<SaleDetail | null>(null)
   const [showSaleDetails, setShowSaleDetails] = useState(false)
   const [isLoadingSaleDetails, setIsLoadingSaleDetails] = useState(false)
 
+  const PAGE_SIZE = 10
+
+  const getTotalDiscount = (sale: any) => {
+    const saleDiscount = Number(sale?._raw?.discount ?? sale?.discount ?? 0)
+    const items = sale?._raw?.items || sale?.items || []
+    const itemDiscount = Array.isArray(items)
+      ? items.reduce((sum: number, item: any) => sum + Number(item?.discount ?? 0), 0)
+      : 0
+    const safeSale = isNaN(saleDiscount) ? 0 : saleDiscount
+    const safeItems = isNaN(itemDiscount) ? 0 : itemDiscount
+    return safeSale + safeItems
+  }
+
   // Load discounted sales
   const loadDiscounts = useCallback(async () => {
-    if (!currentBusiness || !currentOutlet) {
+    if (!currentBusiness) {
+      setIsLoading(false)
+      return
+    }
+
+    const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+    if (!outletId) {
       setIsLoading(false)
       return
     }
@@ -90,24 +101,14 @@ export default function DiscountsPage() {
     setIsLoading(true)
     try {
       const filters: any = {
-        outlet: currentOutlet.id,
-      }
-      
-      if (dateRange.from) {
-        filters.date_from = format(dateRange.from, "yyyy-MM-dd")
-      }
-      if (dateRange.to) {
-        filters.date_to = format(dateRange.to, "yyyy-MM-dd")
+        outlet: outletId,
       }
 
       const response = await saleService.list(filters)
       const allSales = response.results || []
 
       // Filter for sales with discount > 0
-      const discounts = allSales.filter((sale: any) => {
-        const discount = sale._raw?.discount || sale.discount || 0
-        return discount > 0
-      })
+      const discounts = allSales.filter((sale: any) => getTotalDiscount(sale) > 0)
 
       const enrichedDiscounts = discounts.map((discount: any) => {
         const discountDetail: SaleDetail = { ...discount, _raw: discount._raw || discount }
@@ -155,7 +156,7 @@ export default function DiscountsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, currentOutlet, dateRange, toast])
+  }, [currentBusiness, outlet, toast])
 
   const getUserDisplay = (sale: SaleDetail) => {
     const user = sale.user
@@ -166,7 +167,34 @@ export default function DiscountsPage() {
 
   useEffect(() => {
     loadDiscounts()
+
+    if (typeof window === "undefined") return
+
+    const handleRefresh = () => {
+      loadDiscounts()
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        loadDiscounts()
+      }
+    }
+
+    window.addEventListener("sale-completed", handleRefresh)
+    window.addEventListener("focus", handleRefresh)
+    document.addEventListener("visibilitychange", handleVisibility)
+
+    return () => {
+      window.removeEventListener("sale-completed", handleRefresh)
+      window.removeEventListener("focus", handleRefresh)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
   }, [loadDiscounts])
+
+  // Reset page on search
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm])
 
   const filteredDiscounts = useMemo(() => {
     let filtered = discountedSales
@@ -183,10 +211,12 @@ export default function DiscountsPage() {
     return filtered
   }, [discountedSales, searchTerm])
 
-  const totalDiscountAmount = filteredDiscounts.reduce((sum, sale) => {
-    const discount = Number((sale as any)._raw?.discount || sale.discount || 0)
-    return sum + (isNaN(discount) ? 0 : discount)
-  }, 0)
+  const paginatedDiscounts = useMemo(() => {
+    const startIdx = (currentPage - 1) * PAGE_SIZE
+    return filteredDiscounts.slice(startIdx, startIdx + PAGE_SIZE)
+  }, [filteredDiscounts, currentPage])
+
+  const totalDiscountAmount = filteredDiscounts.reduce((sum, sale) => sum + getTotalDiscount(sale), 0)
 
   const handleViewSale = async (sale: SaleDetail) => {
     setIsLoadingSaleDetails(true)
@@ -211,6 +241,39 @@ export default function DiscountsPage() {
     }
   }
 
+  const renderPagination = () => {
+    const totalPages = Math.ceil(filteredDiscounts.length / PAGE_SIZE)
+    if (totalPages <= 1) return null
+
+    return (
+      <div className="flex items-center justify-between px-6 py-4 border-t border-gray-300 bg-gray-50">
+        <div className="text-sm text-gray-600">
+          Page {currentPage} of {totalPages}
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="border-gray-300"
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="border-gray-300"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full">
       <div className="px-6 pt-4 pb-2">
@@ -228,34 +291,6 @@ export default function DiscountsPage() {
                 className="pl-10 bg-white border-gray-300"
               />
             </div>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dateRange.from && dateRange.to
-                    ? `${format(dateRange.from, "MMM dd")} - ${format(dateRange.to, "MMM dd")}`
-                    : "Select date range"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <Calendar
-                  initialFocus
-                  mode="range"
-                  defaultMonth={dateRange.from}
-                  selected={{
-                    from: dateRange.from,
-                    to: dateRange.to,
-                  }}
-                  onSelect={(range) => {
-                    setDateRange({
-                      from: range?.from,
-                      to: range?.to,
-                    })
-                  }}
-                  numberOfMonths={2}
-                />
-              </PopoverContent>
-            </Popover>
           </div>
         </div>
 
@@ -279,7 +314,7 @@ export default function DiscountsPage() {
                   <TableRow className="bg-gray-50">
                     <TableHead className="text-gray-900 font-semibold">Receipt #</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Customer</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Date</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">Date & Time</TableHead>
                     <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                     <TableHead className="text-right text-gray-900 font-semibold">Subtotal</TableHead>
@@ -289,14 +324,14 @@ export default function DiscountsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredDiscounts.map((sale) => (
+                  {paginatedDiscounts.map((sale) => (
                     <TableRow key={sale.id} className="border-gray-300">
                       <TableCell className="font-medium">
                         {sale._raw?.receipt_number || sale.receipt_number || sale.id.slice(-6)}
                       </TableCell>
                       <TableCell>{sale.customer?.name || "Walk-in"}</TableCell>
                       <TableCell>
-                        {format(new Date((sale as any).created_at || sale.createdAt), "MMM dd, yyyy")}
+                        {format(new Date((sale as any).created_at || sale.createdAt), "MMM dd, yyyy HH:mm")}
                       </TableCell>
                       <TableCell>{getUserDisplay(sale)}</TableCell>
                       <TableCell>{sale.outlet?.name || "N/A"}</TableCell>
@@ -305,7 +340,7 @@ export default function DiscountsPage() {
                       </TableCell>
                       <TableCell className="text-right">
                         <Badge variant="secondary">
-                          {currentBusiness?.currencySymbol || "MWK"} {Number((sale as any)._raw?.discount || sale.discount || 0).toFixed(2)}
+                          {currentBusiness?.currencySymbol || "MWK"} {getTotalDiscount(sale).toFixed(2)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right font-semibold">
@@ -334,6 +369,7 @@ export default function DiscountsPage() {
                   ))}
                 </TableBody>
               </Table>
+              {renderPagination()}
             </div>
           )}
         </div>
