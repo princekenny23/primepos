@@ -212,7 +212,7 @@ export class ApiClient {
           errorData: errorData,
           // Don't log request body (may contain credentials)
         })
-        
+
         const apiError = new Error(errorMessage) as any
         apiError.status = response.status
         apiError.data = errorData
@@ -233,6 +233,9 @@ export class ApiClient {
       // Return empty object for responses without JSON content
       return {} as T
     } catch (error) {
+      if (error && typeof error === "object" && "status" in error) {
+        throw error
+      }
       if (error instanceof Error) {
         // Handle specific error types
         let errorMsg = ""
@@ -429,6 +432,7 @@ export const apiEndpoints = {
     update: (id: string) => `/sales/${id}/`,
     refund: (id: string) => `/sales/${id}/refund/`,
     stats: "/sales/stats/",
+    void: "/sales/void/",
   },
   // Receipts
   receipts: {
@@ -548,12 +552,26 @@ export const apiEndpoints = {
   // Reports
   reports: {
     sales: "/reports/sales/",
+    salesXlsx: "/reports/sales/export/xlsx/",
+    salesPdf: "/reports/sales/export/pdf/",
     products: "/reports/products/",
+    productsXlsx: "/reports/products/export/xlsx/",
+    productsPdf: "/reports/products/export/pdf/",
     customers: "/reports/customers/",
+    customersXlsx: "/reports/customers/export/xlsx/",
+    customersPdf: "/reports/customers/export/pdf/",
     profitLoss: "/reports/profit-loss/",
+    profitLossXlsx: "/reports/profit-loss/export/xlsx/",
+    profitLossPdf: "/reports/profit-loss/export/pdf/",
     stockMovement: "/reports/stock-movement/",
+    stockMovementXlsx: "/reports/stock-movement/export/xlsx/",
+    stockMovementPdf: "/reports/stock-movement/export/pdf/",
     expenses: "/reports/expenses/",
+    expensesXlsx: "/reports/expenses/export/xlsx/",
+    expensesPdf: "/reports/expenses/export/pdf/",
     inventoryValuation: "/reports/inventory-valuation/",
+    inventoryValuationXlsx: "/reports/inventory-valuation/export/xlsx/",
+    inventoryValuationPdf: "/reports/inventory-valuation/export/pdf/",
     dailySales: "/reports/daily-sales/",
     topProducts: "/reports/top-products/",
     cashSummary: "/reports/cash-summary/",

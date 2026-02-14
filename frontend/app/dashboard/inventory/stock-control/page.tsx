@@ -73,6 +73,7 @@ export default function StockControlPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
   const [activeTab, setActiveTab] = useState<string>("adjusts")
+  const pageSize = 15
   const useReal = useRealAPI()
   const { t } = useI18n()
   const { toast } = useToast()
@@ -89,6 +90,11 @@ export default function StockControlPage() {
   const [isLoadingTransfers, setIsLoadingTransfers] = useState(true)
   const [isLoadingReceiving, setIsLoadingReceiving] = useState(true)
   const [isLoadingReturns, setIsLoadingReturns] = useState(true)
+
+  const [adjustmentsPage, setAdjustmentsPage] = useState(1)
+  const [transfersPage, setTransfersPage] = useState(1)
+  const [receivingPage, setReceivingPage] = useState(1)
+  const [returnsPage, setReturnsPage] = useState(1)
 
   // Date range filter states
   const [startDate, setStartDate] = useState<string>('')
@@ -432,6 +438,94 @@ export default function StockControlPage() {
   const filteredTransfers = filterByDateRange(transfers)
   const filteredReceiving = filterByDateRange(receiving)
   const filteredReturns = filterByDateRange(returns)
+
+  const totalAdjustmentsPages = Math.max(1, Math.ceil(filteredAdjustments.length / pageSize))
+  const totalTransfersPages = Math.max(1, Math.ceil(filteredTransfers.length / pageSize))
+  const totalReceivingPages = Math.max(1, Math.ceil(filteredReceiving.length / pageSize))
+  const totalReturnsPages = Math.max(1, Math.ceil(filteredReturns.length / pageSize))
+
+  const paginatedAdjustments = filteredAdjustments.slice(
+    (adjustmentsPage - 1) * pageSize,
+    adjustmentsPage * pageSize
+  )
+  const paginatedTransfers = filteredTransfers.slice(
+    (transfersPage - 1) * pageSize,
+    transfersPage * pageSize
+  )
+  const paginatedReceiving = filteredReceiving.slice(
+    (receivingPage - 1) * pageSize,
+    receivingPage * pageSize
+  )
+  const paginatedReturns = filteredReturns.slice(
+    (returnsPage - 1) * pageSize,
+    returnsPage * pageSize
+  )
+
+  useEffect(() => {
+    setAdjustmentsPage(1)
+    setTransfersPage(1)
+    setReceivingPage(1)
+    setReturnsPage(1)
+  }, [startDate, endDate, activeTab])
+
+  useEffect(() => {
+    setAdjustmentsPage((prev) => Math.min(prev, totalAdjustmentsPages))
+  }, [totalAdjustmentsPages])
+
+  useEffect(() => {
+    setTransfersPage((prev) => Math.min(prev, totalTransfersPages))
+  }, [totalTransfersPages])
+
+  useEffect(() => {
+    setReceivingPage((prev) => Math.min(prev, totalReceivingPages))
+  }, [totalReceivingPages])
+
+  useEffect(() => {
+    setReturnsPage((prev) => Math.min(prev, totalReturnsPages))
+  }, [totalReturnsPages])
+
+  const renderPagination = (
+    totalItems: number,
+    currentPage: number,
+    totalPages: number,
+    onPageChange: (page: number) => void
+  ) => {
+    if (totalItems <= pageSize) return null
+
+    const startIndex = (currentPage - 1) * pageSize + 1
+    const endIndex = Math.min(currentPage * pageSize, totalItems)
+
+    return (
+      <div className="flex flex-col gap-2 px-4 py-3 border-t border-gray-200 bg-gray-50 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-gray-600">
+          Showing {startIndex}-{endIndex} of {totalItems}
+        </p>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500">
+            Page {currentPage} of {totalPages}
+          </span>
+          <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // Date range picker state
   const [showDatePicker, setShowDatePicker] = useState(false)
@@ -1162,7 +1256,7 @@ export default function StockControlPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredAdjustments.map((adjustment) => (
+                      paginatedAdjustments.map((adjustment) => (
                         <TableRow key={adjustment.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {adjustment.date
@@ -1210,6 +1304,12 @@ export default function StockControlPage() {
                     )}
                   </TableBody>
                 </Table>
+                {renderPagination(
+                  filteredAdjustments.length,
+                  adjustmentsPage,
+                  totalAdjustmentsPages,
+                  setAdjustmentsPage
+                )}
               </div>
             </div>
           </TabsContent>
@@ -1251,7 +1351,7 @@ export default function StockControlPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredTransfers.map((transfer) => (
+                      paginatedTransfers.map((transfer) => (
                         <TableRow key={transfer.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {transfer.date
@@ -1296,6 +1396,12 @@ export default function StockControlPage() {
                     )}
                   </TableBody>
                 </Table>
+                {renderPagination(
+                  filteredTransfers.length,
+                  transfersPage,
+                  totalTransfersPages,
+                  setTransfersPage
+                )}
               </div>
             </div>
           </TabsContent>
@@ -1338,7 +1444,7 @@ export default function StockControlPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredReceiving.map((rec) => (
+                      paginatedReceiving.map((rec) => (
                         <TableRow key={rec.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {rec.date
@@ -1389,6 +1495,12 @@ export default function StockControlPage() {
                     )}
                   </TableBody>
                 </Table>
+                {renderPagination(
+                  filteredReceiving.length,
+                  receivingPage,
+                  totalReceivingPages,
+                  setReceivingPage
+                )}
               </div>
             </div>
           </TabsContent>
@@ -1430,7 +1542,7 @@ export default function StockControlPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredReturns.map((returnItem) => (
+                      paginatedReturns.map((returnItem) => (
                         <TableRow key={returnItem.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {returnItem.created_at
@@ -1504,6 +1616,12 @@ export default function StockControlPage() {
                     )}
                   </TableBody>
                 </Table>
+                {renderPagination(
+                  filteredReturns.length,
+                  returnsPage,
+                  totalReturnsPages,
+                  setReturnsPage
+                )}
               </div>
             </div>
           </TabsContent>

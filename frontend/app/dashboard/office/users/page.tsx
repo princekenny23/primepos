@@ -60,6 +60,8 @@ export default function AccountsPage() {
   const [showAddRole, setShowAddRole] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [selectedRole, setSelectedRole] = useState<Role | null>(null)
+  const [roleToDelete, setRoleToDelete] = useState<Role | null>(null)
+  const [showDeleteRoleDialog, setShowDeleteRoleDialog] = useState(false)
   const [userToDelete, setUserToDelete] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const useReal = useRealAPI()
@@ -114,7 +116,7 @@ export default function AccountsPage() {
 
     try {
       if (useReal) {
-        const response = await roleService.list({ tenant: currentBusiness.id, is_active: true })
+        const response = await roleService.list({ tenant: currentBusiness.id })
         setRoles(response.results || [])
       } else {
         setRoles([])
@@ -124,6 +126,11 @@ export default function AccountsPage() {
       setRoles([])
     }
   }, [currentBusiness, useReal])
+
+  useEffect(() => {
+    loadUsers()
+    loadRoles()
+  }, [loadUsers, loadRoles])
   
   const handleDeleteUser = useCallback(async (userId: string) => {
     if (currentBusiness) {
@@ -131,6 +138,27 @@ export default function AccountsPage() {
       loadRoles()
     }
   }, [currentBusiness, loadUsers, loadRoles])
+
+  const handleDeleteRole = useCallback(async () => {
+    if (!roleToDelete) return
+
+    try {
+      await roleService.delete(String(roleToDelete.id))
+      toast({
+        title: "Role Deleted",
+        description: "Role has been deleted successfully.",
+      })
+      setShowDeleteRoleDialog(false)
+      setRoleToDelete(null)
+      loadRoles()
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete role.",
+        variant: "destructive",
+      })
+    }
+  }, [roleToDelete, loadRoles, toast])
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
@@ -410,16 +438,29 @@ export default function AccountsPage() {
                               {role.description || "No description provided"}
                             </p>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setSelectedRole(role)
-                              setShowAddRole(true)
-                            }}
-                          >
-                            <Settings className="h-5 w-5" />
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setSelectedRole(role)
+                                setShowAddRole(true)
+                              }}
+                            >
+                              <Settings className="h-5 w-5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive"
+                              onClick={() => {
+                                setRoleToDelete(role)
+                                setShowDeleteRoleDialog(true)
+                              }}
+                            >
+                              <Trash2 className="h-5 w-5" />
+                            </Button>
+                          </div>
                         </div>
                       )
                     })
@@ -470,17 +511,31 @@ export default function AccountsPage() {
                       <div key={role.id} className="space-y-6">
                         <div className="flex items-center justify-between border-b pb-2">
                           <h3 className="text-lg font-semibold">{role.name}</h3>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setSelectedRole(role)
-                              setShowAddRole(true)
-                            }}
-                          >
-                            <Settings className="h-4 w-4 mr-2" />
-                            Edit
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedRole(role)
+                                setShowAddRole(true)
+                              }}
+                            >
+                              <Settings className="h-4 w-4 mr-2" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive"
+                              onClick={() => {
+                                setRoleToDelete(role)
+                                setShowDeleteRoleDialog(true)
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete
+                            </Button>
+                          </div>
                         </div>
 
                         {/* Sales & Transactions */}
@@ -659,6 +714,27 @@ export default function AccountsPage() {
                   })
                 }
               }}
+              className="bg-destructive text-destructive-foreground"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Role Confirmation */}
+      <AlertDialog open={showDeleteRoleDialog} onOpenChange={setShowDeleteRoleDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Role?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this role? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteRole}
               className="bg-destructive text-destructive-foreground"
             >
               Delete

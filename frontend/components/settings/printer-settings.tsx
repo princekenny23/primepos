@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { api, apiEndpoints } from "@/lib/api"
 import { useBusinessStore } from "@/stores/businessStore"
 import { Button } from "@/components/ui/button"
@@ -8,51 +8,93 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
-import { useQZStore } from "@/stores/qzStore"
 
 
-// Minimal QZ Tray integration for discovery and selection.
-// This component loads the QZ script dynamically and provides
-// connect / discover / select functionality.
+const LOCAL_PRINT_AGENT_URL =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_AGENT_TOKEN =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
+
+function encodeTextToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ""
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b)
+  })
+  return btoa(binary)
+}
+
+async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (LOCAL_PRINT_AGENT_TOKEN) {
+    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
+  }
+  const response = await fetch(`${LOCAL_PRINT_AGENT_URL}${path}`, {
+    ...init,
+    headers: { ...headers, ...(init?.headers || {}) },
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    throw new Error(body || response.statusText)
+  }
+  return response
+}
 
 export function PrinterSettings() {
   const { toast } = useToast()
-  const enabled = useQZStore((s) => s.enabled)
-  const connected = useQZStore((s) => s.connected)
-  const printers = useQZStore((s) => s.printers)
-  const setEnabled = useQZStore((s) => s.setEnabled)
-  const refreshPrinters = useQZStore((s) => s.refreshPrinters)
+  const [connected, setConnected] = useState(false)
+  const [printers, setPrinters] = useState<string[]>([])
   const [selectedPrinter, setSelectedPrinter] = useState<string>(typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") || "" : "")
   const [isScanning, setIsScanning] = useState(false)
   const [manualPrinter, setManualPrinter] = useState("")
   const [rawOutputVisible, setRawOutputVisible] = useState(false)
   const [rawPrinters, setRawPrinters] = useState<any>(null)
   const [extraPrinters, setExtraPrinters] = useState<string[]>([])
+  const mergedPrinters = useMemo(
+    () => Array.from(new Set([...(printers || []), ...extraPrinters])),
+    [printers, extraPrinters]
+  )
 
-  // Load QZ Tray library from installed package (client-side only)
   useEffect(() => {
-    // Auto-enable QZ if user toggled integration
-    if (enabled && !connected) {
-      setEnabled(true)
+    const ping = async () => {
+      try {
+        await agentFetch("/health", { method: "GET" })
+        setConnected(true)
+      } catch {
+        setConnected(false)
+      }
     }
-  }, [enabled, connected, setEnabled])
+    ping()
+  }, [])
 
-  const connectQZ = async () => {
-    await setEnabled(true)
-    toast({ title: "QZ Connected", description: "Connected to QZ Tray on this machine." })
+  const connectAgent = async () => {
+    try {
+      await agentFetch("/health", { method: "GET" })
+      setConnected(true)
+      toast({ title: "Local agent connected", description: "Local Print Agent is running on this machine." })
+    } catch (err: any) {
+      setConnected(false)
+      toast({ title: "Agent not reachable", description: err?.message || "Unable to reach Local Print Agent." , variant: "destructive"})
+    }
   }
 
-  const disconnectQZ = async () => {
-    await setEnabled(false)
-    toast({ title: "QZ Disconnected" })
+  const disconnectAgent = async () => {
+    setConnected(false)
+    toast({ title: "Disconnected", description: "Disconnected from Local Print Agent." })
   }
 
   const scanPrinters = async () => {
     setIsScanning(true)
     try {
-      await refreshPrinters()
-      const combined = Array.from(new Set([...(printers || []), ...extraPrinters]))
+      const response = await agentFetch("/printers", { method: "GET" })
+      const data = await response.json().catch(() => ({}))
+      const discovered: string[] = Array.isArray(data?.printers) ? data.printers : []
+      setPrinters(discovered)
+      const combined = Array.from(new Set([...(discovered || []), ...extraPrinters]))
       setRawPrinters(combined)
+      if (data?.default && !selectedPrinter) {
+        setSelectedPrinter(String(data.default))
+      }
       toast({ title: "Printers discovered", description: `${combined.length} printers found` })
     } catch (err: any) {
       toast({ title: "Scan failed", description: (err && err.message) || String(err) })
@@ -66,25 +108,17 @@ export function PrinterSettings() {
       toast({ title: "No printer selected", description: "Select a printer to test-print." })
       return
     }
-    if (!(window as any).qz) {
-      toast({ title: "QZ not loaded", description: "QZ Tray library is not available." })
-      return
-    }
-
     try {
-      const qz = (window as any).qz
-      if (!qz?.websocket?.isActive()) {
-        await setEnabled(true)
-      }
-
-      const config = qz.configs.create(selectedPrinter)
-      const data = [
-        "\x1B@",
-        "TEST PRINT\n",
-        new Date().toLocaleString() + "\n\n",
-        "\x1DV\x01",
-      ]
-      await qz.print(config, data)
+      const text = `TEST PRINT\n${new Date().toLocaleString()}\n\n`
+      const contentBase64 = encodeTextToBase64(text)
+      await agentFetch("/print", {
+        method: "POST",
+        body: JSON.stringify({
+          printerName: selectedPrinter,
+          contentBase64,
+          jobName: "PrimePOS Test Print",
+        }),
+      })
       toast({ title: "Test print sent", description: `Sent test page to ${selectedPrinter}` })
     } catch (err: any) {
       console.error("Test print failed", err)
@@ -131,7 +165,7 @@ export function PrinterSettings() {
           outlet_id: outletId,
           name: selectedPrinter,
           identifier: selectedPrinter,
-          driver: "qz",
+          driver: "other",
           is_default: true,
         })
         toast({ title: "Printer saved", description: `Saved ${selectedPrinter} for this outlet.` })
@@ -145,13 +179,33 @@ export function PrinterSettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Printer Setup (QZ Tray)</CardTitle>
-        <CardDescription>Connect to QZ Tray to discover local printers and select a default receipt printer.</CardDescription>
+        <CardTitle>Printer Setup (Local Print Agent)</CardTitle>
+        <CardDescription>Connect to the Local Print Agent to discover local printers and select a default receipt printer.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded border p-3 text-sm space-y-2">
+          <div className="font-medium">Local Agent Configuration</div>
+          <div className="grid gap-2">
+            <div className="space-y-1">
+              <Label>Agent URL</Label>
+              <Input value={LOCAL_PRINT_AGENT_URL} readOnly />
+            </div>
+            <div className="space-y-1">
+              <Label>Agent Token</Label>
+              <Input
+                value={LOCAL_PRINT_AGENT_TOKEN ? "••••••••" : "Not set"}
+                readOnly
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Set NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL and NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN in your frontend environment.
+          </p>
+        </div>
+
         <div className="flex gap-2">
-          <Button onClick={connectQZ} disabled={connected}>Connect QZ</Button>
-          <Button variant="outline" onClick={disconnectQZ} disabled={!connected}>Disconnect</Button>
+          <Button onClick={connectAgent} disabled={connected}>Connect Agent</Button>
+          <Button variant="outline" onClick={disconnectAgent} disabled={!connected}>Disconnect</Button>
           <Button variant="ghost" onClick={scanPrinters} disabled={!connected || isScanning}>{isScanning ? "Scanning..." : "Scan Printers"}</Button>
         </div>
 
@@ -159,7 +213,7 @@ export function PrinterSettings() {
           <Label>Discovered Printers</Label>
           {printers.length === 0 && <p className="text-sm text-muted-foreground">No printers discovered yet.</p>}
           <div className="space-y-1">
-            {Array.from(new Set([...(printers || []), ...extraPrinters])).map((p) => (
+            {mergedPrinters.map((p) => (
               <label key={p} className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="radio"

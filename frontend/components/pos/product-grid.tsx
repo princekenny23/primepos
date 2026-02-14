@@ -33,7 +33,7 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 p-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-3 p-2">
         {products.map((product) => (
           <Card
             key={product.id}
@@ -46,7 +46,7 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
                   <Package className="h-8 w-8 text-primary" />
                 </div>
                 <div className="w-full">
-                  <p className="font-medium text-sm line-clamp-2">{product.name}</p>
+                  <p className="font-medium text-sm whitespace-normal break-normal">{product.name}</p>
                   <p className="text-xs text-muted-foreground mt-1">MWK {(product.price || 0).toFixed(2)}</p>
                   <p className="text-xs text-muted-foreground">Stock: {product.stock}</p>
                 </div>

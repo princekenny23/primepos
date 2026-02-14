@@ -99,8 +99,8 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 queryset = queryset.filter(outlet=outlet)
         
         # Filter by date range if provided
-        start_date = self.request.query_params.get('start_date')
-        end_date = self.request.query_params.get('end_date')
+        start_date = self.request.query_params.get('start_date') or self.request.query_params.get('date_from')
+        end_date = self.request.query_params.get('end_date') or self.request.query_params.get('date_to')
         if start_date:
             queryset = queryset.filter(created_at__gte=start_date)
         if end_date:
@@ -232,6 +232,8 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             guests=guests,
             priority=priority,
             till=till,
+            is_void=False,
+            void_reason='',
             **serializer.validated_data
         )
         
@@ -317,6 +319,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 quantity=quantity,
                 quantity_in_base_units=quantity_in_base_units,
                 price=price,
+                tax_rate_at_sale=Decimal('0'),
                 total=item_total,
                 notes=item_notes,
                 kitchen_status=kitchen_status
@@ -339,47 +342,58 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         discount = sale.discount or Decimal('0')
         # Round subtotal to 2 decimal places
         sale.subtotal = total_subtotal.quantize(Decimal('0.01'))
+        sale.tax_amount = tax
+        sale.discount_amount = discount
         # Round total to 2 decimal places
         sale.total = (total_subtotal + tax - discount).quantize(Decimal('0.01'))
         
         # Set status based on payment method and sale type
-        # For cash/card/mobile payments, mark as completed immediately
+        paid_amount = Decimal('0')
         if sale.payment_method in ['cash', 'card', 'mobile']:
             sale.status = 'completed'
             sale.payment_status = 'paid'
-        # For tab/restaurant orders, keep as pending until payment
-        elif sale.payment_method == 'tab' and not sale.status:
+            paid_amount = sale.total
+        elif sale.payment_method == 'tab':
+            # Tabs are on-account until payment
             sale.status = 'pending'
             sale.payment_status = 'unpaid'
-        # For credit sales, handle separately
         elif sale.payment_method == 'credit':
             if not sale.customer:
-                return Response(
-                    {"detail": "Customer is required for credit sales"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                raise serializers.ValidationError({"customer": "Customer is required for credit sales"})
             
             # Validate credit
             can_sell, error_message = sale.customer.can_make_credit_sale(sale.total)
             if not can_sell:
-                return Response(
-                    {"detail": error_message},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                raise serializers.ValidationError({"detail": error_message})
             
             # Set due date and payment status
             sale.due_date = timezone.now() + timedelta(days=sale.customer.payment_terms_days)
             sale.amount_paid = Decimal('0')
             sale.payment_status = 'unpaid'
             sale.status = 'completed'  # Credit sales are completed but unpaid
-        # If status was explicitly set in request data (e.g., restaurant orders), keep it
         elif not sale.status:
-            # Default to completed for any other payment method
             sale.status = 'completed'
             sale.payment_status = 'paid'
+            paid_amount = sale.total
+
+        if paid_amount > 0:
+            sale.amount_paid = paid_amount
+            if sale.payment_method == 'cash':
+                sale.cash_amount = paid_amount
+            elif sale.payment_method == 'card':
+                sale.card_amount = paid_amount
+            elif sale.payment_method == 'mobile':
+                sale.mobile_amount = paid_amount
         
         sale.save()
         logger.info(f"Sale saved: ID={sale.id}, Receipt={sale.receipt_number}, Status={sale.status}, Total={sale.total}, Payment={sale.payment_method}")
+
+        if sale.status == 'completed':
+            try:
+                from .services import ReceiptService
+                ReceiptService.generate_receipt(sale, format='pdf', user=request.user)
+            except Exception as e:
+                logger.error(f"Failed to auto-generate receipt for sale {sale.id}: {str(e)}")
         
         # Create Kitchen Order Ticket (KOT) if this is a restaurant order with a table
         if table and sale.status == 'pending':
@@ -428,6 +442,168 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to create sale notification: {str(e)}")
         
+        response_serializer = SaleSerializer(sale)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    @action(detail=False, methods=['post'], url_path='void')
+    def void_sale(self, request):
+        """Record a voided sale (no stock deduction)."""
+        logger = logging.getLogger(__name__)
+
+        tenant = self.get_tenant_for_request(request)
+        if not tenant and not request.user.is_saas_admin:
+            return Response({"detail": "User must have a tenant"}, status=status.HTTP_400_BAD_REQUEST)
+        if not tenant:
+            return Response({"detail": "Tenant is required. Please provide tenant_id in request data."}, status=status.HTTP_400_BAD_REQUEST)
+
+        outlet_id = request.data.get("outlet")
+        if not outlet_id:
+            return Response({"detail": "outlet is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from apps.outlets.models import Outlet
+        try:
+            outlet = Outlet.objects.get(id=outlet_id, tenant=tenant)
+        except Outlet.DoesNotExist:
+            return Response({"detail": "Invalid outlet"}, status=status.HTTP_400_BAD_REQUEST)
+
+        shift = None
+        shift_id = request.data.get("shift")
+        if shift_id:
+            from apps.shifts.models import Shift
+            shift = Shift.objects.get(id=shift_id, outlet__tenant=tenant)
+
+        customer = None
+        customer_id = request.data.get("customer")
+        if customer_id:
+            from apps.customers.models import Customer
+            customer = Customer.objects.get(id=customer_id, tenant=tenant)
+
+        items_data = request.data.get("items_data") or request.data.get("items") or []
+        if not items_data:
+            return Response({"detail": "items_data is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        def to_decimal(value, field_name, default=None):
+            if value is None or value == "":
+                return default
+            try:
+                return Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                raise serializers.ValidationError({field_name: "Invalid decimal value"})
+
+        computed_subtotal = Decimal("0")
+        parsed_items = []
+
+        for idx, item_data in enumerate(items_data):
+            product_id = item_data.get("product_id") or item_data.get("productId")
+            if not product_id:
+                raise serializers.ValidationError(f"Item {idx + 1}: product_id is required")
+
+            try:
+                quantity = int(item_data.get("quantity", 1))
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(f"Item {idx + 1}: Invalid quantity")
+
+            if quantity <= 0:
+                raise serializers.ValidationError(f"Item {idx + 1}: Quantity must be greater than 0")
+
+            price = to_decimal(item_data.get("price", "0"), f"items_data[{idx}].price", Decimal("0"))
+            if price <= 0:
+                raise serializers.ValidationError(f"Item {idx + 1}: Price must be greater than 0")
+
+            try:
+                product = Product.objects.get(id=product_id, tenant=tenant, outlet=outlet)
+            except Product.DoesNotExist:
+                raise serializers.ValidationError(f"Item {idx + 1}: Product {product_id} not found")
+
+            unit_id = item_data.get("unit_id") or item_data.get("unitId")
+            unit = None
+            quantity_in_base_units = quantity
+            unit_name = product.unit
+
+            if unit_id:
+                try:
+                    unit = ProductUnit.objects.get(id=unit_id, product=product, is_active=True)
+                    quantity_in_base_units = unit.convert_to_base_units(quantity)
+                    unit_name = unit.unit_name
+                except ProductUnit.DoesNotExist:
+                    raise serializers.ValidationError(f"Item {idx + 1}: Unit {unit_id} not found or inactive")
+
+            item_total = (price * Decimal(quantity)).quantize(Decimal("0.01"))
+            computed_subtotal += item_total
+
+            item_discount = to_decimal(item_data.get("discount", 0), f"items_data[{idx}].discount", Decimal("0"))
+
+            parsed_items.append({
+                "product": product,
+                "unit": unit,
+                "unit_name": unit_name,
+                "quantity": quantity,
+                "quantity_in_base_units": quantity_in_base_units,
+                "price": price.quantize(Decimal("0.01")),
+                "discount": item_discount,
+                "total": item_total,
+                "notes": item_data.get("notes", ""),
+            })
+
+        subtotal = to_decimal(request.data.get("subtotal"), "subtotal", None) or computed_subtotal
+        tax = to_decimal(request.data.get("tax", 0), "tax", Decimal("0"))
+        discount = to_decimal(request.data.get("discount", 0), "discount", Decimal("0"))
+        total = to_decimal(request.data.get("total"), "total", None)
+
+        if total is None or total <= 0:
+            total = (subtotal + tax - discount).quantize(Decimal("0.01"))
+
+        if total <= 0:
+            return Response({"detail": "total must be greater than 0"}, status=status.HTTP_400_BAD_REQUEST)
+
+        receipt_number = self._generate_receipt_number(tenant)
+        notes = request.data.get("notes", "") or ""
+        reason = request.data.get("reason") or request.data.get("void_reason") or ""
+        if reason:
+            notes = f"{notes} Void reason: {reason}".strip() if notes else f"Void reason: {reason}"
+
+        sale = Sale.objects.create(
+            receipt_number=receipt_number,
+            user=request.user,
+            tenant=tenant,
+            outlet=outlet,
+            shift=shift,
+            customer=customer,
+            subtotal=subtotal.quantize(Decimal("0.01")),
+            tax=tax.quantize(Decimal("0.01")),
+            discount=discount.quantize(Decimal("0.01")),
+            discount_amount=discount.quantize(Decimal("0.01")),
+            total=total.quantize(Decimal("0.01")),
+            payment_method=request.data.get("payment_method") or "cash",
+            status="cancelled",
+            payment_status="unpaid",
+            amount_paid=Decimal("0"),
+            is_void=True,
+            void_reason=reason or "",
+            notes=notes,
+        )
+
+        for item in parsed_items:
+            SaleItem.objects.create(
+                sale=sale,
+                product=item["product"],
+                unit=item["unit"],
+                product_name=item["product"].name,
+                variation_name="",
+                unit_name=item["unit_name"] or "",
+                quantity=item["quantity"],
+                quantity_in_base_units=item["quantity_in_base_units"],
+                price=item["price"],
+                discount=item["discount"] or Decimal("0"),
+                tax_rate_at_sale=Decimal("0"),
+                total=item["total"],
+                notes=item["notes"] or "",
+                kitchen_status="cancelled",
+            )
+
+        logger.info(f"Void sale recorded: ID={sale.id}, Receipt={sale.receipt_number}")
+
         response_serializer = SaleSerializer(sale)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
     
@@ -652,11 +828,17 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             subtotal=subtotal,
             tax=tax,
             discount=discount,
+            discount_amount=discount,
             total=total,
             payment_method='cash',
             status='completed',
+            amount_paid=total,
+            payment_status='paid',
+            cash_amount=total,
             cash_received=cash_received,
             change_given=change_given,
+            is_void=False,
+            void_reason='',
             notes=request.data.get('notes', '')
         )
         
@@ -672,6 +854,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 quantity=item_data['quantity'],
                 quantity_in_base_units=item_data['quantity'],
                 price=item_data['price'],
+                tax_rate_at_sale=Decimal('0'),
                 total=item_data['total'],
             )
             
@@ -718,6 +901,13 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         # Cash movement creation removed - new payment system will handle this
         
+        # Auto-generate receipt PDF for completed cash sales
+        try:
+            from .services import ReceiptService
+            ReceiptService.generate_receipt(sale, format='pdf', user=request.user)
+        except Exception as e:
+            logger.error(f"Failed to auto-generate receipt for cash sale {sale.id}: {str(e)}")
+
         # Return response
         response_serializer = SaleSerializer(sale)
         shift_serializer = None
@@ -777,25 +967,72 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             )
         
         refund_reason = request.data.get('reason', '')
+        refund_method = request.data.get('refund_method')
+        restock = request.data.get('restock', True)
+        if isinstance(restock, str):
+            restock = restock.strip().lower() in ['true', '1', 'yes', 'y']
+        items_data = request.data.get('items') or []
         
         with transaction.atomic():
-            # Restore stock for all items - ensure product belongs to tenant
-            for item in sale.items.all():
-                if item.product:
+            refund_amount = Decimal('0')
+            refund_items = []
+
+            if items_data:
+                items_map = {}
+                for entry in items_data:
+                    if not isinstance(entry, dict):
+                        continue
+                    item_id = entry.get('item_id') or entry.get('sale_item_id') or entry.get('id')
+                    if not item_id:
+                        continue
+                    try:
+                        quantity = Decimal(str(entry.get('quantity', 0)))
+                    except (InvalidOperation, TypeError, ValueError):
+                        quantity = Decimal('0')
+                    items_map[str(item_id)] = quantity
+
+                for item in sale.items.all():
+                    qty = items_map.get(str(item.id))
+                    if qty and qty > 0:
+                        qty = min(qty, Decimal(item.quantity))
+                        refund_items.append((item, qty))
+            else:
+                for item in sale.items.all():
+                    refund_items.append((item, Decimal(item.quantity)))
+
+            # Restore stock for selected items (if enabled) and compute refund amount
+            for item, qty in refund_items:
+                if qty <= 0:
+                    continue
+
+                per_unit = Decimal('0')
+                if item.quantity:
+                    per_unit = (item.total / Decimal(item.quantity))
+                elif item.price:
+                    per_unit = item.price
+
+                refund_amount += (per_unit * qty)
+
+                if restock and item.product:
                     # CRITICAL: Verify product belongs to tenant
                     product = Product.objects.select_for_update().get(id=item.product.id, tenant=sale.tenant)
-                    product.stock += item.quantity
+                    product.stock += int(qty)
                     product.save()
-                    
-                    # Record stock movement
+
+                    reason_parts = [f"Refund for sale {sale.receipt_number}"]
+                    if refund_reason:
+                        reason_parts.append(str(refund_reason))
+                    if refund_method:
+                        reason_parts.append(f"Method: {refund_method}")
+
                     StockMovement.objects.create(
                         tenant=sale.tenant,
                         product=product,
                         outlet=sale.outlet,
                         user=request.user,
                         movement_type='return',
-                        quantity=item.quantity,
-                        reason=f"Refund for sale {sale.receipt_number}: {refund_reason}",
+                        quantity=int(qty),
+                        reason=": ".join(reason_parts),
                         reference_id=str(sale.id)
                     )
             
@@ -805,13 +1042,13 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             
             # Update customer if exists
             if sale.customer:
-                sale.customer.total_spent = max(0, sale.customer.total_spent - sale.total)
+                sale.customer.total_spent = max(0, sale.customer.total_spent - refund_amount)
                 sale.customer.save()
         
         serializer = self.get_serializer(sale)
         return Response(serializer.data)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], url_path='generate-receipt')
     def generate_receipt(self, request, pk=None):
         """Generate a receipt for this sale on-demand.
 
@@ -835,6 +1072,10 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to generate receipt for sale {sale.id}: {str(e)}", exc_info=True)
             return Response({"detail": "Failed to generate receipt"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], url_path='generate_receipt')
+    def generate_receipt_alias(self, request, pk=None):
+        return self.generate_receipt(request, pk=pk)
 
     @action(detail=True, methods=['get'], url_path='escpos-receipt')
     def escpos_receipt(self, request, pk=None):
@@ -1048,6 +1289,14 @@ class ReceiptViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
                     queryset = queryset.filter(sale__outlet=outlet)
             except (ValueError, TypeError):
                 pass
+
+        # Filter by date range if provided (receipt generated_at)
+        start_date = self.request.query_params.get('start_date') or self.request.query_params.get('date_from')
+        end_date = self.request.query_params.get('end_date') or self.request.query_params.get('date_to')
+        if start_date:
+            queryset = queryset.filter(generated_at__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(generated_at__lte=end_date)
         
         return queryset
     

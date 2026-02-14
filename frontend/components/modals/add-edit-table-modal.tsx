@@ -139,7 +139,7 @@ export function AddEditTableModal({ open, onOpenChange, table, onSuccess }: AddE
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{table ? "Edit Table" : "Add New Table"}</DialogTitle>
           <DialogDescription>
@@ -148,7 +148,7 @@ export function AddEditTableModal({ open, onOpenChange, table, onSuccess }: AddE
         </DialogHeader>
         
         <form onSubmit={handleSubmit}>
-          <div className="space-y-4 py-4">
+          <div className="grid grid-cols-1 gap-4 py-4 md:grid-cols-2">
             {!currentOutlet && (
               <div className="space-y-2">
                 <Label htmlFor="outlet">Outlet</Label>
@@ -231,7 +231,7 @@ export function AddEditTableModal({ open, onOpenChange, table, onSuccess }: AddE
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-2">
               <Label htmlFor="notes">Notes</Label>
               <textarea
                 id="notes"

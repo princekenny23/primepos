@@ -16,7 +16,6 @@ import { Card } from "@/components/ui/card"
 import { 
   Search,
   Menu,
-  CalendarIcon,
 } from "lucide-react"
 import {
   DropdownMenu,
@@ -26,19 +25,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { saleService } from "@/lib/services/saleService"
 import { useToast } from "@/components/ui/use-toast"
-import { format, subDays } from "date-fns"
+import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
+import { RefundReturnModal } from "@/components/modals/refund-return-modal"
 import { useI18n } from "@/contexts/i18n-context"
 import type { Sale } from "@/lib/types"
 
@@ -67,25 +61,79 @@ interface SaleDetail extends Sale {
 
 export default function TransactionsPage() {
   const router = useRouter()
-  const { currentBusiness } = useBusinessStore()
-  const { currentOutlet } = useTenant()
+  const { currentBusiness, currentOutlet: storeOutlet } = useBusinessStore()
+  const { currentOutlet: tenantOutlet } = useTenant()
   const { toast } = useToast()
   const { t } = useI18n()
+
+  const outlet = tenantOutlet || storeOutlet
 
   const [sales, setSales] = useState<SaleDetail[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
-  const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({
-    from: subDays(new Date(), 30),
-    to: new Date(),
-  })
+  const [currentPage, setCurrentPage] = useState(1)
+  const PAGE_SIZE = 10
   const [selectedSale, setSelectedSale] = useState<SaleDetail | null>(null)
   const [showSaleDetails, setShowSaleDetails] = useState(false)
   const [isLoadingSaleDetails, setIsLoadingSaleDetails] = useState(false)
+  const [showRefundReturn, setShowRefundReturn] = useState(false)
+  const [refundReceiptNumber, setRefundReceiptNumber] = useState("")
+
+  const enrichSale = useCallback((sale: any): SaleDetail => {
+    const saleDetail: SaleDetail = { ...sale, _raw: sale._raw || sale }
+
+    if (sale._raw?.customer_detail) {
+      saleDetail.customer = {
+        id: String(sale._raw.customer_detail.id),
+        name: sale._raw.customer_detail.name,
+        email: sale._raw.customer_detail.email || "",
+        phone: sale._raw.customer_detail.phone || "",
+      }
+    }
+
+    if (sale._raw?.outlet_detail) {
+      saleDetail.outlet = {
+        id: String(sale._raw.outlet_detail.id),
+        name: sale._raw.outlet_detail.name,
+      }
+    }
+
+    if (sale._raw?.user_detail) {
+      saleDetail.user = {
+        id: String(sale._raw.user_detail.id),
+        email: sale._raw.user_detail.email || "",
+        first_name: sale._raw.user_detail.first_name || "",
+        last_name: sale._raw.user_detail.last_name || "",
+      }
+    }
+
+    saleDetail.receipt_number = sale._raw?.receipt_number || sale.receipt_number
+    saleDetail.payment_method = sale._raw?.payment_method || sale.payment_method || sale.paymentMethod
+
+    return saleDetail
+  }, [])
+
+  const upsertSale = useCallback((sale: SaleDetail) => {
+    setSales((prev) => {
+      const existingIndex = prev.findIndex((item) => String(item.id) === String(sale.id))
+      if (existingIndex >= 0) {
+        const updated = [...prev]
+        updated[existingIndex] = sale
+        return updated
+      }
+      return [sale, ...prev]
+    })
+  }, [])
 
   // Load transactions
   const loadTransactions = useCallback(async () => {
-    if (!currentBusiness || !currentOutlet) {
+    if (!currentBusiness) {
+      setIsLoading(false)
+      return
+    }
+
+    const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+    if (!outletId) {
       setIsLoading(false)
       return
     }
@@ -93,53 +141,16 @@ export default function TransactionsPage() {
     setIsLoading(true)
     try {
       const filters: any = {
-        status: "completed",
-        outlet: currentOutlet.id,
-      }
-      
-      if (dateRange.from) {
-        filters.date_from = format(dateRange.from, "yyyy-MM-dd")
-      }
-      if (dateRange.to) {
-        filters.date_to = format(dateRange.to, "yyyy-MM-dd")
+        outlet: outletId,
       }
 
       const response = await saleService.list(filters)
-      const salesData = response.results || []
-
-      const enrichedSales = salesData.map((sale: any) => {
-        const saleDetail: SaleDetail = { ...sale, _raw: sale._raw || sale }
-        
-        if (sale._raw?.customer_detail) {
-          saleDetail.customer = {
-            id: String(sale._raw.customer_detail.id),
-            name: sale._raw.customer_detail.name,
-            email: sale._raw.customer_detail.email || '',
-            phone: sale._raw.customer_detail.phone || '',
-          }
-        }
-
-        if (sale._raw?.outlet_detail) {
-          saleDetail.outlet = {
-            id: String(sale._raw.outlet_detail.id),
-            name: sale._raw.outlet_detail.name,
-          }
-        }
-
-        if (sale._raw?.user_detail) {
-          saleDetail.user = {
-            id: String(sale._raw.user_detail.id),
-            email: sale._raw.user_detail.email || '',
-            first_name: sale._raw.user_detail.first_name || '',
-            last_name: sale._raw.user_detail.last_name || '',
-          }
-        }
-
-        saleDetail.receipt_number = sale._raw?.receipt_number || sale.receipt_number
-        saleDetail.payment_method = sale._raw?.payment_method || sale.payment_method || sale.paymentMethod
-
-        return saleDetail
+      const salesData = (response.results || []).filter((sale: any) => {
+        const status = String(sale?.status || sale?._raw?.status || "").toLowerCase()
+        return status === "completed" || status === "pending"
       })
+
+      const enrichedSales = salesData.map(enrichSale)
 
       setSales(enrichedSales)
     } catch (error: any) {
@@ -153,7 +164,7 @@ export default function TransactionsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, currentOutlet, dateRange, toast])
+  }, [currentBusiness, outlet, toast, enrichSale])
 
   const getUserDisplay = (sale: SaleDetail) => {
     const user = sale.user
@@ -164,7 +175,70 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     loadTransactions()
-  }, [loadTransactions])
+
+    if (typeof window === "undefined") return
+
+    const handleRefresh = () => {
+      loadTransactions()
+    }
+
+    const handleSaleCreated = async (event: Event) => {
+      const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+      if (!outletId) return
+
+      const detail = (event as CustomEvent)?.detail
+      const saleId = detail?.saleId
+
+      if (detail?.sale) {
+        const detailOutletId = detail?.outletId
+        if (!detailOutletId || String(detailOutletId) === String(outletId)) {
+          upsertSale(enrichSale(detail.sale))
+          return
+        }
+      }
+
+      if (saleId) {
+        try {
+          const fullSale = await saleService.get(String(saleId))
+          upsertSale(enrichSale(fullSale))
+          return
+        } catch (error) {
+          console.error("Failed to fetch sale after creation:", error)
+        }
+      }
+
+      try {
+        const response = await saleService.list({ outlet: String(outletId), limit: 1 })
+        const latestSale = response.results?.[0]
+        if (latestSale) {
+          upsertSale(enrichSale(latestSale))
+        }
+      } catch (error) {
+        console.error("Failed to refresh latest sale:", error)
+      }
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        loadTransactions()
+      }
+    }
+
+    window.addEventListener("sale-completed", handleSaleCreated)
+    window.addEventListener("focus", handleRefresh)
+    document.addEventListener("visibilitychange", handleVisibility)
+
+    return () => {
+      window.removeEventListener("sale-completed", handleSaleCreated)
+      window.removeEventListener("focus", handleRefresh)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
+  }, [loadTransactions, outlet?.id, enrichSale, upsertSale])
+
+  // Reset page on search
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm])
 
   const filteredSales = useMemo(() => {
     if (!searchTerm) return sales
@@ -177,6 +251,11 @@ export default function TransactionsPage() {
       )
     })
   }, [sales, searchTerm])
+
+  const paginatedSales = useMemo(() => {
+    const startIdx = (currentPage - 1) * PAGE_SIZE
+    return filteredSales.slice(startIdx, startIdx + PAGE_SIZE)
+  }, [filteredSales, currentPage])
 
   const handleViewSale = async (sale: SaleDetail) => {
     setIsLoadingSaleDetails(true)
@@ -206,6 +285,45 @@ export default function TransactionsPage() {
     }
   }
 
+  const handleRefundReturn = (sale: SaleDetail) => {
+    const receipt = sale._raw?.receipt_number || sale.receipt_number || ""
+    setRefundReceiptNumber(String(receipt || ""))
+    setShowRefundReturn(true)
+  }
+
+  const renderPagination = () => {
+    const totalPages = Math.ceil(filteredSales.length / PAGE_SIZE)
+    if (totalPages <= 1) return null
+
+    return (
+      <div className="flex items-center justify-between px-6 py-4 border-t border-gray-300 bg-gray-50">
+        <div className="text-sm text-gray-600">
+          Page {currentPage} of {totalPages}
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="border-gray-300"
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="border-gray-300"
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="w-full">
       <div className="px-6 pt-4 pb-2">
@@ -224,34 +342,6 @@ export default function TransactionsPage() {
                 className="pl-10 bg-white border-gray-300"
               />
             </div>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50">
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dateRange.from && dateRange.to
-                    ? `${format(dateRange.from, "MMM dd")} - ${format(dateRange.to, "MMM dd")}`
-                    : "Select date range"}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="end">
-                <Calendar
-                  initialFocus
-                  mode="range"
-                  defaultMonth={dateRange.from}
-                  selected={{
-                    from: dateRange.from,
-                    to: dateRange.to,
-                  }}
-                  onSelect={(range) => {
-                    setDateRange({
-                      from: range?.from,
-                      to: range?.to,
-                    })
-                  }}
-                  numberOfMonths={2}
-                />
-              </PopoverContent>
-            </Popover>
           </div>
         </div>
 
@@ -268,7 +358,7 @@ export default function TransactionsPage() {
                   <TableRow className="bg-gray-50">
                     <TableHead className="text-gray-900 font-semibold">Receipt #</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Customer</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Date</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">Date & Time</TableHead>
                     <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Payment Method</TableHead>
@@ -278,14 +368,14 @@ export default function TransactionsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredSales.map((sale) => (
+                  {paginatedSales.map((sale) => (
                     <TableRow key={sale.id} className="border-gray-300">
                       <TableCell className="font-medium">
                         {sale._raw?.receipt_number || sale.receipt_number || sale.id.slice(-6)}
                       </TableCell>
                       <TableCell>{sale.customer?.name || "Walk-in"}</TableCell>
                       <TableCell>
-                        {format(new Date((sale as any).created_at || sale.createdAt), "MMM dd, yyyy")}
+                        {format(new Date((sale as any).created_at || sale.createdAt), "MMM dd, yyyy HH:mm")}
                       </TableCell>
                       <TableCell>{getUserDisplay(sale)}</TableCell>
                       <TableCell>{sale.outlet?.name || "N/A"}</TableCell>
@@ -316,6 +406,9 @@ export default function TransactionsPage() {
                             >
                               View Details
                             </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleRefundReturn(sale)}>
+                              Refund / Return
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -323,6 +416,7 @@ export default function TransactionsPage() {
                   ))}
                 </TableBody>
               </Table>
+              {renderPagination()}
             </div>
           )}
         </div>
@@ -358,6 +452,12 @@ export default function TransactionsPage() {
           }}
         />
       )}
+
+      <RefundReturnModal
+        open={showRefundReturn}
+        onOpenChange={setShowRefundReturn}
+        initialReceiptNumber={refundReceiptNumber}
+      />
     </div>
   )
 }

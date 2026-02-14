@@ -19,9 +19,14 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Receipt, Download, Printer, Store, User, CreditCard } from "lucide-react"
+import { useState } from "react"
 import { useBusinessStore } from "@/stores/businessStore"
 import { formatCurrency } from "@/lib/utils/currency"
-import { useI18n } from "@/contexts/i18n-context"
+import { receiptService } from "@/lib/services/receiptService"
+import { printReceipt } from "@/lib/print"
+import { api, apiEndpoints } from "@/lib/api"
+import { useToast } from "@/components/ui/use-toast"
+import { saleService } from "@/lib/services/saleService"
 
 interface SaleItem {
   id: string
@@ -53,8 +58,99 @@ interface ViewSaleDetailsModalProps {
 
 export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetailsModalProps) {
   const { currentBusiness } = useBusinessStore()
+  const { toast } = useToast()
+  const [isPrinting, setIsPrinting] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
   
   if (!sale) return null
+
+  const getReceiptRecord = async () => {
+    const response = await saleService.list({ search: String(sale.id) })
+    const match = response.results?.[0]
+    if (!match?.id) {
+      throw new Error("Sale not found for this receipt number.")
+    }
+    try {
+      return await receiptService.getBySale(String(match.id))
+    } catch (error: any) {
+      const status = error?.status || error?.response?.status
+      const message = String(error?.message || "").toLowerCase()
+      const isNotFound = status === 404 || message.includes("receipt not found")
+
+      if (!isNotFound) {
+        throw error
+      }
+
+      await api.post(`${apiEndpoints.sales.get(String(match.id))}generate-receipt/`, { format: "pdf" })
+      return await receiptService.getBySale(String(match.id))
+    }
+  }
+
+  const downloadReceiptPdf = async () => {
+    setIsDownloading(true)
+    try {
+      let receipt = await getReceiptRecord()
+      if (receipt.format !== "pdf") {
+        receipt = await receiptService.regenerate(receipt.id, "pdf")
+      }
+      const { data, contentType } = await receiptService.download(receipt.id)
+
+      const isPdf = contentType?.includes("pdf") || receipt.format === "pdf"
+      const mimeType = isPdf ? "application/pdf" : "text/plain"
+      const extension = isPdf ? "pdf" : "txt"
+
+      const blob = new Blob([data], { type: mimeType })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `Receipt-${receipt.receipt_number || sale.id}.${extension}`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (error: any) {
+      toast({
+        title: "Download Failed",
+        description: error?.message || "Unable to download receipt.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDownloading(false)
+    }
+  }
+
+  const handlePrintReceipt = async () => {
+    setIsPrinting(true)
+    try {
+      const receiptCart = sale.items.map((item) => ({
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+        total: item.total,
+      }))
+
+      await printReceipt(
+        {
+          cart: receiptCart,
+          subtotal: sale.subtotal,
+          discount: sale.discount,
+          tax: sale.tax,
+          total: sale.total,
+          sale: { id: sale.id },
+        },
+        undefined
+      )
+    } catch (error: any) {
+      toast({
+        title: "Print Failed",
+        description:
+          error?.message || "Unable to print receipt. Make sure the Local Print Agent is running.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsPrinting(false)
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -186,13 +282,13 @@ export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetai
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button variant="outline">
+          <Button variant="outline" onClick={handlePrintReceipt} disabled={isPrinting}>
             <Printer className="mr-2 h-4 w-4" />
-            Print Receipt
+            {isPrinting ? "Printing..." : "Print Receipt"}
           </Button>
-          <Button variant="outline">
+          <Button variant="outline" onClick={downloadReceiptPdf} disabled={isDownloading}>
             <Download className="mr-2 h-4 w-4" />
-            Download PDF
+            {isDownloading ? "Downloading..." : "Download PDF"}
           </Button>
         </DialogFooter>
       </DialogContent>

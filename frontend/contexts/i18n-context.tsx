@@ -167,13 +167,13 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }
     
     // Fallback: return key (development helper)
-    if (process.env.NODE_ENV === "development") {
+    if (process.env.NODE_ENV === "development" && isReady) {
       console.warn(`Missing translation: ${key}`)
     }
     
     // Return key with interpolation if applicable
     return interpolate(key, params)
-  }, [translations])
+  }, [translations, isReady])
 
   const value = useMemo(
     () => ({

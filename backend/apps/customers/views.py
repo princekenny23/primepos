@@ -11,6 +11,7 @@ from .models import Customer, LoyaltyTransaction, CreditPayment
 from .serializers import CustomerSerializer, LoyaltyTransactionSerializer, CreditPaymentSerializer
 from apps.tenants.permissions import TenantFilterMixin
 from apps.sales.models import Sale
+from django.db.models import F
 
 
 class CustomerViewSet(viewsets.ModelViewSet, TenantFilterMixin):
@@ -168,10 +169,11 @@ class CustomerViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         tenant = getattr(request, 'tenant', None) or request.user.tenant
         
         # Get unpaid credit sales
+        # Include both formal credit invoices and customer-linked tabs in the unpaid list
         unpaid_sales = Sale.objects.filter(
             customer=customer,
             tenant=tenant,
-            payment_method='credit',
+            payment_method__in=['credit', 'tab'],
             payment_status__in=['unpaid', 'partially_paid', 'overdue']
         ).order_by('created_at')
         
@@ -298,12 +300,27 @@ class CreditPaymentViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def perform_create(self, serializer):
         tenant = getattr(self.request, 'tenant', None) or self.request.user.tenant
         serializer.save(tenant=tenant, user=self.request.user)
-        
-        # Update sale payment status and amount_paid
+        # Atomically update sale method breakdown and amount_paid
         sale = serializer.instance.sale
-        sale.amount_paid += serializer.instance.amount
-        sale.save(update_fields=['amount_paid'])
-        sale.update_payment_status()
+        pm = (serializer.instance.payment_method or 'other')
+        field_map = {
+            'cash': 'cash_amount',
+            'card': 'card_amount',
+            'mobile': 'mobile_amount',
+            'bank_transfer': 'bank_transfer_amount',
+            'other': 'other_amount',
+            'tab': 'tab_amount',
+            'credit': 'credit_amount',
+        }
+        target_field = field_map.get(pm, 'other_amount')
+
+        with transaction.atomic():
+            Sale.objects.filter(pk=sale.pk).update(
+                **{target_field: F(target_field) + serializer.instance.amount},
+                amount_paid=F('amount_paid') + serializer.instance.amount,
+            )
+            sale.refresh_from_db()
+            sale.update_payment_status()
         
         # Update customer if needed (outstanding balance is calculated property)
 

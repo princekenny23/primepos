@@ -9,10 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { SalesChart } from "@/components/dashboard/sales-chart"
 import { RefreshCw, FileSpreadsheet, Printer } from "lucide-react"
-import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
-import { PrintReportModal } from "@/components/modals/print-report-modal"
 import { ReportSettingsModal } from "@/components/modals/report-settings-modal"
-import { dataExchangeConfigs } from "@/lib/utils/data-exchange-config"
 import { useI18n } from "@/contexts/i18n-context"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
@@ -26,8 +23,6 @@ export default function ProfitLossReportsPage() {
   const { currentOutlet } = useTenant()
   const { toast } = useToast()
   
-  const [showExport, setShowExport] = useState(false)
-  const [showPrint, setShowPrint] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   
@@ -65,8 +60,7 @@ export default function ProfitLossReportsPage() {
         const cogs = response.total_cost || 0
         const grossProfit = response.gross_profit || (revenue - cogs)
         const grossMargin = response.gross_margin || (revenue > 0 ? (grossProfit / revenue) * 100 : 0)
-        // Expenses would need separate API - mock for now
-        const expenses = 0
+        const expenses = response.expenses || 0
         const netProfit = grossProfit - expenses
         const netMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0
         
@@ -80,7 +74,6 @@ export default function ProfitLossReportsPage() {
           netMargin,
         })
         
-        // Mock chart data - would come from API
         setChartData([
           { date: startDate, revenue, profit: netProfit },
         ])
@@ -110,6 +103,40 @@ export default function ProfitLossReportsPage() {
     return `${currentBusiness?.currencySymbol || "MK"} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
+  const handleExportXlsx = async () => {
+    if (!currentOutlet) return
+    try {
+      await reportService.downloadReport(
+        "/reports/profit-loss/export/xlsx/",
+        { outlet: String(currentOutlet.id), start_date: startDate, end_date: endDate },
+        `profit-loss-${startDate}-to-${endDate}.xlsx`
+      )
+    } catch (error: any) {
+      toast({
+        title: t("common.messages.error"),
+        description: error?.message || "Failed to export profit & loss report",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleExportPdf = async () => {
+    if (!currentOutlet) return
+    try {
+      await reportService.downloadReport(
+        "/reports/profit-loss/export/pdf/",
+        { outlet: String(currentOutlet.id), start_date: startDate, end_date: endDate },
+        `profit-loss-${startDate}-to-${endDate}.pdf`
+      )
+    } catch (error: any) {
+      toast({
+        title: t("common.messages.error"),
+        description: error?.message || "Failed to export profit & loss report",
+        variant: "destructive",
+      })
+    }
+  }
+
   return (
     <DashboardLayout>
       <PageLayout
@@ -117,11 +144,11 @@ export default function ProfitLossReportsPage() {
         description={t("reports.profit_loss.title")}
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowExport(true)}>
+            <Button variant="outline" size="sm" onClick={handleExportXlsx}>
               <FileSpreadsheet className="mr-2 h-4 w-4" />
               {t("reports.actions.export_excel")}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowPrint(true)}>
+            <Button variant="outline" size="sm" onClick={handleExportPdf}>
               <Printer className="mr-2 h-4 w-4" />
               {t("reports.actions.print")}
             </Button>
@@ -227,18 +254,6 @@ export default function ProfitLossReportsPage() {
         </Card>
       </PageLayout>
 
-      {/* Modals */}
-      <DataExchangeModal
-        open={showExport}
-        onOpenChange={setShowExport}
-        type="export"
-        config={dataExchangeConfigs.reports}
-      />
-      <PrintReportModal
-        open={showPrint}
-        onOpenChange={setShowPrint}
-        reportType={t("reports.menu.profit_loss")}
-      />
       <ReportSettingsModal
         open={showSettings}
         onOpenChange={setShowSettings}

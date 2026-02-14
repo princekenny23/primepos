@@ -28,7 +28,6 @@ import { supplierService } from "@/lib/services/supplierService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { Plus, Trash2, Search, Package } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 
 interface NewReturnModalProps {
   open: boolean
@@ -215,7 +214,7 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
         <DialogHeader>
           <DialogTitle>New Return</DialogTitle>
           <DialogDescription>
-            Create a new return - customer, supplier, or outlet return
+            Create a new supplier or outlet return
           </DialogDescription>
         </DialogHeader>
 

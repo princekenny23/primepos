@@ -30,7 +30,6 @@
     "jspdf": "^3.0.4",
     "lucide-react": "^0.427.0",
     "next": "^14.2.5",
-    "qz-tray": "^2.2.5",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.0",
     "react-dom": "^18.3.1",
@@ -43,7 +42,6 @@
   "devDependencies": {
     "@types/html2canvas": "^0.5.35",
     "@types/node": "^20.14.12",
-    "@types/qz-tray": "^2.2.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",

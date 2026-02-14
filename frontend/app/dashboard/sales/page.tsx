@@ -9,7 +9,7 @@ import TransactionsPage from "./transactions/page"
 import ReturnsPage from "./returns/page"
 import CreditsPage from "./credits/page"
 import DiscountsPage from "./discounts/page"
-import ReceiptsPage from "./receipts/page"
+import VoidsPage from "./voids/page"
 import { useI18n } from "@/contexts/i18n-context"
 
 export default function SalesDashboardPage() {
@@ -21,7 +21,7 @@ export default function SalesDashboardPage() {
     { value: "returns", label: t("sales.menu.returns") },
     { value: "credits", label: t("sales.credit.title") },
     { value: "discounts", label: t("sales.menu.discounts") },
-    { value: "receipts", label: t("sales.menu.receipts") },
+    { value: "voids", label: "Voids" },
   ]
 
   return (
@@ -52,8 +52,8 @@ export default function SalesDashboardPage() {
             <DiscountsPage />
           </TabsContent>
 
-          <TabsContent value="receipts" className="m-0">
-            <ReceiptsPage />
+          <TabsContent value="voids" className="m-0">
+            <VoidsPage />
           </TabsContent>
         </FilterableTabs>
       </PageCard>

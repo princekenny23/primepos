@@ -32,12 +32,21 @@ import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import { SelectUnitModal } from "@/components/modals/select-unit-modal"
 import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
+import { RefundReturnModal } from "@/components/modals/refund-return-modal"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Table,
   TableBody,
@@ -54,7 +63,6 @@ import { printReceipt } from "@/lib/print"
 import type { Customer } from "@/lib/services/customerService"
 import type { Product } from "@/lib/types"
 import { useI18n } from "@/contexts/i18n-context"
-import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { ProductGrid } from "@/components/pos/product-grid-enhanced"
 import { CartItem as CartItemDisplay, CartSummary } from "@/components/pos/cart-item"
 // Printing helper removed - reverted to receipt preview flow
@@ -71,9 +79,23 @@ interface ProductUnit {
   stock_in_unit?: number
 }
 
+type HeldSale = {
+  id: string
+  cart: Array<{
+    id: string
+    productId?: string
+    name: string
+    price: number
+    quantity: number
+    total?: number
+  }>
+  table?: { id?: string; number?: string } | null
+  timestamp: string
+}
+
 export function RetailPOS() {
   const { currentBusiness, currentOutlet } = useBusinessStore()
-  const { cart, addToCart, updateCartItem, removeFromCart, clearCart, holdSale } = usePOSStore()
+  const { cart, addToCart, updateCartItem, removeFromCart, clearCart, holdSale, retrieveHoldSale } = usePOSStore()
   const { activeShift } = useShift()
   const { toast } = useToast()
   const { t } = useI18n()
@@ -104,10 +126,14 @@ export function RetailPOS() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   const [showQuickSelectDropdown, setShowQuickSelectDropdown] = useState(false)
   const [showPaymentMethod, setShowPaymentMethod] = useState(false)
-  const [showReturn, setShowReturn] = useState(false)
-  const [showRefund, setShowRefund] = useState(false)
+  const [showRefundReturn, setShowRefundReturn] = useState(false)
   const [showSaleDiscount, setShowSaleDiscount] = useState(false)
   const [saleDiscount, setSaleDiscount] = useState<SaleDiscount | null>(null)
+  const [isCategoryOpen, setIsCategoryOpen] = useState(true)
+  const [showHoldSales, setShowHoldSales] = useState(false)
+  const [heldSales, setHeldSales] = useState<HeldSale[]>([])
+  const [showReplaceCartConfirm, setShowReplaceCartConfirm] = useState(false)
+  const [pendingHoldId, setPendingHoldId] = useState<string | null>(null)
   
   // Focus search on mount and after actions
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -191,53 +217,36 @@ export function RetailPOS() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBusiness])
 
-  // Global barcode scanner handler (keyboard-wedge)
-  const handleBarcodeScanned = async (code: string) => {
-    const term = String(code).trim()
-    if (!term) return
-
-    try {
-      const { products: matchedProducts } = await productService.lookup(term)
-
-      // Single product match -> add to cart or open unit modal if multiple units exist
-      if (matchedProducts && matchedProducts.length === 1) {
-        const p = matchedProducts[0]
-        // If product has multiple units, open unit modal
-        const units = p.selling_units || []
-        if (units.length > 1) {
-          setSelectedProductForVariation(p)
-          setShowUnitModal(true)
-          return
+  const loadHeldSales = () => {
+    if (typeof window === "undefined") return
+    const holds: HeldSale[] = []
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (!key || !key.startsWith("pos_hold_")) continue
+      const raw = localStorage.getItem(key)
+      if (!raw) continue
+      try {
+        const data = JSON.parse(raw)
+        if (data?.id && Array.isArray(data?.cart)) {
+          holds.push(data)
         }
-
-        // Single unit - add product directly
-        const price = getProductPrice(p)
-        addToCart({
-          id: `cart_${Date.now()}_${Math.random()}`,
-          productId: String(p.id),
-          name: p.name,
-          price: price,
-          quantity: 1,
-          saleType: saleType,
-        })
-        toast({ title: "Added to cart", description: `${p.name} added via barcode` })
-        return
+      } catch {
+        // ignore malformed entries
       }
-
-      // No matches - offer to create product prefilled with barcode
-      toast({ title: "No product found", description: "Would you like to create a product with this barcode?" })
-      setProductToCreate({ barcode: term })
-      setShowAddProductModal(true)
-      return
-
-    } catch (err: any) {
-      console.error("Barcode lookup failed:", err)
-      toast({ title: "Lookup failed", description: err.message || String(err), variant: "destructive" })
-      return
     }
+    holds.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    setHeldSales(holds)
   }
 
-  useBarcodeScanner({ onScan: handleBarcodeScanned })
+  useEffect(() => {
+    loadHeldSales()
+  }, [])
+
+  useEffect(() => {
+    if (showHoldSales) {
+      loadHeldSales()
+    }
+  }, [showHoldSales])
 
 
   const filteredProducts = products.filter((product: any) => {
@@ -290,15 +299,39 @@ export function RetailPOS() {
   })
 
   // Get price based on sale type
+  const toNumber = (value: any) => {
+    const num = Number(value)
+    return Number.isFinite(num) ? num : 0
+  }
+
   const getProductPrice = (product: any): number => {
     if (saleType === "wholesale") {
-      return product.wholesale_price || product.wholesalePrice || product.price || 0
+      return toNumber(
+        product.wholesale_price ??
+          product.wholesalePrice ??
+          product.retail_price ??
+          product.price
+      )
     }
-    return product.price || 0
+    return toNumber(product.retail_price ?? product.price)
+  }
+
+  const getUnitPrice = (unit?: any): number | undefined => {
+    if (!unit) return undefined
+    if (saleType === "wholesale") {
+      const price =
+        unit.wholesale_price ?? unit.wholesalePrice ?? unit.price ?? unit.retail_price
+      return price !== undefined ? toNumber(price) : undefined
+    }
+    const price = unit.retail_price ?? unit.price
+    return price !== undefined ? toNumber(price) : undefined
   }
 
   const addCartWithDetails = (product: any, variation?: any, unit?: any, quantity = 1) => {
-    const basePrice = unit?.retail_price ?? unit?.price ?? variation?.price ?? product.retail_price ?? product.price ?? getProductPrice(product)
+    const basePrice =
+      getUnitPrice(unit) ??
+      (variation?.price !== undefined ? toNumber(variation.price) : undefined) ??
+      getProductPrice(product)
     const displayNameParts = [product.name]
     if (variation?.name) displayNameParts.push(`- ${variation.name}`)
     if (unit?.unit_name) displayNameParts.push(`(${unit.unit_name})`)
@@ -368,9 +401,53 @@ export function RetailPOS() {
     }
   }
 
+  const getHoldTotal = (hold: HeldSale) =>
+    hold.cart.reduce((sum, item) => sum + (item.total ?? item.price * item.quantity), 0)
+
+  const getHoldItemCount = (hold: HeldSale) =>
+    hold.cart.reduce((sum, item) => sum + (item.quantity || 0), 0)
+
   const handleHoldSale = () => {
+    if (cart.length === 0) {
+      toast({ title: "Hold Sale", description: "Cart is empty." })
+      return
+    }
     const holdId = holdSale()
-    alert(`Sale held with ID: ${holdId}`)
+    setSelectedCustomer(null)
+    setSaleDiscount(null)
+    toast({ title: "Hold Sale", description: `Sale held: ${holdId}` })
+    loadHeldSales()
+  }
+
+  const handleRetrieveHoldSale = (holdId: string) => {
+    if (cart.length > 0) {
+      setPendingHoldId(holdId)
+      setShowReplaceCartConfirm(true)
+      return
+    }
+    retrieveHoldSale(holdId)
+    setShowHoldSales(false)
+    toast({ title: "Hold Sale", description: "Hold sale retrieved." })
+  }
+
+  const handleConfirmReplaceCart = () => {
+    if (!pendingHoldId) return
+    retrieveHoldSale(pendingHoldId)
+    setShowHoldSales(false)
+    setShowReplaceCartConfirm(false)
+    setPendingHoldId(null)
+    toast({ title: "Hold Sale", description: "Hold sale retrieved." })
+  }
+
+  const handleCancelReplaceCart = () => {
+    setShowReplaceCartConfirm(false)
+    setPendingHoldId(null)
+  }
+
+  const handleDeleteHoldSale = (holdId: string) => {
+    if (typeof window === "undefined") return
+    localStorage.removeItem(`pos_hold_${holdId}`)
+    setHeldSales((prev) => prev.filter((hold) => hold.id !== holdId))
   }
 
   const handleSaleTypeChange = (newType: SaleType) => {
@@ -382,10 +459,11 @@ export function RetailPOS() {
     }
   }
 
-  const handleConfirmSaleTypeChange = () => {
+  const handleConfirmSaleTypeChange = async () => {
     if (pendingSaleType) {
-      clearCart()
-      setSelectedCustomer(null)
+      if (cart.length > 0) {
+        await handleVoidSale()
+      }
       setSaleType(pendingSaleType)
       setPendingSaleType(null)
       setShowSaleTypeConfirm(false)
@@ -529,7 +607,7 @@ export function RetailPOS() {
       setSaleDiscount(null)
 
   // Receipt preview removed: we no longer open a preview modal in the POS terminal
-      // Attempt to auto-print (non-blocking). Uses QZ Tray and saved default printer.
+      // Attempt to auto-print (non-blocking). Uses the Local Print Agent and saved default printer.
       ;(async () => {
         try {
           const outletId = typeof currentOutlet!.id === 'string' ? parseInt(String(currentOutlet!.id), 10) : currentOutlet!.id
@@ -570,6 +648,66 @@ export function RetailPOS() {
     })
   }
 
+  const handleVoidSale = async () => {
+    if (cart.length === 0) {
+      toast({ title: "Void Sale", description: "Cart is already empty." })
+      return
+    }
+
+    if (!currentOutlet) {
+      toast({ title: "Void Sale", description: "Outlet not available.", variant: "destructive" })
+      return
+    }
+
+    try {
+      const subtotal = Math.round(cartSubtotal * 100) / 100
+      const discount = Math.round(discountAmount * 100) / 100
+      const tax = 0
+      const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+      const items_data = cart.map((item) => ({
+        product_id: item.productId,
+        unit_id: (item as any).unitId || undefined,
+        quantity: item.quantity,
+        price: Math.round(item.price * 100) / 100,
+        notes: item.notes || "",
+      }))
+
+      const voidSale = await saleService.void({
+        outlet: currentOutlet.id,
+        shift: activeShift?.id,
+        customer: selectedCustomer?.id || undefined,
+        items_data,
+        subtotal,
+        tax,
+        discount,
+        total,
+        payment_method: "cash",
+        notes: "Voided sale from POS",
+      })
+
+      const receiptNumber =
+        voidSale._raw?.receipt_number ||
+        ("receipt_number" in voidSale ? (voidSale as any).receipt_number : undefined) ||
+        voidSale.id
+      toast({
+        title: "Void Sale",
+        description: `Sale voided. Receipt #${receiptNumber}`,
+      })
+
+      clearCart()
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+    } catch (error: any) {
+      console.error("Void sale error:", error)
+      toast({
+        title: "Void Sale Failed",
+        description: error.message || "Unable to record void sale.",
+        variant: "destructive",
+      })
+    }
+  }
+
   if (!currentBusiness) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -584,22 +722,31 @@ export function RetailPOS() {
       <div className="border-b bg-card px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div>
-            <div className="text-lg font-bold">POS Terminal</div>
-            <div className="text-xs text-muted-foreground">{currentBusiness.name}</div>
+            <div className="text-lg font-bold">{currentBusiness.name}</div>
           </div>
           <Tabs value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
             <TabsList>
-              <TabsTrigger value="retail">Retail</TabsTrigger>
-              <TabsTrigger value="wholesale">Wholesale</TabsTrigger>
+              <TabsTrigger
+                value="retail"
+                className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+              >
+                Retail
+              </TabsTrigger>
+              <TabsTrigger
+                value="wholesale"
+                className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+              >
+                Wholesale
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
 
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Products Panel - Clean List View */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-background">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-background">
           {/* Search Bar with Dropdown */}
           <div className="p-3 border-b bg-card">
             <div className="relative">
@@ -924,54 +1071,86 @@ export function RetailPOS() {
             </div>
           </div>
 
-          {/* Category Filter - Compact */}
-          {categories.length > 1 && (
-            <div className="px-3 py-2 border-b bg-muted/30 flex gap-1 flex-wrap">
-              <Button
-                variant={selectedCategory === "all" ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs px-3"
-                onClick={() => setSelectedCategory("all")}
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            {/* Category Filter - Sidebar */}
+            {categories.length > 1 && (
+              <div
+                className={
+                  "border-r bg-gray-200 overflow-y-auto flex-shrink-0 transition-all duration-200 " +
+                  (isCategoryOpen ? "w-40 p-3" : "w-12 p-2")
+                }
               >
-                All
-              </Button>
-              {categories.map((category) => (
-                <Button
-                  key={category}
-                  variant={selectedCategory === category ? "default" : "outline"}
-                  size="sm"
-                  className="h-7 text-xs px-4 min-w-fit"
-                  onClick={() => setSelectedCategory(category)}
-                >
-                  {category}
-                </Button>
-              ))}
-            </div>
-          )}
-
-          {/* Products Grid - Enhanced */}
-          <div className="flex-1 overflow-y-auto p-4">
-            {isLoadingProducts ? (
-              <div className="p-8 text-center text-muted-foreground">Loading products...</div>
-            ) : productsError ? (
-              <div className="p-8 text-center text-destructive">{productsError}</div>
-            ) : filteredProducts.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground">No products found</div>
-            ) : (
-              <ProductGrid
-                products={filteredProducts as any}
-                onAddToCart={(
-                  product,
-                  unit,
-                  quantity
-                ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
-              />
+                <div className="mb-2 flex items-center justify-between">
+                  <span className={isCategoryOpen ? "text-xs font-medium" : "sr-only"}>
+                    Categories
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={() => setIsCategoryOpen((prev) => !prev)}
+                    title={isCategoryOpen ? "Collapse categories" : "Expand categories"}
+                  >
+                    {isCategoryOpen ? "«" : "»"}
+                  </Button>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    key="all"
+                    variant={selectedCategory === "all" ? "default" : "outline"}
+                    className={
+                      "h-10 justify-start px-3 text-sm" +
+                      (selectedCategory === "all" ? " ring-2 ring-primary" : "") +
+                      (!isCategoryOpen ? " hidden" : "")
+                    }
+                    onClick={() => setSelectedCategory("all")}
+                  >
+                    All
+                  </Button>
+                  {categories
+                    .filter((category) => category !== "all")
+                    .map((category) => (
+                      <Button
+                        key={category}
+                        variant={selectedCategory === category ? "default" : "outline"}
+                        className={
+                          "h-10 justify-start px-3 text-sm" +
+                          (selectedCategory === category ? " ring-2 ring-primary" : "") +
+                          (!isCategoryOpen ? " hidden" : "")
+                        }
+                        onClick={() => setSelectedCategory(category)}
+                      >
+                        {category}
+                      </Button>
+                    ))}
+                </div>
+              </div>
             )}
+
+            {/* Products Grid - Enhanced */}
+            <div className="flex-1 overflow-y-auto p-4 bg-gray-200">
+              {isLoadingProducts ? (
+                <div className="p-8 text-center text-muted-foreground">Loading products...</div>
+              ) : productsError ? (
+                <div className="p-8 text-center text-destructive">{productsError}</div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground">No products found</div>
+              ) : (
+                <ProductGrid
+                  products={filteredProducts as any}
+                  onAddToCart={(
+                    product,
+                    unit,
+                    quantity
+                  ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
+                />
+              )}
+            </div>
           </div>
         </div>
 
         {/* Cart Panel - Table Based */}
-        <div className="w-96 border-l bg-card flex flex-col">
+        <div className="flex-1 lg:flex-none w-full lg:w-[520px] border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
           {/* Cart Header */}
           <div className="p-3 border-b">
             <div className="flex items-center justify-between mb-2">
@@ -1066,8 +1245,7 @@ export function RetailPOS() {
           </div>
 
           {/* Summary & Payment Footer */}
-          {cart.length > 0 && (
-            <div className="p-3 bg-muted/30 space-y-3">
+          <div className="p-3 bg-muted/30 space-y-3">
               {/* Summary Grid */}
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="flex justify-between">
@@ -1089,10 +1267,10 @@ export function RetailPOS() {
               {/* Action Buttons */}
               <div className="flex gap-2">
                 <Button
-                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                  className="flex-1 bg-blue-900 hover:bg-blue-800"
                   size="sm"
                   onClick={handleCheckout}
-                  disabled={isProcessingPayment}
+                  disabled={isProcessingPayment || cart.length === 0}
                 >
                   {isProcessingPayment ? "Processing..." : "PAY"}
                 </Button>
@@ -1106,38 +1284,25 @@ export function RetailPOS() {
                     <DropdownMenuItem onClick={() => setShowSaleDiscount(true)}>
                       Discount
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      // Handle Return
-                      toast({ title: "Return", description: "Feature coming soon" })
-                    }}>
-                      Return
+                    <DropdownMenuItem onClick={() => setShowRefundReturn(true)}>
+                      Refund / Return
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      // Handle Refund
-                      toast({ title: "Refund", description: "Feature coming soon" })
-                    }}>
-                      Refund
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => {
-                      // Handle Hold Sale
-                      toast({ title: "Hold Sale", description: "Feature coming soon" })
-                    }}>
+                    <DropdownMenuItem onClick={handleHoldSale}>
                       Hold Sale
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => setShowHoldSales(true)}>
+                      Retrieve Hold
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setShowCloseRegister(true)}>
                       Close Register
                     </DropdownMenuItem>
-                    <DropdownMenuItem 
-                      onClick={clearCart}
-                      className="text-red-600"
-                    >
-                      Clear Cart
+                    <DropdownMenuItem onClick={handleVoidSale} className="text-red-600">
+                      Void Sale
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
             </div>
-          )}
         </div>
       </div>
 
@@ -1159,6 +1324,66 @@ export function RetailPOS() {
         open={showCloseRegister}
         onOpenChange={setShowCloseRegister}
       />
+      <RefundReturnModal
+        open={showRefundReturn}
+        onOpenChange={setShowRefundReturn}
+      />
+      <Dialog open={showHoldSales} onOpenChange={setShowHoldSales}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Held Sales</DialogTitle>
+            <DialogDescription>Select a held sale to retrieve.</DialogDescription>
+          </DialogHeader>
+
+          {heldSales.length === 0 ? (
+            <div className="text-sm text-muted-foreground">No held sales found.</div>
+          ) : (
+            <div className="rounded-md border border-gray-200 overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="text-xs font-semibold">Hold ID</TableHead>
+                    <TableHead className="text-xs font-semibold">Items</TableHead>
+                    <TableHead className="text-xs font-semibold">Total</TableHead>
+                    <TableHead className="text-xs font-semibold">Time</TableHead>
+                    <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {heldSales.map((hold) => (
+                    <TableRow key={hold.id}>
+                      <TableCell className="text-xs">{hold.id}</TableCell>
+                      <TableCell className="text-xs">{getHoldItemCount(hold)}</TableCell>
+                      <TableCell className="text-xs">
+                        {formatCurrency(getHoldTotal(hold), currentBusiness)}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {new Date(hold.timestamp).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button size="sm" onClick={() => handleRetrieveHoldSale(hold.id)}>
+                            Load
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleDeleteHoldSale(hold.id)}>
+                            Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowHoldSales(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <CustomerSelectModal
         open={showCustomerSelect}
         onOpenChange={setShowCustomerSelect}
@@ -1213,6 +1438,26 @@ export function RetailPOS() {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmSaleTypeChange}>
+              Continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Replace Cart Confirmation for Hold Retrieval */}
+      <AlertDialog open={showReplaceCartConfirm} onOpenChange={setShowReplaceCartConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace Current Cart?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Retrieving a held sale will replace the current cart. Continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelReplaceCart}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmReplaceCart}>
               Continue
             </AlertDialogAction>
           </AlertDialogFooter>

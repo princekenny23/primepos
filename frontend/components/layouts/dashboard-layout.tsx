@@ -24,7 +24,6 @@ import { useBusinessStore } from "@/stores/businessStore"
 import { useAuthStore } from "@/stores/authStore"
 import { useRouter } from "next/navigation"
 import { PrimePOSLogo } from "@/components/brand/primepos-logo"
-import { LanguageSwitcherCompact } from "@/components/language-switcher"
 import { useI18n } from "@/contexts/i18n-context"
 
 // Navigation translation keys mapping
@@ -41,6 +40,20 @@ const navTranslationKeys: Record<string, string> = {
   "Bar": "common.navigation.bar",
 }
 
+const LOCAL_PRINT_AGENT_URL =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_AGENT_TOKEN =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
+const AGENT_PING_INTERVAL_MS = 15000
+
+function buildAgentHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {}
+  if (LOCAL_PRINT_AGENT_TOKEN) {
+    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
+  }
+  return headers
+}
+
 interface DashboardLayoutProps {
   children: React.ReactNode
 }
@@ -50,6 +63,8 @@ import { getIndustrySidebarConfig, fullNavigation, type NavigationItem } from "@
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [agentStatus, setAgentStatus] = useState<"checking" | "connected" | "disconnected">("checking")
   const pathname = usePathname()
   const router = useRouter()
   const { currentTenant, currentOutlet, isLoading } = useTenant()
@@ -60,6 +75,64 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const { t } = useI18n()
   const restoringBusinessRef = useRef(false)
   const redirectedRef = useRef(false)
+
+  // Handle double-click fullscreen on navbar
+  const handleNavbarDoubleClick = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        // Enter fullscreen
+        await document.documentElement.requestFullscreen()
+        setIsFullscreen(true)
+      } else {
+        // Exit fullscreen
+        await document.exitFullscreen()
+        setIsFullscreen(false)
+      }
+    } catch (error) {
+      console.error("Fullscreen request failed:", error)
+    }
+  }
+
+  // Listen for fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange)
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange)
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    let intervalId: ReturnType<typeof setInterval> | undefined
+
+    const pingAgent = async () => {
+      try {
+        const response = await fetch(`${LOCAL_PRINT_AGENT_URL}/health`, {
+          method: "GET",
+          headers: buildAgentHeaders(),
+        })
+        if (!cancelled) {
+          setAgentStatus(response.ok ? "connected" : "disconnected")
+        }
+      } catch {
+        if (!cancelled) {
+          setAgentStatus("disconnected")
+        }
+      }
+    }
+
+    pingAgent()
+    intervalId = setInterval(pingAgent, AGENT_PING_INTERVAL_MS)
+
+    return () => {
+      cancelled = true
+      if (intervalId) clearInterval(intervalId)
+    }
+  }, [])
   
   // Helper to translate navigation item names
   const translateNavItem = (name: string) => {
@@ -196,7 +269,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 lg:ml-20">
         {/* Topbar */}
-        <header data-navbar="main" className="sticky top-0 z-30 bg-background border-b">
+        <header 
+          data-navbar="main" 
+          className="sticky top-0 z-30 bg-background border-b cursor-pointer" 
+          onDoubleClick={handleNavbarDoubleClick}
+          title="Double-click to toggle fullscreen"
+        >
           <div className="flex items-center justify-between px-4 py-3 lg:px-6">
             <Button
               variant="ghost"
@@ -209,7 +287,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
 
             {/* Tenant and Outlet Info - Display only, no switching */}
             {!isAdminRoute && !isLoading && currentTenant && (
-              <div className="flex items-center gap-4 mr-4">
+              <div className="flex items-center gap-4 mr-4 select-none pointer-events-none">
                 <div className="text-sm">
                   <span className="font-medium">{currentTenant.name}</span>
                 </div>
@@ -227,7 +305,24 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               </div>
             )}
 
-            <div className="flex items-center gap-2 ml-auto">
+            <div className="flex items-center gap-2 ml-auto select-none">
+              <Badge
+                variant="outline"
+                className="flex items-center gap-2 px-3 py-1.5"
+                title="Local Print Agent status"
+              >
+                <span
+                  className={cn(
+                    "inline-block h-2 w-2 rounded-full",
+                    agentStatus === "connected" && "bg-emerald-500",
+                    agentStatus === "disconnected" && "bg-red-500",
+                    agentStatus === "checking" && "bg-amber-500"
+                  )}
+                />
+                <span className="text-xs">
+                  Print Agent: {agentStatus === "connected" ? "Connected" : agentStatus === "disconnected" ? "Offline" : "Checking"}
+                </span>
+              </Badge>
               {/* Shift Status Indicator - Only show for current outlet */}
               {activeShift && currentOutlet && activeShift.outletId === currentOutlet.id && (() => {
                 if (!activeShift.startTime) return null
@@ -269,7 +364,6 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 </Link>
               )}
               
-              <LanguageSwitcherCompact />
               <NotificationBell />
               <Button 
                 variant="ghost" 

@@ -11,10 +11,6 @@ interface PrintReportModalProps {
 
 export function PrintReportModal({ open, onOpenChange, reportType }: PrintReportModalProps) {
   const handlePrint = () => {
-    // Use browser print for now; replace with PDF generation if needed
-    if (typeof window !== "undefined") {
-      window.print()
-    }
     onOpenChange(false)
   }
 
@@ -24,7 +20,7 @@ export function PrintReportModal({ open, onOpenChange, reportType }: PrintReport
         <DialogHeader>
           <DialogTitle>Print {reportType || "Report"}</DialogTitle>
           <DialogDescription>
-            Use your browser print dialog to print or save the current report as PDF.
+            Printing is handled by the local print agent when supported.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="flex justify-end gap-2">

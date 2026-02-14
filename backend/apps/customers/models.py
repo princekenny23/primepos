@@ -71,9 +71,10 @@ class Customer(models.Model):
         """Calculate total outstanding balance from unpaid credit sales"""
         from django.db.models import Sum, F
         from apps.sales.models import Sale
+        # Include both formal credit invoices and customer-linked tabs
         unpaid_sales = Sale.objects.filter(
             customer=self,
-            payment_method='credit',
+            payment_method__in=['credit', 'tab'],
             payment_status__in=['unpaid', 'partially_paid']
         ).aggregate(
             total=Sum(F('total') - F('amount_paid'))

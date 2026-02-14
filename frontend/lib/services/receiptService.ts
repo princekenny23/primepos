@@ -45,6 +45,8 @@ export interface ReceiptFilters {
   format?: 'html' | 'pdf' | 'json'
   is_sent?: boolean
   search?: string
+  start_date?: string
+  end_date?: string
 }
 
 export const receiptService = {
@@ -61,6 +63,8 @@ export const receiptService = {
     if (filters?.format) params.append("format", filters.format)
     if (filters?.is_sent !== undefined) params.append("is_sent", String(filters.is_sent))
     if (filters?.search) params.append("search", filters.search)
+    if (filters?.start_date) params.append("start_date", filters.start_date)
+    if (filters?.end_date) params.append("end_date", filters.end_date)
     
     const query = params.toString()
     // Use direct endpoint path as fallback if apiEndpoints.receipts is not available

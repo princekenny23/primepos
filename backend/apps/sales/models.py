@@ -48,9 +48,66 @@ class Sale(models.Model):
     receipt_number = models.CharField(max_length=50, unique=True, db_index=True)
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
     tax = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
+    discount_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))]
+    )
     total = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default='cash')
+    # Denormalized per-payment-method aggregates for fast reporting
+    cash_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Aggregated cash received for this sale",
+    )
+    card_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Aggregated card payments for this sale",
+    )
+    mobile_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Aggregated mobile-money payments for this sale",
+    )
+    bank_transfer_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Aggregated bank transfer payments for this sale",
+    )
+    other_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Aggregated other payments for this sale",
+    )
+    tab_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Aggregated tab (on-account) payments for this sale",
+    )
+    credit_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Aggregated credit-account payments for this sale",
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='completed')
     
     # Cash payment fields (for cash-only sales)
@@ -84,9 +141,11 @@ class Sale(models.Model):
     payment_status = models.CharField(
         max_length=20,
         choices=PAYMENT_STATUS_CHOICES,
-        default='paid',
+        default='unpaid',
         help_text="Payment status for credit sales"
     )
+    is_void = models.BooleanField(default=False, help_text="Indicates if this sale was voided")
+    void_reason = models.TextField(default='', blank=True, help_text="Reason for voiding a sale")
     
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -125,19 +184,30 @@ class Sale(models.Model):
         """Update payment status based on amount_paid"""
         if not self.is_credit_sale:
             self.payment_status = 'paid'
+            if self.status != 'completed':
+                self.status = 'completed'
+                self.save(update_fields=['payment_status', 'status'])
+            else:
+                self.save(update_fields=['payment_status'])
             return
         
         if self.amount_paid >= self.total:
             self.payment_status = 'paid'
+            if self.status != 'completed':
+                self.status = 'completed'
         elif self.amount_paid > 0:
             self.payment_status = 'partially_paid'
+            if self.status != 'pending':
+                self.status = 'pending'
         else:
             # Check if overdue
             if self.due_date and self.due_date < timezone.now():
                 self.payment_status = 'overdue'
             else:
                 self.payment_status = 'unpaid'
-        self.save(update_fields=['payment_status'])
+            if self.status != 'pending':
+                self.status = 'pending'
+        self.save(update_fields=['payment_status', 'status'])
 
 
 class SaleItem(models.Model):
@@ -159,6 +229,19 @@ class SaleItem(models.Model):
     quantity = models.IntegerField(validators=[MinValueValidator(1)], help_text="Quantity sold in the selected unit")
     quantity_in_base_units = models.IntegerField(validators=[MinValueValidator(1)], default=1, help_text="Quantity in base units (for inventory deduction)")
     price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    discount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))]
+    )
+    tax_rate_at_sale = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Tax rate captured at time of sale"
+    )
     total = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     
     # Restaurant-specific fields

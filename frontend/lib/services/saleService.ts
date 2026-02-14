@@ -15,6 +15,7 @@ export interface SaleFilters {
   payment_method?: string
   start_date?: string
   end_date?: string
+  search?: string
   page?: number
   tenant?: string
   businessId?: string
@@ -39,13 +40,34 @@ export interface CreateSaleData {
   discount_type?: "percentage" | "amount"
   discount_reason?: string
   total: number
-  payment_method: "cash" | "card" | "mobile" | "tab"
+  payment_method: "cash" | "card" | "mobile" | "tab" | "credit"
   notes?: string
   // Restaurant-specific fields
   table_id?: string
   guests?: number
   priority?: "normal" | "high" | "urgent"
   status?: string
+}
+
+export interface VoidSaleData {
+  outlet: string | number
+  shift?: string | number
+  customer?: string | number
+  items_data: Array<{
+    product_id: string | number
+    quantity: number
+    price: number
+    unit_id?: string | number
+    notes?: string
+    discount?: number
+  }>
+  subtotal?: number
+  tax?: number
+  discount?: number
+  total?: number
+  payment_method?: "cash" | "card" | "mobile" | "tab" | "credit"
+  notes?: string
+  reason?: string
 }
 
 // Transform backend sale to frontend format
@@ -58,6 +80,7 @@ function transformSale(backendSale: any): Sale {
       ? String(backendSale.user_detail.id) 
       : (backendSale.user ? String(backendSale.user.id || backendSale.user_id) : ""),
     items: (backendSale.items || []).map((item: any) => ({
+      id: String(item.id || item.sale_item_id || ""),
       productId: item.product ? String(item.product.id || item.product_id) : "",
       productName: item.product_name || item.product?.name || "",
       quantity: item.quantity || 0,
@@ -94,6 +117,7 @@ export const saleService = {
     if (filters?.payment_method) params.append("payment_method", filters.payment_method)
     if (filters?.start_date) params.append("start_date", filters.start_date)
     if (filters?.end_date) params.append("end_date", filters.end_date)
+    if (filters?.search) params.append("search", filters.search)
     if (filters?.page) params.append("page", String(filters.page))
     if (filters?.tenant) params.append("tenant", filters.tenant)
     if (filters?.businessId) params.append("business", filters.businessId)
@@ -179,6 +203,18 @@ export const saleService = {
     try {
       const response = await api.post<any>(apiEndpoints.sales.create, backendData)
       console.log("Sale response received:", response)
+      if (typeof window !== "undefined") {
+        const receiptNumber = response?._raw?.receipt_number || response?.receipt_number
+        const outletId = response?._raw?.outlet_detail?.id || response?.outlet_detail?.id || response?.outlet || response?.outlet_id
+        window.dispatchEvent(new CustomEvent("sale-completed", {
+          detail: {
+            saleId: response?.id,
+            receiptNumber,
+            outletId,
+            sale: response,
+          },
+        }))
+      }
       return transformSale(response)
     } catch (error: any) {
       console.error("Sale creation error:", error)
@@ -190,12 +226,44 @@ export const saleService = {
     }
   },
 
-  async refund(id: string, reason?: string): Promise<SaleWithMetadata> {
-    const response = await api.post<any>(`${apiEndpoints.sales.get(id)}refund/`, { reason })
+  async void(data: VoidSaleData): Promise<SaleWithMetadata> {
+    const response = await api.post<any>(apiEndpoints.sales.void, data)
+    if (typeof window !== "undefined") {
+      const receiptNumber = response?._raw?.receipt_number || response?.receipt_number
+      const outletId = response?._raw?.outlet_detail?.id || response?.outlet_detail?.id || response?.outlet || response?.outlet_id
+      window.dispatchEvent(new CustomEvent("sale-completed", {
+        detail: {
+          saleId: response?.id,
+          receiptNumber,
+          outletId,
+          sale: response,
+        },
+      }))
+    }
     return transformSale(response)
   },
 
-  async getStats(filters?: { start_date?: string; end_date?: string }): Promise<{
+  async refund(
+    id: string,
+    options?:
+      | string
+      | {
+          reason?: string
+          restock?: boolean
+          refund_method?: string
+          refund_amount?: number
+          items?: Array<{ item_id: string; quantity: number }>
+        }
+  ): Promise<SaleWithMetadata> {
+    const payload = typeof options === "string"
+      ? { reason: options }
+      : (options || {})
+
+    const response = await api.post<any>(`${apiEndpoints.sales.get(id)}refund/`, payload)
+    return transformSale(response)
+  },
+
+  async getStats(filters?: { start_date?: string; end_date?: string; outlet?: string }): Promise<{
     total_sales: number
     total_revenue: number
     today_sales: number
@@ -204,10 +272,11 @@ export const saleService = {
     const params = new URLSearchParams()
     if (filters?.start_date) params.append("start_date", filters.start_date)
     if (filters?.end_date) params.append("end_date", filters.end_date)
+    if (filters?.outlet) params.append("outlet", filters.outlet)
     
     const query = params.toString()
-    // Use the stats action endpoint: /api/v1/sales/stats/
-    return api.get(`/api/v1/sales/stats/${query ? `?${query}` : ""}`)
+    // Use the stats action endpoint: /sales/stats/
+    return api.get(`/sales/stats/${query ? `?${query}` : ""}`)
   },
 
   async getChartData(outletId?: string): Promise<Array<{
@@ -216,7 +285,7 @@ export const saleService = {
     profit: number
   }>> {
     const params = outletId ? `?outlet=${outletId}` : ""
-    return api.get(`/api/v1/sales/chart_data/${params}`)
+    return api.get(`/sales/chart_data/${params}`)
   },
 
   async getTopSellingItems(filters?: { outlet?: string; start_date?: string; end_date?: string }): Promise<Array<{
@@ -233,7 +302,7 @@ export const saleService = {
     if (filters?.end_date) params.append("end_date", filters.end_date)
     
     const query = params.toString()
-    return api.get(`/api/v1/sales/top_selling_items/${query ? `?${query}` : ""}`)
+    return api.get(`/sales/top_selling_items/${query ? `?${query}` : ""}`)
   },
 }
 

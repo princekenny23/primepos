@@ -15,6 +15,7 @@ import { formatDistanceToNow } from "date-fns"
 import { notificationService, type Notification } from "@/lib/services/notificationService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
+import { NotificationDetailModal } from "@/components/modals/notification-detail-modal"
 
 export function NotificationBell() {
   const { currentBusiness } = useBusinessStore()
@@ -22,6 +23,8 @@ export function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
+  const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null)
+  const [showDetail, setShowDetail] = useState(false)
 
   useEffect(() => {
     if (!currentBusiness) return
@@ -81,6 +84,14 @@ export function NotificationBell() {
       await loadUnreadCount()
     } catch (error) {
       console.error("Failed to mark notification as read:", error)
+    }
+  }
+
+  const handleOpenDetail = (notification: Notification) => {
+    setSelectedNotification(notification)
+    setShowDetail(true)
+    if (!notification.read) {
+      handleMarkAsRead(notification.id)
     }
   }
 
@@ -163,54 +174,46 @@ export function NotificationBell() {
                 </div>
               ) : (
                 notifications.map((notification) => (
-                  <div
+                  <button
                     key={notification.id}
-                    onClick={() => {
-                      if (!notification.read) {
-                        handleMarkAsRead(notification.id)
-                      }
-                    }}
-                    className="block"
+                    type="button"
+                    onClick={() => handleOpenDetail(notification)}
+                    className="block w-full text-left"
                   >
-                    <Link
-                      href={notification.link || "/dashboard/settings/notifications"}
-                      className="block"
+                    <div
+                      className={`p-3 rounded-lg hover:bg-accent transition-colors cursor-pointer ${
+                        !notification.read ? "bg-blue-50 dark:bg-blue-950/20" : ""
+                      }`}
                     >
-                      <div
-                        className={`p-3 rounded-lg hover:bg-accent transition-colors cursor-pointer ${
-                          !notification.read ? "bg-blue-50 dark:bg-blue-950/20" : ""
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <span className="text-lg">{getNotificationIcon(notification.type)}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between mb-1">
-                              <p className="text-sm font-medium truncate">
-                                {notification.title}
-                              </p>
-                              {!notification.read && (
-                                <span className="h-2 w-2 bg-primary rounded-full flex-shrink-0 ml-2" />
-                              )}
-                            </div>
-                            <p className="text-xs text-muted-foreground mb-1">
-                              {notification.message}
+                      <div className="flex items-start gap-3">
+                        <span className="text-lg">{getNotificationIcon(notification.type)}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-sm font-medium truncate">
+                              {notification.title}
                             </p>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-muted-foreground">
-                                {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
-                              </span>
-                              <Badge
-                                variant="outline"
-                                className={`text-xs ${getPriorityColor(notification.priority)}`}
-                              >
-                                {notification.priority}
-                              </Badge>
-                            </div>
+                            {!notification.read && (
+                              <span className="h-2 w-2 bg-primary rounded-full flex-shrink-0 ml-2" />
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mb-1">
+                            {notification.message}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">
+                              {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
+                            </span>
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${getPriorityColor(notification.priority)}`}
+                            >
+                              {notification.priority}
+                            </Badge>
                           </div>
                         </div>
                       </div>
-                    </Link>
-                  </div>
+                    </div>
+                  </button>
                 ))
               )}
             </div>
@@ -224,6 +227,21 @@ export function NotificationBell() {
           </div>
         </div>
       </DropdownMenuContent>
+      <NotificationDetailModal
+        notification={selectedNotification}
+        open={showDetail}
+        onOpenChange={(open) => {
+          setShowDetail(open)
+          if (!open) {
+            setSelectedNotification(null)
+          }
+        }}
+        onMarkAsRead={(notification) => handleMarkAsRead(notification.id)}
+        onRefresh={() => {
+          loadNotifications()
+          loadUnreadCount()
+        }}
+      />
     </DropdownMenu>
   )
 }

@@ -92,6 +92,29 @@ export function PaymentMethodModal({
     setAmount(cleaned)
   }
 
+  const appendAmount = (value: string) => {
+    if (value === "clear") {
+      setAmount("")
+      return
+    }
+
+    if (value === "backspace") {
+      setAmount((prev) => prev.slice(0, -1))
+      return
+    }
+
+    if (value === ".") {
+      if (!amount) {
+        setAmount("0.")
+        return
+      }
+      if (amount.includes(".")) return
+    }
+
+    handleAmountChange(`${amount}${value}`)
+    setTimeout(() => amountInputRef.current?.focus(), 0)
+  }
+
   const handleConfirm = () => {
     if (!selectedMethod || !onConfirm) return
 
@@ -116,7 +139,7 @@ export function PaymentMethodModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md max-h-[90vh] flex flex-col">
+      <DialogContent className="sm:max-w-2xl flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Select Payment Method</DialogTitle>
           <DialogDescription>
@@ -124,7 +147,7 @@ export function PaymentMethodModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4 flex-1 overflow-y-auto min-h-0">
+        <div className="space-y-4 py-4">
           {/* Payment Method Selection */}
           {!selectedMethod && (
             <div className="grid grid-cols-2 gap-3">
@@ -165,42 +188,95 @@ export function PaymentMethodModal({
 
           {/* Cash Amount Input */}
           {selectedMethod === "cash" && (
-            <div className="space-y-3 pt-2 border-t">
-              <div>
-                <Label htmlFor="amount" className="text-sm">Amount Received</Label>
-                <Input
-                  id="amount"
-                  ref={amountInputRef}
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0.00"
-                  value={amount}
-                  onChange={(e) => handleAmountChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && canConfirm()) {
-                      handleConfirm()
-                    }
-                  }}
-                  className="text-2xl font-bold text-center h-12"
-                  autoFocus
-                />
+            <div className="pt-2 border-t grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="amount" className="text-sm">Amount Received</Label>
+                  <Input
+                    id="amount"
+                    ref={amountInputRef}
+                    type="number"
+                    inputMode="decimal"
+                    pattern="[0-9]*[.,]?[0-9]*"
+                    step="0.01"
+                    min="0"
+                    enterKeyHint="done"
+                    placeholder="0.00"
+                    value={amount}
+                    onChange={(e) => handleAmountChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && canConfirm()) {
+                        handleConfirm()
+                      }
+                    }}
+                    className="text-2xl font-bold text-center h-12"
+                    autoFocus
+                  />
+                </div>
+
+                {/* Change Display */}
+                {change > 0 && (
+                  <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
+                    <div className="text-xs text-muted-foreground">Change</div>
+                    <div className="text-xl font-bold text-green-600 dark:text-green-400">
+                      {formatCurrency(change, business)}
+                    </div>
+                  </div>
+                )}
+
+                {amount && parseFloat(amount) < total && (
+                  <div className="text-xs text-destructive text-center">
+                    Amount is less than total
+                  </div>
+                )}
               </div>
 
-              {/* Change Display */}
-              {change > 0 && (
-                <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3">
-                  <div className="text-xs text-muted-foreground">Change</div>
-                  <div className="text-xl font-bold text-green-600 dark:text-green-400">
-                    {formatCurrency(change, business)}
-                  </div>
-                </div>
-              )}
-
-              {amount && parseFloat(amount) < total && (
-                <div className="text-xs text-destructive text-center">
-                  Amount is less than total
-                </div>
-              )}
+              {/* On-screen numeric keypad for touch devices */}
+              <div className="grid grid-cols-3 gap-2">
+                {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((key) => (
+                  <Button
+                    key={key}
+                    type="button"
+                    variant="outline"
+                    className="h-11 text-lg"
+                    onClick={() => appendAmount(key)}
+                  >
+                    {key}
+                  </Button>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 text-lg"
+                  onClick={() => appendAmount(".")}
+                >
+                  .
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 text-lg"
+                  onClick={() => appendAmount("0")}
+                >
+                  0
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 text-lg"
+                  onClick={() => appendAmount("backspace")}
+                >
+                  ⌫
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 text-sm col-span-3"
+                  onClick={() => appendAmount("clear")}
+                >
+                  Clear
+                </Button>
+              </div>
             </div>
           )}
 

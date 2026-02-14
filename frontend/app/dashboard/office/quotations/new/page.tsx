@@ -246,7 +246,7 @@ export default function NewQuotationPage() {
 
   // Handle print quotation
   const handlePrint = () => {
-    window.print()
+    handleDownload()
   }
 
   // Handle download quotation as PDF

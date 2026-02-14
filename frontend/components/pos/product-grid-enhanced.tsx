@@ -119,7 +119,7 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
   return (
     <>
       <ScrollArea className="flex-1">
-        <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 p-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 p-4">
           {products.map((product) => {
             const hasUnits = (product.selling_units?.length || 0) > 0
             const stockStatus = product.is_low_stock ? "low" : "normal"
@@ -128,56 +128,15 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
             return (
               <Card
                 key={product.id}
-                className="cursor-pointer hover:border-primary transition-colors"
+                className="cursor-pointer hover:shadow-md transition-shadow border border-muted"
                 onClick={() => handleProductClick(product)}
               >
-                <CardContent className="p-4">
-                  <div className="flex flex-col items-center text-center space-y-2">
-                    {/* Product icon with stock indicator */}
-                    <div className="relative w-16 h-16 rounded-lg bg-primary/10 flex items-center justify-center">
-                      <Package className="h-8 w-8 text-primary" />
-                      {stockStatus === "low" && (
-                        <div className="absolute top-0 right-0 w-3 h-3 bg-orange-500 rounded-full" />
-                      )}
+                <CardContent className="p-3">
+                  <div className="flex flex-col gap-2">
+                    <div className="text-sm leading-tight whitespace-normal break-normal">
+                      {product.name}
                     </div>
 
-                    {/* Product info */}
-                    <div className="w-full">
-                      <p className="font-medium text-sm line-clamp-2">{product.name}</p>
-                      
-                      {/* Unit info */}
-                      {hasUnits && product.selling_units && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {product.selling_units.length} units
-                        </p>
-                      )}
-
-                      {/* Price */}
-                      <p className="text-sm font-semibold text-primary mt-1">
-                        MWK {(product.retail_price || product.price || 0).toFixed(2)}
-                      </p>
-
-                      {/* Stock */}
-                      <p className={`text-xs mt-1 ${stockColor}`}>
-                        Stock: {product.stock}
-                        {hasUnits && product.selling_units && product.selling_units.length > 0
-                          ? ` (${product.selling_units[0].unit_name})`
-                          : " pcs"}
-                      </p>
-                    </div>
-
-                    {/* Add button */}
-                    <Button
-                      size="sm"
-                      className="w-full"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleProductClick(product)
-                      }}
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      {hasUnits ? "Select" : "Add"}
-                    </Button>
                   </div>
                 </CardContent>
               </Card>

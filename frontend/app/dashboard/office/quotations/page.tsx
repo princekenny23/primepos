@@ -67,6 +67,47 @@ import { useTenant } from "@/contexts/tenant-context"
 import { SelectProductModal } from "@/components/modals/select-product-modal"
 import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 
+const LOCAL_PRINT_AGENT_URL =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_AGENT_TOKEN =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
+
+function encodeTextToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ""
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b)
+  })
+  return btoa(binary)
+}
+
+function htmlToText(html: string): string {
+  if (typeof window === "undefined") return html
+  const doc = new DOMParser().parseFromString(html, "text/html")
+  return doc.body?.innerText || html
+}
+
+async function printTextViaAgent(text: string, printer?: string): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (LOCAL_PRINT_AGENT_TOKEN) {
+    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
+  }
+  const contentBase64 = encodeTextToBase64(text)
+  const response = await fetch(`${LOCAL_PRINT_AGENT_URL}/print`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      printerName: printer || "",
+      contentBase64,
+      jobName: "PrimePOS Quotation",
+    }),
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    throw new Error(body || response.statusText)
+  }
+}
+
 export default function QuotationsPage() {
   const { currentBusiness } = useBusinessStore()
   const { currentOutlet } = useTenant()
@@ -447,7 +488,7 @@ export default function QuotationsPage() {
       const canvas = await html2canvas.default(tempDiv, {
         useCORS: true,
         logging: false,
-        background: "#ffffff",
+        backgroundColor: "#ffffff",
       })
 
       // Remove temp element
@@ -485,8 +526,6 @@ export default function QuotationsPage() {
   const handlePrintWithQR = async (quotation: Quotation) => {
     setIsPrinting(true)
     try {
-      const qz = require('qz-tray')
-      
       // Generate quotation HTML content
       const quotationHTML = `
         <html>
@@ -595,14 +634,8 @@ export default function QuotationsPage() {
         </html>
       `
 
-      // Connect to qz-tray and print
-      await qz.websocket.connect()
-      
-      const config = qz.configs.create(qz.printers.getDefault())
-      const html = [{type: 'html', format: 'plain', data: quotationHTML}]
-      
-      await qz.print(config, html)
-      await qz.websocket.disconnect()
+      const quotationText = htmlToText(quotationHTML)
+      await printTextViaAgent(quotationText)
 
       toast({
         title: "Printed",
@@ -612,7 +645,7 @@ export default function QuotationsPage() {
       console.error("Failed to print quotation:", error)
       toast({
         title: "Error",
-        description: error.message || "Failed to print. Make sure QZ Tray is running.",
+        description: error.message || "Failed to print. Make sure the Local Print Agent is running.",
         variant: "destructive",
       })
     } finally {
