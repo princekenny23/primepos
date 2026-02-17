@@ -13,6 +13,7 @@ import { useBusinessStore } from "@/stores/businessStore"
 import { tabService, type BarTable } from "@/lib/services/barTabService"
 import { useToast } from "@/components/ui/use-toast"
 import { useTenant } from "@/contexts/tenant-context"
+import { getOutletPosMode } from "@/lib/utils/outlet-settings"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +30,7 @@ export default function BarTablesPage() {
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { currentOutlet: tenantOutlet } = useTenant()
   const outlet = tenantOutlet || currentOutlet
+  const posMode = getOutletPosMode(outlet, currentBusiness)
   const { toast } = useToast()
   
   const [showAddTable, setShowAddTable] = useState(false)
@@ -40,10 +42,10 @@ export default function BarTablesPage() {
 
   // Redirect if not bar business
   useEffect(() => {
-    if (currentBusiness && currentBusiness.type !== "bar") {
+    if (currentBusiness && posMode !== "bar") {
       router.push("/dashboard")
     }
-  }, [currentBusiness, router])
+  }, [currentBusiness, posMode, router])
 
   const loadTables = useCallback(async () => {
     if (!outlet) {
@@ -95,7 +97,7 @@ export default function BarTablesPage() {
   }
 
   // Show loading while checking business type
-  if (!currentBusiness || currentBusiness.type !== "bar") {
+  if (!currentBusiness || posMode !== "bar") {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">

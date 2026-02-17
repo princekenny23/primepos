@@ -33,12 +33,15 @@ import { kitchenService } from "@/lib/services/kitchenService"
 import { useToast } from "@/components/ui/use-toast"
 import { useTenant } from "@/contexts/tenant-context"
 import { useShift } from "@/contexts/shift-context"
+import { getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function OrdersPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const { currentBusiness, currentOutlet, currentTill } = useBusinessStore()
+  const { currentBusiness, currentOutlet: businessOutlet, currentTill } = useBusinessStore()
   const { currentOutlet: tenantOutlet } = useTenant()
+  const currentOutlet = tenantOutlet || businessOutlet
+  const posMode = currentOutlet ? getOutletPosMode(currentOutlet, currentBusiness) : undefined
   const { activeShift } = useShift()
   const [searchTerm, setSearchTerm] = useState("")
   const [activeTab, setActiveTab] = useState("active")
@@ -262,13 +265,13 @@ export default function OrdersPage() {
 
   // Redirect if not restaurant business
   useEffect(() => {
-    if (currentBusiness && currentBusiness.type !== "restaurant") {
+    if (currentBusiness && posMode !== "restaurant") {
       router.push("/dashboard")
     }
-  }, [currentBusiness, router])
+  }, [currentBusiness, posMode, router])
 
   // Show loading while checking business type
-  if (!currentBusiness || currentBusiness.type !== "restaurant") {
+  if (!currentBusiness || posMode !== "restaurant") {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">

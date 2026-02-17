@@ -17,11 +17,13 @@ import {
 import { useBusinessStore } from "@/stores/businessStore"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { useTenant } from "@/contexts/tenant-context"
 import { expenseService } from "@/lib/services/expenseService"
+import { shiftService, type Shift } from "@/lib/services/shiftService"
+import { format, isValid, parseISO } from "date-fns"
 
 const expenseCategories = [
   "Supplies",
@@ -48,6 +50,8 @@ export default function NewExpensePage() {
   const { toast } = useToast()
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isLoadingShifts, setIsLoadingShifts] = useState(false)
+  const [openShifts, setOpenShifts] = useState<Shift[]>([])
   const [formData, setFormData] = useState({
     title: "",
     category: "",
@@ -58,11 +62,67 @@ export default function NewExpensePage() {
     payment_reference: "",
     expense_date: new Date().toISOString().split("T")[0],
     outlet_id: "",
+    shift_id: "",
   })
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
+
+  const formatShiftTime = (value?: string | null) => {
+    if (!value) return "-"
+    const parsed = parseISO(value)
+    if (!isValid(parsed)) return value
+    return format(parsed, "HH:mm")
+  }
+
+  const shiftOptions = useMemo(() => {
+    return openShifts.map((shift) => {
+      const start = formatShiftTime(shift.startTime)
+      const end = formatShiftTime(shift.endTime)
+      const parsedDate = shift.operatingDate ? parseISO(shift.operatingDate) : null
+      const date = parsedDate && isValid(parsedDate) ? format(parsedDate, "MMM dd") : ""
+      return {
+        id: String(shift.id),
+        label: `Shift #${shift.id} • ${date} ${start}${end !== "-" ? ` - ${end}` : ""}`.trim(),
+      }
+    })
+  }, [openShifts])
+
+  useEffect(() => {
+    if (outlets.length === 1 && !formData.outlet_id) {
+      setFormData((prev) => ({ ...prev, outlet_id: String(outlets[0].id) }))
+    }
+  }, [outlets, formData.outlet_id])
+
+  useEffect(() => {
+    const loadShifts = async () => {
+      if (!formData.outlet_id) {
+        setOpenShifts([])
+        setFormData((prev) => ({ ...prev, shift_id: "" }))
+        return
+      }
+
+      setIsLoadingShifts(true)
+      try {
+        const shifts = await shiftService.listOpen({ outlet: formData.outlet_id })
+        setOpenShifts(shifts)
+        if (shifts.length === 1) {
+          setFormData((prev) => ({ ...prev, shift_id: String(shifts[0].id) }))
+        } else if (!shifts.find((shift) => String(shift.id) === formData.shift_id)) {
+          setFormData((prev) => ({ ...prev, shift_id: "" }))
+        }
+      } catch (error: any) {
+        console.error("Failed to load open shifts:", error)
+        setOpenShifts([])
+        setFormData((prev) => ({ ...prev, shift_id: "" }))
+      } finally {
+        setIsLoadingShifts(false)
+      }
+    }
+
+    loadShifts()
+  }, [formData.outlet_id, formData.shift_id])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -71,6 +131,15 @@ export default function NewExpensePage() {
       toast({
         title: "Validation Error",
         description: "Please fill in all required fields (Title, Category, Amount, Payment Method, and Description).",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!formData.shift_id) {
+      toast({
+        title: "Shift Required",
+        description: "Select an open shift to keep cashup reporting accurate.",
         variant: "destructive",
       })
       return
@@ -88,6 +157,7 @@ export default function NewExpensePage() {
         payment_reference: formData.payment_reference.trim() || undefined,
         expense_date: formData.expense_date,
         outlet_id: formData.outlet_id || undefined,
+        shift_id: formData.shift_id || undefined,
       })
 
       toast({
@@ -217,6 +287,29 @@ export default function NewExpensePage() {
                       </Select>
                     </div>
                   )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="shift">Shift *</Label>
+                    <Select
+                      value={formData.shift_id}
+                      onValueChange={(value) => handleInputChange("shift_id", value)}
+                      disabled={!formData.outlet_id || isLoadingShifts}
+                    >
+                      <SelectTrigger id="shift">
+                        <SelectValue placeholder={isLoadingShifts ? "Loading shifts..." : "Select open shift"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {shiftOptions.map((shift) => (
+                          <SelectItem key={shift.id} value={shift.id}>
+                            {shift.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {!isLoadingShifts && formData.outlet_id && openShifts.length === 0 && (
+                      <p className="text-xs text-destructive">No open shifts for this outlet.</p>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </div>

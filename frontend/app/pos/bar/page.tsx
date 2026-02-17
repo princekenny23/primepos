@@ -6,11 +6,14 @@ import { useBusinessStore } from "@/stores/businessStore"
 import { useShift } from "@/contexts/shift-context"
 import { BarPOS } from "@/components/pos/bar-pos"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
+import { getOutletPOSRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function BarPOSPage() {
   const router = useRouter()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { activeShift, isLoading } = useShift()
+  const posMode = getOutletPosMode(currentOutlet, currentBusiness)
+  const posRoute = getOutletPOSRoute(currentOutlet, currentBusiness)
 
   useEffect(() => {
     if (!currentBusiness) {
@@ -18,13 +21,13 @@ export default function BarPOSPage() {
       return
     }
 
-    if (currentBusiness.type !== "bar") {
-      router.push(`/pos/${currentBusiness.type}`)
+    if (posMode !== "bar") {
+      router.push(posRoute)
       return
     }
-  }, [currentBusiness, router])
+  }, [currentBusiness, posMode, posRoute, router])
 
-  if (!currentBusiness || currentBusiness.type !== "bar") {
+  if (!currentBusiness || posMode !== "bar") {
     return null
   }
 

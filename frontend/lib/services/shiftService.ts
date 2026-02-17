@@ -9,6 +9,8 @@ export interface Shift {
   openingCashBalance: number
   floatingCash: number
   closingCashBalance?: number
+  totalSales?: number
+  totalExpense?: number
   systemTotal?: number
   difference?: number
   status: "OPEN" | "CLOSED"
@@ -48,12 +50,17 @@ function transformShift(backendShift: any): Shift {
     openingCashBalance: parseFloat(backendShift.opening_cash_balance || backendShift.openingCashBalance || 0),
     floatingCash: parseFloat(backendShift.floating_cash || backendShift.floatingCash || 0),
     closingCashBalance: backendShift.closing_cash_balance || backendShift.closingCashBalance ? parseFloat(backendShift.closing_cash_balance || backendShift.closingCashBalance) : undefined,
+    totalSales: backendShift.total_sales !== undefined ? parseFloat(backendShift.total_sales) : undefined,
+    totalExpense: backendShift.total_expense !== undefined ? parseFloat(backendShift.total_expense) : undefined,
     systemTotal: backendShift.system_total || backendShift.systemTotal ? parseFloat(backendShift.system_total || backendShift.systemTotal) : undefined,
     difference: backendShift.difference ? parseFloat(backendShift.difference) : undefined,
     status: backendShift.status,
     startTime: backendShift.start_time || backendShift.startTime,
     endTime: backendShift.end_time || backendShift.endTime,
     notes: backendShift.notes,
+    outlet: backendShift.outlet,
+    till: backendShift.till,
+    user: backendShift.user,
   }
 }
 

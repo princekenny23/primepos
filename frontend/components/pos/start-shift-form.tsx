@@ -21,6 +21,7 @@ import { useShift, Till } from "@/contexts/shift-context"
 import { useRole } from "@/contexts/role-context"
 import { useBusinessStore } from "@/stores/businessStore"
 import { cn } from "@/lib/utils"
+import { getOutletPOSRoute } from "@/lib/utils/outlet-settings"
 
 interface FormErrors {
   outlet?: string
@@ -53,11 +54,8 @@ export function StartShiftForm({ onSuccess, redirectTo }: StartShiftFormProps = 
     }
     // Default: redirect to POS
     if (currentBusiness) {
-      // For wholesale and retail businesses, redirect to retail POS
-      if (currentBusiness.type === "wholesale and retail") {
-        return "/pos/retail"
-      }
-      return `/pos/${currentBusiness.type}`
+      const selectedOutletDetails = outlets.find((o) => String(o.id) === String(selectedOutlet)) || currentOutlet
+      return getOutletPOSRoute(selectedOutletDetails, currentBusiness)
     }
     return "/dashboard"
   }

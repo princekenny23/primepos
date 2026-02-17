@@ -17,11 +17,14 @@ import { Store, Settings2 } from "lucide-react"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { CustomizeDashboardModal } from "@/components/modals/customize-dashboard-modal"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
+import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function DashboardPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { currentOutlet: tenantOutlet, isLoading } = useTenant()
+  const outlet = tenantOutlet || currentOutlet
+  const posMode = getOutletPosMode(outlet, currentBusiness)
   const [showCustomize, setShowCustomize] = useState(false)
   const [kpiData, setKpiData] = useState<any>(null)
   const [chartData, setChartData] = useState<any[]>([])
@@ -43,20 +46,12 @@ export default function DashboardPage() {
     // Only redirect if we're on the main dashboard page, not if already on business-specific dashboard
     const currentPath = window.location.pathname
     if (currentPath === "/dashboard" || currentPath === "/dashboard/") {
-      // No retail-specific dashboard; stay on main dashboard
-      // Redirect restaurant to dashboard (not features page)
-      if (currentBusiness.type === "restaurant") {
-        router.push("/dashboard/restaurant/dashboard")
-        return
-      }
-      
-      // Redirect bar to dashboard (not features page)
-      if (currentBusiness.type === "bar") {
-        router.push("/dashboard/bar/dashboard")
+      if (posMode !== "standard") {
+        router.push(getOutletDashboardRoute(outlet, currentBusiness))
         return
       }
     }
-  }, [currentBusiness, router])
+  }, [currentBusiness, outlet, posMode, router])
   
   // Load dashboard data with optimized callback
   const loadDashboardData = useCallback(async () => {

@@ -23,11 +23,13 @@ import { productService } from "@/lib/services/productService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useRealAPI } from "@/lib/utils/api-config"
 import { useToast } from "@/components/ui/use-toast"
+import { getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function MenuPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { currentBusiness, currentOutlet } = useBusinessStore()
+  const posMode = getOutletPosMode(currentOutlet, currentBusiness)
   const useReal = useRealAPI()
   const [searchTerm, setSearchTerm] = useState("")
   const [showAddMenuItem, setShowAddMenuItem] = useState(false)
@@ -37,10 +39,10 @@ export default function MenuPage() {
   
   // Redirect if not restaurant business
   useEffect(() => {
-    if (currentBusiness && currentBusiness.type !== "restaurant") {
+    if (currentBusiness && posMode !== "restaurant") {
       router.push("/dashboard")
     }
-  }, [currentBusiness, router])
+  }, [currentBusiness, posMode, router])
   
   const loadMenuItems = useCallback(async () => {
     if (!currentBusiness) {
@@ -84,7 +86,7 @@ export default function MenuPage() {
     loadMenuItems()
   }, [loadMenuItems])
 
-  if (!currentBusiness || currentBusiness.type !== "restaurant") {
+  if (!currentBusiness || posMode !== "restaurant") {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">

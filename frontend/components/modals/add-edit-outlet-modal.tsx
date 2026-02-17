@@ -21,8 +21,15 @@ import {
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { outletService } from "@/lib/services/outletService"
-import { useTenant } from "@/contexts/tenant-context"
 import { useBusinessStore } from "@/stores/businessStore"
+import type { OutletBusinessType } from "@/lib/types"
+import { buildOutletSettings, normalizeOutletBusinessType } from "@/lib/utils/outlet-business-type"
+
+const BUSINESS_TYPE_OPTIONS: { value: OutletBusinessType; label: string }[] = [
+  { value: "wholesale_and_retail", label: "Wholesale and Retail" },
+  { value: "restaurant", label: "Restaurant" },
+  { value: "bar", label: "Bar" },
+]
 
 interface AddEditOutletModalProps {
   open: boolean
@@ -38,13 +45,13 @@ export function AddEditOutletModal({
   onOutletCreated 
 }: AddEditOutletModalProps) {
   const { toast } = useToast()
-  const { currentTenant } = useTenant()
   const { currentBusiness, loadOutlets } = useBusinessStore()
   const [isLoading, setIsLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     address: "",
     phone: "",
+    businessType: normalizeOutletBusinessType(currentBusiness?.type) as OutletBusinessType,
     isActive: true,
   })
 
@@ -56,6 +63,7 @@ export function AddEditOutletModal({
           name: outlet.name || "",
           address: outlet.address || "",
           phone: outlet.phone || "",
+          businessType: normalizeOutletBusinessType(outlet.businessType),
           isActive: outlet.isActive !== undefined ? outlet.isActive : true,
         })
       } else {
@@ -63,11 +71,12 @@ export function AddEditOutletModal({
           name: "",
           address: "",
           phone: "",
+          businessType: normalizeOutletBusinessType(currentBusiness?.type),
           isActive: true,
         })
       }
     }
-  }, [open, outlet])
+  }, [open, outlet, currentBusiness?.type])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -99,6 +108,8 @@ export function AddEditOutletModal({
           name: formData.name,
           address: formData.address,
           phone: formData.phone,
+          businessType: formData.businessType,
+          settings: buildOutletSettings(currentBusiness?.settings, formData.businessType),
           isActive: formData.isActive,
         })
         toast({
@@ -112,6 +123,8 @@ export function AddEditOutletModal({
           name: formData.name,
           address: formData.address,
           phone: formData.phone,
+          businessType: formData.businessType,
+          settings: buildOutletSettings(currentBusiness?.settings, formData.businessType),
           isActive: formData.isActive,
         })
         toast({
@@ -172,6 +185,27 @@ export function AddEditOutletModal({
                 placeholder="Enter outlet name"
                 required 
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="business-type">Business Type *</Label>
+              <Select
+                value={formData.businessType}
+                onValueChange={(value) =>
+                  setFormData({ ...formData, businessType: value as OutletBusinessType })
+                }
+              >
+                <SelectTrigger id="business-type">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BUSINESS_TYPE_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">

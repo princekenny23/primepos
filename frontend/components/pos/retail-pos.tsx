@@ -32,13 +32,8 @@ import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import { SelectUnitModal } from "@/components/modals/select-unit-modal"
 import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
+import { PaymentPopup } from "@/components/pos/payment-popup"
 import { RefundReturnModal } from "@/components/modals/refund-return-modal"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -55,7 +50,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { MoreVertical, Trash2 } from "lucide-react"
+import {
+  Ban,
+  ChevronDown,
+  History,
+  Lock,
+  PauseCircle,
+  RotateCcw,
+  Tag,
+  Trash2,
+} from "lucide-react"
 import { useShift } from "@/contexts/shift-context"
 import { saleService } from "@/lib/services/saleService"
 import { useToast } from "@/components/ui/use-toast"
@@ -137,6 +141,7 @@ export function RetailPOS() {
   
   // Focus search on mount and after actions
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const productsScrollRef = useRef<HTMLDivElement>(null)
 
   
 
@@ -174,7 +179,7 @@ export function RetailPOS() {
     setShowSearchDropdown(results.length > 0)
   }, [debouncedSearchTerm, products, selectedCategory])
 
-  // Get quick select items (all active products, limited to 20 for performance)
+  // Get quick select items (all active products, limited to 16 for performance)
   const quickSelectItems = useMemo(() => {
     return products
       .filter((product: any) => {
@@ -183,7 +188,7 @@ export function RetailPOS() {
                                (product.category && (product.category.id === selectedCategory || product.category.name === selectedCategory))
         return product.isActive
       })
-      .slice(0, 20) // Limit to 20 items for quick selection
+      .slice(0, 16) // Limit to 16 items for quick selection
   }, [products, selectedCategory])
 
   const fetchProductsAndCategories = async () => {
@@ -717,33 +722,7 @@ export function RetailPOS() {
   }
 
   return (
-    <div className="flex flex-col bg-background h-screen">
-      {/* Compact Header */}
-      <div className="border-b bg-card px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div>
-            <div className="text-lg font-bold">{currentBusiness.name}</div>
-          </div>
-          <Tabs value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
-            <TabsList>
-              <TabsTrigger
-                value="retail"
-                className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
-              >
-                Retail
-              </TabsTrigger>
-              <TabsTrigger
-                value="wholesale"
-                className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
-              >
-                Wholesale
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-
-      </div>
-
+    <div className="flex h-screen flex-col overflow-hidden bg-background">
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Products Panel - Clean List View */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-background">
@@ -1128,7 +1107,7 @@ export function RetailPOS() {
             )}
 
             {/* Products Grid - Enhanced */}
-            <div className="flex-1 overflow-y-auto p-4 bg-gray-200">
+            <div className="relative flex-1 overflow-y-auto bg-gray-200 p-4" ref={productsScrollRef}>
               {isLoadingProducts ? (
                 <div className="p-8 text-center text-muted-foreground">Loading products...</div>
               ) : productsError ? (
@@ -1145,6 +1124,77 @@ export function RetailPOS() {
                   ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
                 />
               )}
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="absolute bottom-4 right-4 rounded-full shadow-lg"
+                onClick={() => {
+                  productsScrollRef.current?.scrollBy({ top: 320, behavior: "smooth" })
+                }}
+                title="View more products"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="border-t bg-card px-3 py-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-amber-700"
+                onClick={() => setShowSaleDiscount(true)}
+              >
+                <Tag className="h-4 w-4" />
+                Discount
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-blue-700"
+                onClick={() => setShowRefundReturn(true)}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Refund
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-emerald-700"
+                onClick={handleHoldSale}
+              >
+                <PauseCircle className="h-4 w-4" />
+                Hold
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-indigo-700"
+                onClick={() => setShowHoldSales(true)}
+              >
+                <History className="h-4 w-4" />
+                Retrieve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-slate-700"
+                onClick={() => setShowCloseRegister(true)}
+              >
+                <Lock className="h-4 w-4" />
+                Close
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-red-600"
+                onClick={handleVoidSale}
+              >
+                <Ban className="h-4 w-4" />
+                Void
+              </Button>
             </div>
           </div>
         </div>
@@ -1152,14 +1202,30 @@ export function RetailPOS() {
         {/* Cart Panel - Table Based */}
         <div className="flex-1 lg:flex-none w-full lg:w-[520px] border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
           {/* Cart Header */}
-          <div className="p-3 border-b">
-            <div className="flex items-center justify-between mb-2">
+          <div className="p-3 border-b space-y-2">
+            <div className="flex items-center justify-between">
               <div className="font-semibold">Cart ({cartItemCount})</div>
+              <Tabs value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
+                <TabsList>
+                  <TabsTrigger
+                    value="retail"
+                    className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+                  >
+                    Retail
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="wholesale"
+                    className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+                  >
+                    Wholesale
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
-            
+
             {/* Customer Selection */}
             {selectedCustomer ? (
-              <div className="flex items-center justify-between p-2 bg-muted rounded text-xs">
+              <div className="flex items-center justify-between rounded bg-muted p-2 text-xs">
                 <span className="truncate font-medium">{selectedCustomer.name}</span>
                 <Button
                   variant="ghost"
@@ -1174,7 +1240,7 @@ export function RetailPOS() {
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full h-7 text-xs"
+                className="h-7 w-full text-xs"
                 onClick={() => setShowCustomerSelect(true)}
               >
                 Select Customer
@@ -1274,33 +1340,6 @@ export function RetailPOS() {
                 >
                   {isProcessingPayment ? "Processing..." : "PAY"}
                 </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="px-2">
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-40">
-                    <DropdownMenuItem onClick={() => setShowSaleDiscount(true)}>
-                      Discount
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setShowRefundReturn(true)}>
-                      Refund / Return
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleHoldSale}>
-                      Hold Sale
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setShowHoldSales(true)}>
-                      Retrieve Hold
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setShowCloseRegister(true)}>
-                      Close Register
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={handleVoidSale} className="text-red-600">
-                      Void Sale
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
               </div>
             </div>
         </div>
@@ -1466,18 +1505,20 @@ export function RetailPOS() {
       
       {/* Receipt preview removed from POS terminal - printing is automatic */}
 
-      {/* Payment Method Selection Modal */}
-      <PaymentMethodModal
+      {/* Payment Popup Modal - Single unified popup */}
+      <PaymentPopup
         open={showPaymentMethod}
-        onOpenChange={setShowPaymentMethod}
-        total={cartTotal}
-        business={currentBusiness}
-        selectedCustomer={selectedCustomer}
-        onConfirm={handlePaymentConfirm}
-        onCancel={() => {
+        onClose={() => {
           setShowPaymentMethod(false)
           setIsProcessingPayment(false)
         }}
+        total={cartTotal}
+        subtotal={cartSubtotal}
+        discount={discountAmount}
+        tax={0}
+        customer={selectedCustomer}
+        items={cart}
+        onConfirm={handlePaymentConfirm}
       />
 
       {/* Add/Edit Product Modal used when barcode lookup returns no result */}

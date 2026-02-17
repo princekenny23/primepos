@@ -16,7 +16,7 @@ import { usePOSStore } from "@/stores/posStore"
 import { useBusinessStore } from "@/stores/businessStore"
 import { productService } from "@/lib/services/productService"
 import { formatCurrency } from "@/lib/utils/currency"
-import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
+import { PaymentPopup } from "@/components/pos/payment-popup"
 // Receipt preview removed from POS terminal
 import { printReceipt } from "@/lib/print"
 // printReceiptAuto removed; using receipt preview modal
@@ -26,7 +26,7 @@ import { saleService } from "@/lib/services/saleService"
 import { useToast } from "@/components/ui/use-toast"
 import type { Customer } from "@/lib/services/customerService"
 import type { Product } from "@/lib/types"
-import { Package, Plus, Minus, ShoppingCart, X, User } from "lucide-react"
+import { Package, Plus, Minus, ShoppingCart, X, User, Tag, RotateCcw, Lock, Ban } from "lucide-react"
 
 interface ProductUnit {
   id: string | number
@@ -542,6 +542,52 @@ export function SingleProductPOS() {
             )}
           </div>
 
+          {/* Action Icons Row */}
+          <div className="border-t bg-card px-3 py-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-amber-700"
+                disabled={cart.length === 0}
+                title="Apply discount"
+              >
+                <Tag className="h-4 w-4" />
+                <span className="text-xs">Discount</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-blue-700"
+                disabled={cart.length === 0}
+                title="Process refund"
+              >
+                <RotateCcw className="h-4 w-4" />
+                <span className="text-xs">Refund</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-slate-700"
+                disabled={cart.length === 0}
+                title="Close register"
+              >
+                <Lock className="h-4 w-4" />
+                <span className="text-xs">Close</span>
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-red-600"
+                disabled={cart.length === 0}
+                title="Void sale"
+              >
+                <Ban className="h-4 w-4" />
+                <span className="text-xs">Void</span>
+              </Button>
+            </div>
+          </div>
+
           {/* Cart Footer */}
           {cart.length > 0 && (
             <div className="border-t p-4 bg-muted/30 space-y-4">
@@ -576,12 +622,15 @@ export function SingleProductPOS() {
         selectedCustomer={selectedCustomer || undefined}
       />
       
-      <PaymentMethodModal
+      <PaymentPopup
         open={showPaymentMethod}
-        onOpenChange={setShowPaymentMethod}
+        onClose={() => setShowPaymentMethod(false)}
         total={cartTotal}
-        business={currentBusiness || null}
-        selectedCustomer={selectedCustomer}
+        subtotal={cartTotal}
+        discount={0}
+        tax={0}
+        customer={selectedCustomer}
+        items={cart}
         onConfirm={(method, amount) => handlePayment(method, amount || cartTotal)}
       />
 

@@ -4,11 +4,24 @@ from apps.tenants.models import Tenant
 
 class Outlet(models.Model):
     """Outlet/Branch model for multi-location businesses"""
+    BUSINESS_TYPE_CHOICES = [
+        ("wholesale_and_retail", "Wholesale and Retail"),
+        ("restaurant", "Restaurant"),
+        ("bar", "Bar"),
+    ]
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='outlets')
     name = models.CharField(max_length=255)
     address = models.TextField(blank=True)
     phone = models.CharField(max_length=20, blank=True)
     email = models.EmailField(blank=True)
+    business_type = models.CharField(
+        max_length=30,
+        choices=BUSINESS_TYPE_CHOICES,
+        default="wholesale_and_retail",
+        help_text="Business type for this outlet",
+    )
+    settings = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -20,10 +33,11 @@ class Outlet(models.Model):
         ordering = ['name']
         indexes = [
             models.Index(fields=['tenant']),
+            models.Index(fields=['tenant', 'business_type']),
         ]
 
     def __str__(self):
-        return f"{self.tenant.name} - {self.name}"
+        return f"{self.tenant.name} - {self.name} ({self.get_business_type_display()})"
 
 
 class Till(models.Model):

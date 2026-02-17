@@ -203,6 +203,7 @@ export default function StockMovementReportsPage() {
         onOpenChange={setShowExport}
         type="export"
         config={dataExchangeConfigs.reports}
+        data={stockMovements}
       />
       <PrintReportModal
         open={showPrint}

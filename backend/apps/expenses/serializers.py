@@ -9,6 +9,8 @@ class ExpenseSerializer(serializers.ModelSerializer):
     outlet = OutletSerializer(read_only=True)
     outlet_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     user = UserSerializer(read_only=True)
+    shift = serializers.PrimaryKeyRelatedField(read_only=True)
+    shift_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     outlet_name = serializers.CharField(source='outlet.name', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
     rejected_by_name = serializers.CharField(source='rejected_by.get_full_name', read_only=True)
@@ -17,6 +19,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
         model = Expense
         fields = (
             'id', 'tenant', 'outlet', 'outlet_id', 'outlet_name', 'user',
+            'shift', 'shift_id',
             'expense_number', 'title', 'category', 'vendor', 'description',
             'amount', 'payment_method', 'payment_reference', 'expense_date',
             'status', 'approved_by', 'approved_by_name', 'approved_at', 
@@ -60,21 +63,64 @@ class ExpenseSerializer(serializers.ModelSerializer):
         if outlet_id:
             from apps.outlets.models import Outlet
             validated_data['outlet'] = Outlet.objects.get(id=outlet_id)
+
+        shift_id = validated_data.pop('shift_id', None)
+        if shift_id:
+            from apps.shifts.models import Shift
+            validated_data['shift'] = Shift.objects.get(id=shift_id)
         
         return super().create(validated_data)
     
     def update(self, instance, validated_data):
         """Override update to handle outlet_id"""
         outlet_id = validated_data.pop('outlet_id', None)
+        shift_id = validated_data.pop('shift_id', None)
         if outlet_id is not None:
             if outlet_id:
                 from apps.outlets.models import Outlet
                 instance.outlet = Outlet.objects.get(id=outlet_id)
             else:
                 instance.outlet = None
+        if shift_id is not None:
+            if shift_id:
+                from apps.shifts.models import Shift
+                instance.shift = Shift.objects.get(id=shift_id)
+            else:
+                instance.shift = None
         
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         return instance
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        is_create = self.instance is None
+        if not is_create:
+            return attrs
+
+        shift_id = attrs.get('shift_id')
+        if not shift_id:
+            raise serializers.ValidationError({"shift_id": "Shift is required for expense accuracy."})
+
+        from apps.shifts.models import Shift
+        try:
+            shift = Shift.objects.select_related('outlet', 'outlet__tenant').get(id=shift_id)
+        except Shift.DoesNotExist:
+            raise serializers.ValidationError({"shift_id": "Shift not found."})
+
+        tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+        if tenant and shift.outlet.tenant_id != tenant.id:
+            raise serializers.ValidationError({"shift_id": "Shift does not belong to your tenant."})
+
+        outlet_id = attrs.get('outlet_id')
+        if outlet_id and str(shift.outlet_id) != str(outlet_id):
+            raise serializers.ValidationError({"outlet_id": "Outlet must match the selected shift."})
+
+        expense_date = attrs.get('expense_date')
+        if expense_date and shift.operating_date != expense_date:
+            raise serializers.ValidationError({"expense_date": "Expense date must match the shift operating date."})
+
+        attrs['outlet_id'] = str(shift.outlet_id)
+        return attrs
 

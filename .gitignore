@@ -54,3 +54,7 @@ yarn-error.log*
 *.tmp
 *.temp
 
+# .NET build artifacts
+primeposconnector/bin/
+primeposconnector/obj/
+

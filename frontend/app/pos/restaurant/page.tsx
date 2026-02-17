@@ -7,11 +7,14 @@ import { useShift } from "@/contexts/shift-context"
 import { RestaurantPOS } from "@/components/pos/restaurant-pos"
 import { RegisterClosedScreen } from "@/components/pos/register-closed-screen"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
+import { getOutletPOSRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function RestaurantPOSPage() {
   const router = useRouter()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { activeShift, isLoading } = useShift()
+  const posMode = getOutletPosMode(currentOutlet, currentBusiness)
+  const posRoute = getOutletPOSRoute(currentOutlet, currentBusiness)
 
   useEffect(() => {
     if (!currentBusiness) {
@@ -19,13 +22,13 @@ export default function RestaurantPOSPage() {
       return
     }
 
-    if (currentBusiness.type !== "restaurant") {
-      router.push(`/pos/${currentBusiness.type}`)
+    if (posMode !== "restaurant") {
+      router.push(posRoute)
       return
     }
-  }, [currentBusiness, router])
+  }, [currentBusiness, posMode, posRoute, router])
 
-  if (!currentBusiness || currentBusiness.type !== "restaurant") {
+  if (!currentBusiness || posMode !== "restaurant") {
     return null
   }
 

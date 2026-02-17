@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Store, Settings2 } from "lucide-react"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { CustomizeDashboardModal } from "@/components/modals/customize-dashboard-modal"
+import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function BarDashboardPage() {
   const router = useRouter()
@@ -32,6 +33,7 @@ export default function BarDashboardPage() {
   
   // Use tenant outlet if available, otherwise fall back to business store outlet
   const currentOutlet = tenantOutlet || businessOutlet
+  const posMode = getOutletPosMode(currentOutlet, currentBusiness)
   const outletId = useMemo(() => {
     if (currentOutlet?.id) return String(currentOutlet.id)
     if (typeof window !== "undefined") return localStorage.getItem("currentOutletId") || undefined
@@ -63,18 +65,11 @@ export default function BarDashboardPage() {
       return
     }
     
-    if (currentBusiness.type !== "bar") {
-      // Redirect to appropriate dashboard based on business type
-      if (currentBusiness.type === "wholesale and retail") {
-        router.push("/dashboard")
-      } else if (currentBusiness.type === "restaurant") {
-        router.push("/dashboard/restaurant/dashboard")
-      } else {
-        router.push("/dashboard")
-      }
+    if (posMode !== "bar") {
+      router.push(getOutletDashboardRoute(currentOutlet, currentBusiness))
       return
     }
-  }, [currentBusiness, isAuthenticated, router])
+  }, [currentBusiness, currentOutlet, isAuthenticated, posMode, router])
 
   // Load dashboard data
   useEffect(() => {
@@ -124,7 +119,7 @@ export default function BarDashboardPage() {
     }
   }, [currentBusiness, outletId])
 
-  if (!currentBusiness || currentBusiness.type !== "bar" || isLoadingData || tenantLoading || !kpiData) {
+  if (!currentBusiness || posMode !== "bar" || isLoadingData || tenantLoading || !kpiData) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">

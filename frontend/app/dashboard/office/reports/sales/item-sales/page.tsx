@@ -213,7 +213,9 @@ export default function ItemSalesPage() {
   }
 
   const itemRows = useMemo(() => {
-    return [...productReport].sort((a, b) => Number(b.total_revenue || 0) - Number(a.total_revenue || 0))
+    return [...productReport]
+      .filter((item) => Number(item.total_revenue || 0) > 0)
+      .sort((a, b) => Number(b.total_revenue || 0) - Number(a.total_revenue || 0))
   }, [productReport])
 
   const itemChartData = useMemo(() => {
@@ -273,7 +275,7 @@ export default function ItemSalesPage() {
           </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-md border bg-white p-4">
             <div className="mb-4">
               <h3 className="text-sm font-semibold">Top Item Gross Sales</h3>

@@ -1,8 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: process.env.BUILD_FOR_ELECTRON === 'true' ? 'export' : undefined,
+  distDir: process.env.BUILD_FOR_ELECTRON === 'true' ? 'out' : '.next',
   reactStrictMode: true,
   images: {
     domains: [],
+    unoptimized: process.env.BUILD_FOR_ELECTRON === 'true' ? true : false,
   },
   // Performance optimizations
   swcMinify: true,

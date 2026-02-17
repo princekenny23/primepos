@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog"
 import { useShift } from "@/contexts/shift-context"
 import { useBusinessStore } from "@/stores/businessStore"
+import { getOutletDashboardRoute } from "@/lib/utils/outlet-settings"
 import { cn } from "@/lib/utils"
 
 interface CloseRegisterModalProps {
@@ -34,7 +35,7 @@ interface CloseRegisterModalProps {
 export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalProps) {
   const router = useRouter()
   const { activeShift, closeShift } = useShift()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const [closingCash, setClosingCash] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string>("")
@@ -97,7 +98,7 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
       handleClose()
       // Redirect to business-specific dashboard
       if (currentBusiness) {
-        router.push(`/dashboard/${currentBusiness.type}`)
+        router.push(getOutletDashboardRoute(currentOutlet, currentBusiness))
       } else {
         router.push("/dashboard")
       }

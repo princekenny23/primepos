@@ -93,7 +93,9 @@ export default function StockTakingHistoryPage() {
       setIsLoading(true)
       try {
         if (useReal) {
-          const response = await inventoryService.getStockTakes()
+          const response = await inventoryService.getStockTakes({
+            outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+          })
           const stockTakes = response.results || []
           
           // Transform all stock takes into unified format
@@ -143,7 +145,7 @@ export default function StockTakingHistoryPage() {
     }
     
     loadStockTakes()
-  }, [currentBusiness, useReal, outlets])
+  }, [currentBusiness, currentOutlet?.id, useReal, outlets])
 
   const handleJoinStockTake = (id: string) => {
     router.push(`/dashboard/inventory/stock-taking/${id}`)

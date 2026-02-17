@@ -488,7 +488,6 @@ export default function QuotationsPage() {
       const canvas = await html2canvas.default(tempDiv, {
         useCORS: true,
         logging: false,
-        backgroundColor: "#ffffff",
       })
 
       // Remove temp element

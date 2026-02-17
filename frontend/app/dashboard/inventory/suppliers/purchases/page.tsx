@@ -46,7 +46,9 @@ export default function PurchasesPage() {
     setLoadingOrders(true)
     try {
       if (useReal) {
-        const response = await purchaseOrderService.list()
+        const response = await purchaseOrderService.list({
+          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+        })
         setPurchaseOrders(response.results || response || [])
       } else {
         setPurchaseOrders([])

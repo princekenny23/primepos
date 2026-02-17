@@ -293,6 +293,7 @@ export default function FinancialReportsPage() {
         onOpenChange={setShowExport}
         type="export"
         config={dataExchangeConfigs.reports}
+        data={financialData.breakdown || []}
       />
       <PrintReportModal
         open={showPrint}

@@ -53,12 +53,16 @@ class OutletSerializer(serializers.ModelSerializer):
     """Outlet serializer"""
     tills = TillSerializer(many=True, read_only=True)
     tenant = serializers.SerializerMethodField(read_only=True)  # Make tenant read-only for security
+    business_type_display = serializers.CharField(source='get_business_type_display', read_only=True)
     
     class Meta:
         model = Outlet
-        fields = ('id', 'tenant', 'name', 'address', 'phone', 'email', 'is_active', 
-                  'created_at', 'updated_at', 'tills')
-        read_only_fields = ('id', 'tenant', 'created_at', 'updated_at')
+        fields = (
+            'id', 'tenant', 'name', 'address', 'phone', 'email',
+            'business_type', 'business_type_display',
+            'settings', 'is_active', 'created_at', 'updated_at', 'tills'
+        )
+        read_only_fields = ('id', 'tenant', 'created_at', 'updated_at', 'business_type_display')
     
     def get_tenant(self, obj):
         """Return tenant ID as string for frontend compatibility"""

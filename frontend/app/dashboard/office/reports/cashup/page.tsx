@@ -73,10 +73,10 @@ type CashupRow = {
   till?: string | null
   openingCash: number
   closingCash: number
-  cashSalesTotal: number
-  totalRevenue: number
+  totalSales: number
   expectedCash: number
   difference: number
+  totalExpense: number
 }
 
 type CashupChartRow = {
@@ -227,27 +227,28 @@ export default function CashupReportPage() {
       const mapped = shifts.map((shift: Shift): CashupRow => {
         const openingCash = Number(shift.opening_cash_balance || shift.openingCashBalance || 0)
         const closingCash = Number(shift.closing_cash_balance || shift.closingCashBalance || 0)
-        const cashSalesTotal = Number(shift.system_total || shift.systemTotal || 0)
-        const totalRevenue = Number(shift.system_total || shift.systemTotal || 0)
-        const expectedCash = openingCash + cashSalesTotal
+        const totalSales = Number(shift.totalSales ?? (shift as any).total_sales ?? shift.system_total ?? shift.systemTotal ?? 0)
+        const expectedCash = openingCash + totalSales
         const difference = shift.difference !== null && shift.difference !== undefined
           ? Number(shift.difference)
           : closingCash - expectedCash
+        const operatingDate = shift.operating_date || shift.operatingDate
+        const totalExpense = Number(shift.totalExpense ?? (shift as any).total_expense ?? 0)
 
         return {
           shiftId: Number(shift.id),
-          operatingDate: shift.operating_date || shift.operatingDate,
+          operatingDate,
           startTime: shift.start_time || shift.startTime,
           endTime: shift.end_time || shift.endTime,
-          cashier: shift.user?.first_name || shift.user?.email || "-",
+          cashier: shift.user?.name || shift.user?.username || shift.user?.email || "-",
           outlet: shift.outlet?.name || "-",
           till: shift.till?.name || "-",
           openingCash,
           closingCash,
-          cashSalesTotal,
-          totalRevenue,
+          totalSales,
           expectedCash,
           difference,
+          totalExpense,
         }
       })
 
@@ -276,8 +277,8 @@ export default function CashupReportPage() {
 
   const totals = useMemo(() => {
     const totalShifts = rows.length
-    const totalCashSales = rows.reduce((sum, row) => sum + row.cashSalesTotal, 0)
-    const totalRevenue = rows.reduce((sum, row) => sum + row.totalRevenue, 0)
+    const totalCashSales = rows.reduce((sum, row) => sum + row.totalSales, 0)
+    const totalRevenue = rows.reduce((sum, row) => sum + row.totalSales, 0)
     const totalVariance = rows.reduce((sum, row) => sum + row.difference, 0)
     return { totalShifts, totalCashSales, totalRevenue, totalVariance }
   }, [rows])
@@ -288,8 +289,8 @@ export default function CashupReportPage() {
       const label = isValid(parsed) ? format(parsed, "MMM dd") : row.operatingDate
       return {
         label,
-        cashSales: row.cashSalesTotal,
-        totalRevenue: row.totalRevenue,
+        cashSales: row.totalSales,
+        totalRevenue: row.totalSales,
       }
     })
   }, [rows])
@@ -428,56 +429,55 @@ export default function CashupReportPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date</TableHead>
+                  <TableHead>Open</TableHead>
+                  <TableHead>Close</TableHead>
                   <TableHead>Shift</TableHead>
-                  <TableHead>Cashier</TableHead>
-                  <TableHead>Outlet / Till</TableHead>
-                  <TableHead className="text-right">Opening Cash</TableHead>
-                  <TableHead className="text-right">Cash Sales</TableHead>
-                  <TableHead className="text-right">Expected</TableHead>
-                  <TableHead className="text-right">Closing Cash</TableHead>
-                  <TableHead className="text-right">Difference</TableHead>
-                  <TableHead className="text-right">Total Revenue</TableHead>
+                  <TableHead>Teller/Cashier</TableHead>
+                  <TableHead>Till</TableHead>
+                  <TableHead className="text-right">Close Balance</TableHead>
+                  <TableHead className="text-right">Total Sales</TableHead>
+                  <TableHead className="text-right">Total Expense</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground">
                       Loading cashup data...
                     </TableCell>
                   </TableRow>
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="text-center text-muted-foreground">
                       No cashup data found for the selected range.
                     </TableCell>
                   </TableRow>
                 ) : (
                   rows.map((row) => (
                     <TableRow key={row.shiftId}>
-                      <TableCell>{formatDate(row.operatingDate)}</TableCell>
+                      <TableCell>{formatTime(row.startTime)}</TableCell>
+                      <TableCell>{formatTime(row.endTime)}</TableCell>
                       <TableCell>
                         <div className="text-sm font-medium">Shift #{row.shiftId}</div>
                         <div className="text-xs text-muted-foreground">
-                          {formatTime(row.startTime)} - {formatTime(row.endTime)}
+                          {formatDate(row.operatingDate)}
                         </div>
                       </TableCell>
                       <TableCell>{row.cashier || "-"}</TableCell>
-                      <TableCell>
-                        <div className="text-sm">{row.outlet || "-"}</div>
-                        <div className="text-xs text-muted-foreground">{row.till || "-"}</div>
-                      </TableCell>
-                      <TableCell className="text-right">{formatCurrency(row.openingCash)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(row.cashSalesTotal)}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(row.expectedCash)}</TableCell>
+                      <TableCell>{row.till || "-"}</TableCell>
                       <TableCell className="text-right">{formatCurrency(row.closingCash)}</TableCell>
-                      <TableCell
-                        className={`text-right font-semibold ${row.difference < 0 ? "text-red-700" : "text-emerald-700"}`}
-                      >
-                        {formatCurrency(row.difference)}
+                      <TableCell className="text-right">{formatCurrency(row.totalSales)}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(row.totalExpense)}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => console.log("View cashup", row.shiftId)}
+                        >
+                          View
+                        </Button>
                       </TableCell>
-                      <TableCell className="text-right">{formatCurrency(row.totalRevenue)}</TableCell>
                     </TableRow>
                   ))
                 )}
