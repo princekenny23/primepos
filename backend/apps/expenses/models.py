@@ -4,6 +4,7 @@ from decimal import Decimal
 from apps.tenants.models import Tenant
 from apps.outlets.models import Outlet
 from apps.accounts.models import User
+from apps.shifts.models import Shift
 
 
 class Expense(models.Model):
@@ -36,6 +37,7 @@ class Expense(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='expenses')
     outlet = models.ForeignKey(Outlet, on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses')
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='expenses')
+    shift = models.ForeignKey(Shift, on_delete=models.SET_NULL, null=True, blank=True, related_name='expenses')
     
     expense_number = models.CharField(max_length=50, unique=True, db_index=True)
     title = models.CharField(max_length=255)

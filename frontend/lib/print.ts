@@ -35,6 +35,7 @@ async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
   const response = await fetch(url, { ...init, headers })
   if (!response.ok) {
     const body = await response.text().catch(() => "")
+    console.error(`[Print Agent] ${path} failed:`, { status: response.status, body, url, headers })
     throw new Error(`Local Print Agent error (${response.status}): ${body || response.statusText}`)
   }
   return response
@@ -50,21 +51,23 @@ async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
 export async function scanPrinters(persistDefault = true): Promise<string[]> {
   if (typeof window === "undefined") return []
   try {
+    console.log("[Print] Scanning printers from:", LOCAL_PRINT_AGENT_URL)
     const response = await agentFetch("/printers", { method: "GET" })
     const data = await response.json().catch(() => ({}))
     const printers: string[] = Array.isArray(data?.printers) ? data.printers : []
     const defaultPrinter = data?.default
+    console.log("[Print] Found printers:", printers, "default:", defaultPrinter)
     if (Array.isArray(printers) && printers.length > 0 && persistDefault) {
       try {
         localStorage.setItem("defaultPrinter", defaultPrinter || printers[0])
+        console.log("[Print] Saved default printer:", defaultPrinter || printers[0])
       } catch {
         // ignore localStorage errors
       }
     }
     return printers || []
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn("Failed to scan printers via Local Print Agent", err)
+    console.error("[Print] ❌ Failed to scan printers. Is the Local Print Agent running at", LOCAL_PRINT_AGENT_URL, "?", err)
     return []
   }
 }
@@ -188,23 +191,37 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     }
   }
 
-  if (!printerName) throw new Error("No printer configured for this outlet")
+  if (!printerName) throw new Error("[Print] ❌ No printer found. Check printer settings or ensure Local Print Agent (/printers endpoint) is reachable at " + LOCAL_PRINT_AGENT_URL)
 
   const saleId = String(payload?.sale?.id || "").trim()
   let contentBase64: string | null = null
   let receiptNumber = ""
 
   if (saleId) {
-    const escpos = await getEscposPayload(saleId)
-    if (escpos) {
-      contentBase64 = escpos.contentBase64
-      receiptNumber = escpos.receiptNumber
+    try {
+      const escpos = await getEscposPayload(saleId)
+      if (escpos) {
+        contentBase64 = escpos.contentBase64
+        receiptNumber = escpos.receiptNumber
+        console.log("[Print] Using backend ESC/POS payload for sale:", saleId)
+      } else {
+        console.warn("[Print] No ESC/POS payload found, falling back to plain text")
+      }
+    } catch (err) {
+      console.warn("[Print] ESC/POS fetch failed, falling back to plain text:", err)
     }
   }
 
   if (!contentBase64) {
     const plainText = buildPlainTextReceipt(payload)
-    contentBase64 = btoa(unescape(encodeURIComponent(plainText)))
+    // Proper UTF-8 to base64 encoding (avoids deprecated unescape)
+    const encoder = new TextEncoder()
+    const data = encoder.encode(plainText)
+    let binary = ""
+    for (let i = 0; i < data.length; i++) {
+      binary += String.fromCharCode(data[i])
+    }
+    contentBase64 = btoa(binary)
   }
 
   const job: EscposPrintJob = {
@@ -212,6 +229,13 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     contentBase64: contentBase64,
     jobName: receiptNumber ? `PrimePOS Receipt ${receiptNumber}` : "PrimePOS Receipt",
   }
+
+  console.log("[Print] Sending print job to agent:", {
+    url: LOCAL_PRINT_AGENT_URL,
+    printer: job.printerName,
+    jobName: job.jobName,
+    contentLength: job.contentBase64.length,
+  })
 
   await agentFetch("/print", {
     method: "POST",

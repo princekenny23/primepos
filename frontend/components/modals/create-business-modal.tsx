@@ -17,6 +17,7 @@ import type { BusinessType, POSType } from "@/lib/types"
 import { useAuthStore } from "@/stores/authStore"
 import { tenantService } from "@/lib/services/tenantService"
 import { outletService } from "@/lib/services/outletService"
+import { buildOutletSettings, normalizeOutletBusinessType } from "@/lib/utils/outlet-business-type"
 import { userService } from "@/lib/services/userService"
 
 interface CreateBusinessModalProps {
@@ -84,6 +85,8 @@ export function CreateBusinessModal({
         name: formData.outletName || `${business.name} - Main`,
         address: formData.outletAddress || "",
         phone: formData.outletPhone || "",
+        businessType: normalizeOutletBusinessType(business.type),
+        settings: buildOutletSettings(business.settings, business.type),
         isActive: true,
       })
       

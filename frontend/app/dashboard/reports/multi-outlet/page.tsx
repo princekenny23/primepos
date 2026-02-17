@@ -321,6 +321,7 @@ export default function MultiOutletReportsPage() {
           defaultFormat: "xlsx",
           apiEndpoints: { import: "/api/reports/import", export: "/api/reports/export" }
         }}
+        data={outletData}
       />
       </PageLayout>
     </DashboardLayout>

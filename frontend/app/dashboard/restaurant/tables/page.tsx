@@ -13,6 +13,7 @@ import { useBusinessStore } from "@/stores/businessStore"
 import { tableService, type Table } from "@/lib/services/tableService"
 import { useToast } from "@/components/ui/use-toast"
 import { useTenant } from "@/contexts/tenant-context"
+import { getOutletPosMode } from "@/lib/utils/outlet-settings"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +30,7 @@ export default function TablesPage() {
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { currentOutlet: tenantOutlet } = useTenant()
   const outlet = tenantOutlet || currentOutlet
+  const posMode = getOutletPosMode(outlet, currentBusiness)
   const { toast } = useToast()
 
   const [showAddTable, setShowAddTable] = useState(false)
@@ -39,10 +41,10 @@ export default function TablesPage() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    if (currentBusiness && currentBusiness.type !== "restaurant") {
+    if (currentBusiness && posMode !== "restaurant") {
       router.push("/dashboard")
     }
-  }, [currentBusiness, router])
+  }, [currentBusiness, posMode, router])
 
   const loadTables = useCallback(async () => {
     if (!outlet) {
@@ -93,7 +95,7 @@ export default function TablesPage() {
     }
   }
 
-  if (!currentBusiness || currentBusiness.type !== "restaurant") {
+  if (!currentBusiness || posMode !== "restaurant") {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">

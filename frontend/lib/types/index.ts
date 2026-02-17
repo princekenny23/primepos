@@ -2,6 +2,7 @@
 
 export type BusinessType = "wholesale and retail" | "restaurant" | "bar"
 export type POSType = "standard" | "single_product"
+export type OutletBusinessType = "wholesale_and_retail" | "restaurant" | "bar"
 
 export interface Business {
   id: string
@@ -34,6 +35,10 @@ export interface Outlet {
   name: string
   address?: string
   phone?: string
+  email?: string
+  businessType?: OutletBusinessType
+  businessTypeDisplay?: string
+  settings?: BusinessSettings
   isActive: boolean
   createdAt: string
 }

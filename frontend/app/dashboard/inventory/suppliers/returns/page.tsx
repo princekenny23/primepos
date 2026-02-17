@@ -19,15 +19,19 @@ import { useToast } from "@/components/ui/use-toast"
 import Link from "next/link"
 
 import { purchaseReturnService } from "@/lib/services/purchaseReturnService"
+import { useBusinessStore } from "@/stores/businessStore"
 
 export default function PurchaseReturnsPage() {
   const { toast } = useToast()
+  const { currentOutlet } = useBusinessStore()
   const [searchTerm, setSearchTerm] = useState("")
   const [returns, setReturns] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    purchaseReturnService.list()
+    purchaseReturnService.list({
+      outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+    })
       .then((response) => setReturns(response.results))
       .catch((error) => {
         console.error("Failed to load returns:", error)
@@ -38,7 +42,7 @@ export default function PurchaseReturnsPage() {
         })
       })
       .finally(() => setLoading(false))
-  }, [toast])
+  }, [currentOutlet?.id, toast])
 
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { bg: string; text: string; icon: any }> = {

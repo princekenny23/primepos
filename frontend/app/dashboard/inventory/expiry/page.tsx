@@ -27,10 +27,12 @@ import {
 } from "@/components/ui/select"
 import Link from "next/link"
 import { useI18n } from "@/contexts/i18n-context"
+import { useBusinessStore } from "@/stores/businessStore"
 
 export default function ExpiryManagementPage() {
   const { toast } = useToast()
   const { t } = useI18n()
+  const { currentOutlet } = useBusinessStore()
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [products, setProducts] = useState<any[]>([])
@@ -39,7 +41,10 @@ export default function ExpiryManagementPage() {
   const loadProducts = async () => {
     setIsLoading(true)
     try {
-      const response = await productService.list({ is_active: true })
+      const response = await productService.list({
+        is_active: true,
+        outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+      })
       const allProducts = response.results || response || []
       const productsWithExpiry = allProducts.filter((p: any) => 
         p.expiry_date || p.manufacturing_date || p.track_expiration
@@ -60,7 +65,7 @@ export default function ExpiryManagementPage() {
   useEffect(() => {
     loadProducts()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [currentOutlet?.id])
 
   const getExpiryStatus = (expiryDate: string | null | undefined) => {
     if (!expiryDate) return { status: "none", label: "No Expiry", color: "bg-gray-100" }

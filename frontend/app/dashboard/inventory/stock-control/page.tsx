@@ -73,7 +73,7 @@ export default function StockControlPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
   const [activeTab, setActiveTab] = useState<string>("adjusts")
-  const pageSize = 15
+  const pageSize = 10
   const useReal = useRealAPI()
   const { t } = useI18n()
   const { toast } = useToast()
@@ -113,6 +113,7 @@ export default function StockControlPage() {
       if (useReal) {
         const movements = await inventoryService.getMovements({
           movement_type: "adjustment",
+          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
         })
         
         const mappedAdjustments = (movements.results || []).map((m: any) => ({
@@ -135,7 +136,7 @@ export default function StockControlPage() {
     } finally {
       setIsLoadingAdjustments(false)
     }
-  }, [currentBusiness, useReal])
+  }, [currentBusiness, currentOutlet?.id, useReal])
 
   // Load transfers
   const loadTransfers = useCallback(async () => {
@@ -150,6 +151,7 @@ export default function StockControlPage() {
       if (useReal) {
         const transferOutMovements = await inventoryService.getMovements({
           movement_type: "transfer_out",
+          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
         })
         
         const transferMap = new Map()
@@ -197,6 +199,7 @@ export default function StockControlPage() {
         
         const transferInMovements = await inventoryService.getMovements({
           movement_type: "transfer_in",
+          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
         })
         
         const transferInResults = (transferInMovements.results || []).filter((movement: any) => {
@@ -249,7 +252,7 @@ export default function StockControlPage() {
     } finally {
       setIsLoadingTransfers(false)
     }
-  }, [currentBusiness, outlets, useReal])
+  }, [currentBusiness, currentOutlet?.id, outlets, useReal])
 
   // Load receiving
   const loadReceiving = useCallback(async () => {
@@ -264,6 +267,7 @@ export default function StockControlPage() {
       if (useReal) {
         const purchaseMovements = await inventoryService.getMovements({
           movement_type: "purchase",
+          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
         })
         
         const receivingMap = new Map()
@@ -331,16 +335,19 @@ export default function StockControlPage() {
     } finally {
       setIsLoadingReceiving(false)
     }
-  }, [currentBusiness, outlets, useReal])
+  }, [currentBusiness, currentOutlet?.id, outlets, useReal])
 
   const loadProducts = useCallback(async () => {
     try {
-      const response = await productService.list({ is_active: true })
+      const response = await productService.list({
+        is_active: true,
+        outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+      })
       setProducts(response.results || [])
     } catch (error) {
       console.error("Failed to load products:", error)
     }
-  }, [])
+  }, [currentOutlet?.id])
 
   // Load returns
   const loadReturns = useCallback(async () => {

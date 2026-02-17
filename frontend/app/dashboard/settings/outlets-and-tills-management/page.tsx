@@ -438,13 +438,13 @@ export default function OutletsAndTillsManagementPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+              <AlertDialogCancel>{t("common.actions.cancel")}</AlertDialogCancel>
               <AlertDialogAction
                 onClick={handleDeleteTill}
                 disabled={deletingTill?.is_in_use}
                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               >
-                {t("common.delete")}
+                {t("common.actions.delete")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

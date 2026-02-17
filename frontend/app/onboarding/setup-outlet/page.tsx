@@ -19,6 +19,7 @@ import Link from "next/link"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useAuthStore } from "@/stores/authStore"
 import { outletService } from "@/lib/services/outletService"
+import { buildOutletSettings, normalizeOutletBusinessType } from "@/lib/utils/outlet-business-type"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export default function SetupOutletPage() {
@@ -82,6 +83,8 @@ export default function SetupOutletPage() {
         name: formData.outletName.trim() || `${currentBusiness.name} - Main`,
         address: formData.address?.trim() || "",
         phone: formData.phone?.trim() || "",
+        businessType: normalizeOutletBusinessType(currentBusiness.type),
+        settings: buildOutletSettings(currentBusiness.settings, currentBusiness.type),
         isActive: true,
       })
       

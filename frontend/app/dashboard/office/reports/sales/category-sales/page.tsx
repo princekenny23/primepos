@@ -221,7 +221,9 @@ export default function CategorySalesPage() {
       entry.quantity += Number(row.total_sold || 0)
       map.set(category, entry)
     })
-    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue)
+    return Array.from(map.values())
+      .filter((row) => row.revenue > 0)
+      .sort((a, b) => b.revenue - a.revenue)
   }, [productReport])
 
   const categoryChartData = useMemo(() => {
@@ -281,7 +283,7 @@ export default function CategorySalesPage() {
           </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-md border bg-white p-4">
             <div className="mb-4">
               <h3 className="text-sm font-semibold">Top Category Gross Sales</h3>

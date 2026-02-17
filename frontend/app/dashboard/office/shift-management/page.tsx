@@ -294,8 +294,8 @@ export default function ShiftManagementPage() {
   }
 
   const getTillName = (tillId: string): string => {
-    const till = tills.find(t => t.id === tillId)
-    return till?.name || tillId
+    const till = tills.find(t => String(t.id) === String(tillId))
+    return till?.name || (till as any)?.till_name || tillId
   }
 
   const handleExportToExcel = () => {

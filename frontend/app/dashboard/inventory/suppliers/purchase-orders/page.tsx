@@ -19,15 +19,19 @@ import { useToast } from "@/components/ui/use-toast"
 import Link from "next/link"
 
 import { purchaseOrderService } from "@/lib/services/purchaseOrderService"
+import { useBusinessStore } from "@/stores/businessStore"
 
 export default function PurchaseOrdersPage() {
   const { toast } = useToast()
+  const { currentOutlet } = useBusinessStore()
   const [searchTerm, setSearchTerm] = useState("")
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    purchaseOrderService.list()
+    purchaseOrderService.list({
+      outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+    })
       .then((response) => setPurchaseOrders(response.results))
       .catch((error) => {
         console.error("Failed to load purchase orders:", error)
@@ -38,7 +42,7 @@ export default function PurchaseOrdersPage() {
         })
       })
       .finally(() => setLoading(false))
-  }, [toast])
+  }, [currentOutlet?.id, toast])
 
   const getStatusBadge = (status: string) => {
     const statusConfig: Record<string, { bg: string; text: string; icon: any; label: string }> = {

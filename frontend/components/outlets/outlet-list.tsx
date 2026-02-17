@@ -29,6 +29,7 @@ import { outletService } from "@/lib/services/outletService"
 import { useToast } from "@/components/ui/use-toast"
 import { AddEditOutletModal } from "@/components/modals/add-edit-outlet-modal"
 import { useBusinessStore } from "@/stores/businessStore"
+import { getOutletBusinessTypeDisplay, normalizeOutletBusinessType } from "@/lib/utils/outlet-business-type"
 
 interface OutletListProps {
   onOutletUpdated?: () => void
@@ -46,6 +47,17 @@ export function OutletList(props: OutletListProps = {}) {
   const [isTogglingStatus, setIsTogglingStatus] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [isSwitching, setIsSwitching] = useState<string | null>(null)
+
+  const getBusinessTypeBadgeClass = (type?: string) => {
+    switch (normalizeOutletBusinessType(type)) {
+      case "restaurant":
+        return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+      case "bar":
+        return "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200"
+      default:
+        return "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200"
+    }
+  }
 
   const handleEdit = (outlet: any) => {
     setEditingOutlet(outlet)
@@ -69,6 +81,8 @@ export function OutletList(props: OutletListProps = {}) {
         address: o.address || "",
         phone: o.phone || "",
         email: o.email || "",
+        businessType: o.businessType,
+        businessTypeDisplay: o.businessTypeDisplay,
         isActive: o.isActive,
         settings: o.settings || {},
       }))
@@ -114,6 +128,8 @@ export function OutletList(props: OutletListProps = {}) {
         address: o.address || "",
         phone: o.phone || "",
         email: o.email || "",
+        businessType: o.businessType,
+        businessTypeDisplay: o.businessTypeDisplay,
         isActive: o.isActive,
         settings: o.settings || {},
       }))
@@ -227,6 +243,7 @@ export function OutletList(props: OutletListProps = {}) {
             <TableHeader>
               <TableRow>
                 <TableHead>Outlet Name</TableHead>
+                <TableHead>Business Type</TableHead>
                 <TableHead>Address</TableHead>
                 <TableHead>Contact</TableHead>
                 <TableHead>Status</TableHead>
@@ -236,7 +253,7 @@ export function OutletList(props: OutletListProps = {}) {
             <TableBody>
               {outlets.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                     No outlets found. Create your first outlet to get started.
                   </TableCell>
                 </TableRow>
@@ -255,6 +272,14 @@ export function OutletList(props: OutletListProps = {}) {
                           )}
                         </div>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant="secondary"
+                        className={getBusinessTypeBadgeClass(outlet.businessType)}
+                      >
+                        {outlet.businessTypeDisplay || getOutletBusinessTypeDisplay(outlet.businessType)}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">

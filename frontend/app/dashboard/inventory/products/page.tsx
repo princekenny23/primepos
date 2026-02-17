@@ -41,6 +41,7 @@ import { productService, categoryService } from "@/lib/services/productService"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useToast } from "@/components/ui/use-toast"
+import { getOutletBusinessRouteSegment } from "@/lib/utils/outlet-settings"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -94,13 +95,12 @@ export default function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
   const [activeTab, setActiveTab] = useState("all")
   const [currentPage, setCurrentPage] = useState(1)
-  const pageSize = 15
+  const pageSize = 10
 
   const [products, setProducts] = useState<any[]>([])
   const [categories, setCategories] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false)
   const [showExport, setShowExport] = useState(false)
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
@@ -111,10 +111,10 @@ export default function ProductsPage() {
   const { toast } = useToast()
   
   // Determine business type for conditional rendering
-  const businessType = currentBusiness?.type || ""
-  const isWholesaleRetail = businessType === "wholesale and retail"
-  const isBar = businessType === "bar"
-  const isRestaurant = businessType === "restaurant"
+  const outletSegment = getOutletBusinessRouteSegment(currentOutlet, currentBusiness)
+  const isWholesaleRetail = outletSegment === "retail"
+  const isBar = outletSegment === "bar"
+  const isRestaurant = outletSegment === "restaurant"
   
   // Helper function to parse business-specific fields from description
   const parseBusinessFields = (product: any) => {
@@ -149,14 +149,10 @@ export default function ProductsPage() {
     return fields
   }
 
-  const loadData = useCallback(async (isAutoRefresh = false) => {
+  const loadData = useCallback(async () => {
     if (!currentBusiness) return
-    
-    if (isAutoRefresh) {
-      setIsAutoRefreshing(true)
-    } else {
-      setIsLoading(true)
-    }
+
+    setIsLoading(true)
     try {
       const categoriesPromise = categoryService.list()
       const allProducts: any[] = []
@@ -179,68 +175,19 @@ export default function ProductsPage() {
       setCategories(Array.isArray(categoriesResponse) ? categoriesResponse : categoriesResponse || [])
     } catch (error) {
       console.error("Failed to load products:", error)
-      if (!isAutoRefresh) {
-        toast({
-          title: "Error",
-          description: "Failed to load products. Please try again.",
-          variant: "destructive",
-        })
-      }
+      toast({
+        title: "Error",
+        description: "Failed to load products. Please try again.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoading(false)
-      setIsAutoRefreshing(false)
     }
   }, [currentBusiness, currentOutlet, toast])
 
   useEffect(() => {
-    loadData(false)
-    
-    // Auto-refresh every 30 seconds for real-time updates
-    const interval = setInterval(() => {
-      loadData(true)
-    }, 30000)
-    
-    // Refresh when page becomes visible (user switches back to tab)
-    const handleVisibilityChange = () => {
-      if (!document.hidden && currentBusiness) {
-        loadData(false)
-      }
-    }
-    
-    // Refresh when window gains focus
-    const handleFocus = () => {
-      if (currentBusiness) {
-        loadData(false)
-      }
-    }
-    
-    // Listen for custom events from inventory operations
-    const handleInventoryUpdate = () => {
-      if (currentBusiness) {
-        loadData(false)
-      }
-    }
-    
-    // Listen for outlet changes
-    const handleOutletChange = () => {
-      if (currentBusiness) {
-        loadData(false)
-      }
-    }
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', handleFocus)
-    window.addEventListener('inventory-updated', handleInventoryUpdate)
-    window.addEventListener('outlet-changed', handleOutletChange)
-    
-    return () => {
-      clearInterval(interval)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', handleFocus)
-      window.removeEventListener('inventory-updated', handleInventoryUpdate)
-      window.removeEventListener('outlet-changed', handleOutletChange)
-    }
-  }, [loadData, currentBusiness])
+    loadData()
+  }, [loadData])
 
   const getProductStatus = (product: any) => {
     // Check if backend already marked it as low stock
@@ -256,30 +203,6 @@ export default function ProductsPage() {
     const lowStockThreshold = typeof product.lowStockThreshold === 'string' 
       ? parseFloat(product.lowStockThreshold) 
       : (product.lowStockThreshold || 0)
-    
-    // Check variation-level low stock
-    if (product.variations && Array.isArray(product.variations)) {
-      const hasLowVariation = product.variations.some((v: any) => {
-        if (!v.track_inventory) return false
-        const varStock = v.total_stock || v.stock || 0
-        const varThreshold = v.low_stock_threshold || 0
-        if (varThreshold > 0 && varStock <= varThreshold) {
-          return true
-        }
-        return false
-      })
-      
-      if (hasLowVariation) {
-        // Check if any variation is out of stock
-        const hasOutOfStock = product.variations.some((v: any) => {
-          if (!v.track_inventory) return false
-          const varStock = v.total_stock || v.stock || 0
-          return varStock === 0
-        })
-        if (hasOutOfStock && stock === 0) return "out-of-stock"
-        return "low-stock"
-      }
-    }
     
     // Only show out of stock if stock is exactly 0
     if (stock === 0 || stock === null || stock === undefined) return "out-of-stock"
@@ -495,7 +418,7 @@ export default function ProductsPage() {
     <DashboardLayout>
       <PageLayout
         title="Products"
-        description={`Manage your product catalog${isAutoRefreshing ? ' (Updating...)' : ''}` }
+        description="Manage your product catalog"
         noPadding={true}
       >
         {/* Tabs Navigation */}
@@ -1021,6 +944,7 @@ export default function ProductsPage() {
         onOpenChange={setShowExport}
         type="export"
         config={dataExchangeConfigs.products}
+        data={products}
         outlets={outlets}
         categories={categories}
       />
@@ -1055,7 +979,7 @@ export default function ProductsPage() {
               <span className="text-destructive font-medium">This action cannot be undone.</span>
               <br />
               <span className="text-xs text-muted-foreground mt-2 block">
-                All associated data including sales history, inventory records, and variations will be affected.
+                All associated data including sales history and inventory records will be affected.
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>

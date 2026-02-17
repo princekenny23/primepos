@@ -57,15 +57,16 @@ import { saleService } from "@/lib/services/saleService"
 import { kitchenService } from "@/lib/services/kitchenService"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Product, Category } from "@/lib/types"
-import { 
-  Search, Wine, Receipt, Plus, Minus, X, CreditCard, Smartphone, DollarSign, 
+import {
+  Search, Wine, Receipt, Plus, Minus, X, CreditCard, Smartphone, DollarSign,
   Lock, RefreshCw, Users, ArrowRightLeft, Merge, Split, Clock, User,
   Table2, Armchair, List, AlertCircle, Check, Trash2,
-  MoreHorizontal, RotateCcw, Percent, Pencil,
+  RotateCcw, Percent, Pencil,
   Wallet, ShieldAlert, XCircle, Zap, History, ChefHat
 } from "lucide-react"
+import { Tag, PauseCircle, Ban } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
-import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
+import { PaymentPopup } from "@/components/pos/payment-popup"
 import { SaleDiscountModal, type SaleDiscount } from "@/components/modals/sale-discount-modal"
 import { RefundReturnModal } from "@/components/modals/refund-return-modal"
 import { TabFinderModal } from "@/components/modals/tab-finder-modal"
@@ -1458,6 +1459,66 @@ export function RestaurantPOS() {
               </ScrollArea>
             </div>
           )}
+
+          {/* Action Icon Row - Below Products/Tables */}
+          <div className="border-t bg-card px-3 py-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-amber-700"
+                onClick={() => setShowDiscountModal(true)}
+              >
+                <Tag className="h-4 w-4" />
+                Discount
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-blue-700"
+                onClick={() => setShowRefundModal(true)}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Refund
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-emerald-700"
+                onClick={handleHoldSale}
+              >
+                <PauseCircle className="h-4 w-4" />
+                Hold
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-indigo-700"
+                onClick={() => setShowHoldSales(true)}
+              >
+                <History className="h-4 w-4" />
+                Retrieve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-slate-700"
+                onClick={() => setShowCloseRegister(true)}
+              >
+                <Lock className="h-4 w-4" />
+                Close
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-red-600"
+                onClick={handleVoidSale}
+              >
+                <Ban className="h-4 w-4" />
+                Void
+              </Button>
+            </div>
+          </div>
         </div>
 
         {/* Right Panel - Cart - Fixed layout, only cart items scroll */}
@@ -1601,43 +1662,6 @@ export function RestaurantPOS() {
                 )}
                 Send to Kitchen
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="h-14 px-4"
-                    disabled={cart.length === 0}
-                    title="More actions"
-                  >
-                    <MoreHorizontal className="h-5 w-5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-40">
-                  <DropdownMenuItem disabled={cart.length === 0} onClick={() => setShowDiscountModal(true)}>
-                    Discount
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled={cart.length === 0} onClick={() => setShowRefundModal(true)}>
-                    Refund / Return
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={cart.length === 0}
-                    onClick={handleHoldSale}
-                  >
-                    Hold Sale
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => setShowHoldSales(true)}
-                  >
-                    Retrieve Hold
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setShowCloseRegister(true)}>
-                    Close Register
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled={cart.length === 0} onClick={handleVoidSale} className="text-red-600">
-                    Void Sale
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
             </div>
 
             {/* Quick Tab Actions (when tab is selected) */}
@@ -2105,28 +2129,31 @@ export function RestaurantPOS() {
         </DialogContent>
       </Dialog>
 
-      {/* ==================== PAYMENT METHOD MODAL ==================== */}
-      <PaymentMethodModal
+      {/* ==================== PAYMENT POPUP ==================== */}
+      <PaymentPopup
         open={showPaymentModal}
-        onOpenChange={setShowPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
         total={currentTab?.total || cartSubtotal}
-        business={currentBusiness}
-        onConfirm={(method, amount, change) => {
-          // Map "tab" (credit) to "credit" for backend
+        subtotal={currentTab?.subtotal || cartSubtotal}
+        discount={currentTab?.discount || 0}
+        tax={0}
+        customer={currentTab ? { name: currentTab.customer_name || undefined, phone: currentTab.customer_phone } : undefined}
+        items={cart}
+        onConfirm={async (method, amount, change) => {
           const paymentMethod = method === "tab" ? "credit" : method
-          
-          // If this is a tab, close it with payment
           if (currentTab) {
             handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "credit", amount, change)
           } else {
             // Quick sale (no tab) - just show confirmation
-            toast({
-              title: "Payment Processed",
-              description: `${method.charAt(0).toUpperCase() + method.slice(1)} payment of ${formatCurrency(cartSubtotal, currentBusiness)} received${change && change > 0 ? `. Change: ${formatCurrency(change, currentBusiness)}` : ''}`,
-            })
+            if (method && amount) {
+              toast({
+                title: "Payment Processed",
+                description: `${method.charAt(0).toUpperCase() + method.slice(1)} payment of ${formatCurrency(cartSubtotal, currentBusiness)} received${change && change > 0 ? `. Change: ${formatCurrency(change, currentBusiness)}` : ''}`,
+              })
+            }
             setCart([])
-            setShowPaymentModal(false)
           }
+          setShowPaymentModal(false)
         }}
       />
 

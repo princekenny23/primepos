@@ -6,11 +6,14 @@ import { useBusinessStore } from "@/stores/businessStore"
 import { useShift } from "@/contexts/shift-context"
 import { RetailPOS } from "@/components/pos/retail-pos"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
+import { getOutletPOSRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function RetailPOSPage() {
   const router = useRouter()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { activeShift, isLoading } = useShift()
+  const posMode = getOutletPosMode(currentOutlet, currentBusiness)
+  const posRoute = getOutletPOSRoute(currentOutlet, currentBusiness)
 
   useEffect(() => {
     if (!currentBusiness) {
@@ -25,8 +28,8 @@ export default function RetailPOSPage() {
     }
 
     // Redirect non-retail/wholesale businesses to their specific POS
-    if (currentBusiness.type !== "wholesale and retail") {
-      router.push(`/pos/${currentBusiness.type}`)
+    if (posMode !== "standard") {
+      router.push(posRoute)
       return
     }
 
@@ -35,10 +38,10 @@ export default function RetailPOSPage() {
       router.push("/dashboard/pos")
       return
     }
-  }, [currentBusiness, router, activeShift, isLoading])
+  }, [currentBusiness, posMode, posRoute, router, activeShift, isLoading])
 
   // Only allow standard POS with "wholesale and retail" type to use this POS
-  if (!currentBusiness || currentBusiness.posType !== "standard" || currentBusiness.type !== "wholesale and retail") {
+  if (!currentBusiness || currentBusiness.posType !== "standard" || posMode !== "standard") {
     return null
   }
 

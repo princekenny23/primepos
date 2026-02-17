@@ -26,6 +26,7 @@ import { FileSpreadsheet, Printer, RefreshCw } from "lucide-react"
 import { useI18n } from "@/contexts/i18n-context"
 import { useBusinessStore } from "@/stores/businessStore"
 import { apiEndpoints } from "@/lib/api"
+import { exportToXLSX, type ExportColumn } from "@/lib/services/exportService"
 import {
   reportService,
   type InventoryValuationReport,
@@ -110,16 +111,52 @@ export default function StockValuationReportPage() {
 
   const handleExportXlsx = async () => {
     try {
-      await reportService.downloadReport(
-        apiEndpoints.reports.inventoryValuationXlsx,
-        {
-          outlet: selectedOutlet !== "all" ? selectedOutlet : "",
-          start_date: startDate,
-          end_date: endDate,
-          category: selectedCategory !== "all" ? selectedCategory : "",
-        },
-        `stock-valuation-${startDate}-to-${endDate}.xlsx`
-      )
+      const items = report?.items || []
+      if (items.length === 0) {
+        toast({
+          title: t("common.messages.error"),
+          description: "No stock valuation data to export",
+          variant: "destructive",
+        })
+        return
+      }
+
+      const columns: ExportColumn[] = [
+        { key: "name", label: "Item" },
+        { key: "code", label: "Code" },
+        { key: "category", label: "Category" },
+        { key: "cost_price", label: "Cost Price", format: "currency" },
+        { key: "retail_price", label: "Retail Price", format: "currency" },
+        { key: "open_qty", label: "Open Qty", format: "number" },
+        { key: "open_value", label: "Open Value", format: "currency" },
+        { key: "received_qty", label: "Received Qty", format: "number" },
+        { key: "received_value", label: "Received Value", format: "currency" },
+        { key: "transferred_qty", label: "Transferred Qty", format: "number" },
+        { key: "transferred_value", label: "Transferred Value", format: "currency" },
+        { key: "adjusted_qty", label: "Adjusted Qty", format: "number" },
+        { key: "adjusted_value", label: "Adjusted Value", format: "currency" },
+        { key: "sold_qty", label: "Sold Qty", format: "number" },
+        { key: "sold_value", label: "Sold Value", format: "currency" },
+        { key: "stock_qty", label: "Stock Qty", format: "number" },
+        { key: "stock_value", label: "Stock Value", format: "currency" },
+        { key: "counted_qty", label: "Counted Qty", format: "number" },
+        { key: "counted_value", label: "Counted Value", format: "currency" },
+        { key: "discrepancy", label: "Discrepancy Qty", format: "number" },
+        { key: "discrepancy_value", label: "Discrepancy Value", format: "currency" },
+        { key: "surplus_qty", label: "Surplus Qty", format: "number" },
+        { key: "surplus_value", label: "Surplus Value", format: "currency" },
+        { key: "shortage_qty", label: "Shortage Qty", format: "number" },
+        { key: "shortage_value", label: "Shortage Value", format: "currency" },
+      ]
+
+      await exportToXLSX({
+        data: items,
+        fileName: `stock-valuation-${startDate}-to-${endDate}`,
+        sheetName: "Stock Valuation",
+        columns,
+        includeHeaders: true,
+        freezeHeader: true,
+      })
     } catch (error: any) {
       toast({
         title: t("common.messages.error"),

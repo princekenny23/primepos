@@ -268,6 +268,7 @@ export default function SalesReportsPage() {
           onOpenChange={setShowExport}
           type="export"
           config={dataExchangeConfigs.reports}
+          data={paymentBreakdown}
         />
         <PrintReportModal
           open={showPrint}

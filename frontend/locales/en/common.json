@@ -61,6 +61,8 @@
     "undo": "Undo",
     "redo": "Redo"
   },
+  "delete": "Delete",
+  "cancel": "Cancel",
   "status": {
     "active": "Active",
     "inactive": "Inactive",
@@ -145,7 +147,6 @@
   "search_products_placeholder": "Search products by name or SKU...",
   "outlet": "Outlet",
   "category": "Category",
-  "status": "Status",
   "filters": "Filters",
   "search": "Search",
   "all_outlets": "All Outlets",

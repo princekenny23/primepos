@@ -25,6 +25,7 @@ import { useAuthStore } from "@/stores/authStore"
 import { useRouter } from "next/navigation"
 import { PrimePOSLogo } from "@/components/brand/primepos-logo"
 import { useI18n } from "@/contexts/i18n-context"
+import { getOutletBusinessRouteSegment, getOutletDashboardRoute } from "@/lib/utils/outlet-settings"
 
 // Navigation translation keys mapping
 const navTranslationKeys: Record<string, string> = {
@@ -71,7 +72,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const { hasPermission, role } = useRole()
   const { activeShift } = useShift()
   const { user } = useAuthStore()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet: businessOutlet } = useBusinessStore()
   const { t } = useI18n()
   const restoringBusinessRef = useRef(false)
   const redirectedRef = useRef(false)
@@ -150,21 +151,17 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     if (isAdminRoute || isSaaSAdmin) {
       return fullNavigation
     }
-    const industry = currentBusiness?.type as "wholesale and retail" | "restaurant" | "bar" | null | undefined
-    const nav = getIndustrySidebarConfig(industry)
+    const outlet = currentOutlet || businessOutlet
+    const outletSegment = getOutletBusinessRouteSegment(outlet, currentBusiness)
+    const industry = outletSegment === "retail" ? "wholesale and retail" : outletSegment
+    const nav = getIndustrySidebarConfig(industry as "wholesale and retail" | "restaurant" | "bar")
     const dashboardIndex = nav.findIndex(item => item.name === "Dashboard")
     if (dashboardIndex !== -1 && currentBusiness) {
-      if (currentBusiness.type === "restaurant") {
-        nav[dashboardIndex] = { ...nav[dashboardIndex], href: "/dashboard/restaurant/dashboard" }
-      } else if (currentBusiness.type === "bar") {
-        nav[dashboardIndex] = { ...nav[dashboardIndex], href: "/dashboard/bar/dashboard" }
-      } else if (currentBusiness.type === "wholesale and retail") {
-        nav[dashboardIndex] = { ...nav[dashboardIndex], href: "/dashboard" }
-      }
+      nav[dashboardIndex] = { ...nav[dashboardIndex], href: getOutletDashboardRoute(outlet, currentBusiness) }
     }
     return nav
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAdminRoute, isSaaSAdmin, currentBusiness?.type])
+  }, [isAdminRoute, isSaaSAdmin, currentBusiness?.type, currentOutlet?.id, businessOutlet?.id])
   
   // Filter navigation based on user role
   const navigation = allNavigation.filter((item) => hasPermission(item.permission))

@@ -13,6 +13,7 @@ export interface Expense {
   expense_date: string
   outlet_id?: string
   outlet_name?: string
+  shift_id?: string
   status: "pending" | "approved" | "rejected"
   created_at: string
   updated_at: string
@@ -38,6 +39,7 @@ export interface ExpenseCreateData {
   payment_reference?: string
   expense_date: string
   outlet_id?: string
+  shift_id?: string
 }
 
 export const expenseService = {

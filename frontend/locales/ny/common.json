@@ -61,6 +61,8 @@
     "undo": "Bwezerani",
     "redo": "Chitaninso"
   },
+  "delete": "Chotsani",
+  "cancel": "Lekani",
   "status": {
     "active": "Ikugwira",
     "inactive": "Siikugwira",

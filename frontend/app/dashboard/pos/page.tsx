@@ -24,6 +24,7 @@ import { useTenant } from "@/contexts/tenant-context"
 import { shiftService, type Shift } from "@/lib/services/shiftService"
 import { tillService, type Till } from "@/lib/services/tillService"
 import { format } from "date-fns"
+import { getOutletPOSRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 import {
   Select,
   SelectContent,
@@ -42,7 +43,7 @@ interface RegisterStatus {
 
 export default function POSLandingPage() {
   const router = useRouter()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { outlets } = useTenant()
   const { setActiveShift, activeShift } = useShift()
   const [isLoading, setIsLoading] = useState(true)
@@ -68,13 +69,14 @@ export default function POSLandingPage() {
     }
 
     // For standard POS, check business type
-    if (currentBusiness.type === "wholesale and retail") {
+    const posMode = getOutletPosMode(currentOutlet, currentBusiness)
+    if (posMode === "standard") {
       // loadRegisterStatuses will be called in useEffect
     } else {
       // For other business types, redirect to their specific POS
-      router.push(`/pos/${currentBusiness.type}`)
+      router.push(getOutletPOSRoute(currentOutlet, currentBusiness))
     }
-  }, [currentBusiness, outlets, activeShift, router])
+  }, [currentBusiness, currentOutlet, outlets, activeShift, router])
 
   const loadRegisterStatuses = useCallback(async () => {
     if (!currentBusiness || !outlets.length) {
@@ -127,11 +129,11 @@ export default function POSLandingPage() {
     if (activeShift && currentBusiness) {
       if (currentBusiness.posType === "single_product") {
         router.push("/pos/single-product")
-      } else if (currentBusiness.type === "wholesale and retail") {
-        router.push("/pos/retail")
+      } else {
+        router.push(getOutletPOSRoute(currentOutlet, currentBusiness))
       }
     }
-  }, [activeShift, currentBusiness, router, loadRegisterStatuses])
+  }, [activeShift, currentBusiness, currentOutlet, router, loadRegisterStatuses])
 
   const handleStartNew = () => {
     router.push("/dashboard/office/shift-management/start-shift")

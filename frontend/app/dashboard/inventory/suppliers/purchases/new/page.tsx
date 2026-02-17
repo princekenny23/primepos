@@ -45,7 +45,7 @@ export default function NewPurchaseOrderPage() {
   const { toast } = useToast()
   const router = useRouter()
   const { outlets } = useTenant()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
@@ -93,6 +93,7 @@ export default function NewPurchaseOrderPage() {
 
     const loadSupplierProducts = async () => {
       try {
+        const outletFilter = outletId || currentOutlet?.id
         // Get products available from this supplier
         const response = await productSupplierService.list({
           supplier: supplierId,
@@ -101,7 +102,10 @@ export default function NewPurchaseOrderPage() {
         setSupplierProducts(response.results || [])
         
         // Also load all products for search
-        const productsResponse = await productService.list({ is_active: true })
+        const productsResponse = await productService.list({
+          is_active: true,
+          outlet: outletFilter ? String(outletFilter) : undefined,
+        })
         setProducts(productsResponse.results || [])
       } catch (error) {
         console.error("Failed to load supplier products:", error)
@@ -109,7 +113,7 @@ export default function NewPurchaseOrderPage() {
     }
 
     loadSupplierProducts()
-  }, [supplierId])
+  }, [supplierId, outletId, currentOutlet?.id])
 
   // Filter products based on search
   const filteredProducts = products.filter((product) =>

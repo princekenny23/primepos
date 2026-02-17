@@ -23,6 +23,7 @@ import { Upload, Download, AlertCircle, CheckCircle2, XCircle } from "lucide-rea
 import { useToast } from "@/components/ui/use-toast"
 import * as XLSX from "xlsx"
 import { DataExchangeConfig } from "@/lib/utils/data-exchange-config"
+import { exportToXLSX, exportToCSV, ExportColumn } from "@/lib/services/exportService"
 
 interface DataExchangeModalProps {
   open: boolean
@@ -191,83 +192,171 @@ export function DataExchangeModal({
   }
 
   const handleExport = async () => {
+    if (!data || data.length === 0) {
+      toast({
+        title: "No Data",
+        description: "Nothing to export. Apply filters or load data first.",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsLoading(true)
 
     try {
-      // Get auth token from localStorage
-      const token = typeof window !== "undefined" 
-        ? localStorage.getItem("authToken") 
-        : null
-      
-      // Get current outlet ID if available
-      const outletId = typeof window !== "undefined"
-        ? localStorage.getItem("currentOutletId")
-        : null
+      const isCurrencyField = (name: string, label: string) => {
+        const value = `${name} ${label}`.toLowerCase()
+        return /(price|cost|amount|total|tax|discount|revenue|profit|sales|balance)/.test(value)
+      }
 
-      const params = new URLSearchParams({
-        format,
-      })
+      const resolveObjectValue = (value: any): string | number | boolean => {
+        if (Array.isArray(value)) {
+          return value
+            .map((item) => {
+              if (item && typeof item === "object") {
+                return item.name || item.label || item.title || item.code || item.id || ""
+              }
+              return item
+            })
+            .filter((item) => item !== undefined && item !== null && String(item).trim() !== "")
+            .join(", ")
+        }
 
-      Object.entries(selectedFilters).forEach(([key, value]) => {
-        if (value && value !== "all") {
-          params.append(key, String(value))
+        if (value && typeof value === "object") {
+          return value.name || value.label || value.title || value.code || value.id || ""
+        }
+
+        return value
+      }
+
+      const resolveExportValue = (row: any, fieldName: string) => {
+        let value = row?.[fieldName]
+
+        if (config.entityType === "products") {
+          switch (fieldName) {
+            case "product_name":
+              value = row?.name
+              break
+            case "barcode":
+              value = row?.barcode ?? row?.bar_code
+              break
+            case "category":
+              value = row?.category?.name
+              if (!value) {
+                const id = row?.categoryId ?? row?.category_id
+                value = categories.find((c) => String(c.id) === String(id))?.name
+              }
+              break
+            case "retail_price":
+              value = row?.retail_price ?? row?.price ?? row?.retailPrice
+              break
+            case "wholesale_price":
+              value = row?.wholesale_price ?? row?.wholesalePrice
+              break
+            case "cost":
+              value = row?.cost
+              break
+            case "initial_stock_qty":
+              value = row?.initial_stock_qty ?? row?.stock ?? row?.quantity ?? row?.current_stock
+              break
+            case "low_stock_threshold":
+              value = row?.low_stock_threshold ?? row?.lowStockThreshold
+              break
+            case "unit_name":
+              value = row?.unit_name ?? row?.unitName
+              break
+            case "conversion_factor":
+              value = row?.conversion_factor ?? row?.conversionFactor
+              break
+            case "batch_expiry_date":
+              value = row?.batch_expiry_date ?? row?.expiry_date
+              break
+            case "description":
+              value = row?.description
+              break
+            case "is_active":
+              value = row?.is_active ?? row?.isActive
+              break
+            case "outlet":
+              value = row?.outlet?.name ?? row?.outlet_name
+              if (!value) {
+                const id = row?.outlet_id ?? row?.outlet
+                value = outlets.find((o) => String(o.id) === String(id))?.name
+              }
+              break
+            default:
+              break
+          }
+        }
+
+        return resolveObjectValue(value ?? "")
+      }
+
+      // Build columns config for export
+      const exportColumns: ExportColumn[] = config.fields.map((field) => {
+        let format: ExportColumn["format"] = "text"
+        if (field.type === "date") {
+          format = "date"
+        } else if (field.type === "number") {
+          format = isCurrencyField(field.name, field.label) ? "currency" : "number"
+        }
+
+        return {
+          key: field.name,
+          label: field.label,
+          format,
+          width: 20,
         }
       })
 
-      // Build headers
-      const headers: Record<string, string> = {}
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`
-      }
-      if (outletId) {
-        headers["X-Outlet-ID"] = outletId
-      }
-
-      // Build full URL
-      const baseURL = process.env.NEXT_PUBLIC_API_URL || "https://primepos-5mf6.onrender.com/api/v1"
-      const exportPath = config.apiEndpoints.export.startsWith("/api/v1") 
-        ? config.apiEndpoints.export.replace("/api/v1", "")
-        : config.apiEndpoints.export
-      const exportUrl = `${baseURL}${exportPath}`
-
-      console.log("Export URL debug:", {
-        baseURL,
-        configEndpoint: config.apiEndpoints.export,
-        exportPath,
-        finalUrl: `${exportUrl}?${params.toString()}`
+      const exportData = data.map((row) => {
+        const record: Record<string, any> = {}
+        config.fields.forEach((field) => {
+          record[field.name] = resolveExportValue(row, field.name)
+        })
+        return record
       })
 
-      const response = await fetch(`${exportUrl}?${params.toString()}`, {
-        method: "GET",
-        headers,
+      console.log("[DataExchange Export] Starting export with config:", {
+        dataLength: exportData.length,
+        format,
+        columnsCount: exportColumns.length,
       })
 
-      if (!response.ok) {
-        throw new Error(`Export failed: ${response.status}`)
+      if (format === "xlsx") {
+        await exportToXLSX({
+          data: exportData,
+          fileName: config.entityType,
+          sheetName: config.entityType,
+          columns: exportColumns,
+          includeHeaders: true,
+          freezeHeader: true,
+        })
+      } else {
+        await exportToCSV({
+          data: exportData,
+          fileName: config.entityType,
+          sheetName: config.entityType,
+          columns: exportColumns,
+        })
       }
-
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `${config.entityType}-export-${new Date().toISOString().split("T")[0]}.${format}`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      URL.revokeObjectURL(url)
 
       toast({
         title: "Export Complete",
-        description: "File downloaded successfully",
+        description: `Successfully exported ${data.length} records`,
       })
-      onOpenChange(false)
+
+      // Auto-close after 2 seconds
+      setTimeout(() => {
+        onOpenChange(false)
+      }, 2000)
     } catch (error: any) {
       toast({
         title: "Export Failed",
-        description: error.message,
+        description: error.message || "An error occurred during export",
         variant: "destructive",
       })
-      console.error("Export error:", error)
+      console.error("[DataExchange Export] Error:", error)
     } finally {
       setIsLoading(false)
     }
@@ -574,7 +663,7 @@ export function DataExchangeModal({
             )}
 
             {type === "export" && (
-              <Button onClick={handleExport} disabled={isLoading}>
+              <Button onClick={handleExport} disabled={isLoading || data.length === 0}>
                 {isLoading ? "Exporting..." : "Export"}
               </Button>
             )}

@@ -15,11 +15,13 @@ import { kitchenService } from "@/lib/services/kitchenService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useRealAPI } from "@/lib/utils/api-config"
 import { useToast } from "@/components/ui/use-toast"
+import { getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function KitchenPage() {
   const router = useRouter()
   const { toast } = useToast()
   const { currentBusiness, currentOutlet } = useBusinessStore()
+  const posMode = getOutletPosMode(currentOutlet, currentBusiness)
   const [showKOT, setShowKOT] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<any>(null)
   const [activeTab, setActiveTab] = useState("pending")
@@ -29,10 +31,10 @@ export default function KitchenPage() {
   
   // Redirect if not restaurant business
   useEffect(() => {
-    if (currentBusiness && currentBusiness.type !== "restaurant") {
+    if (currentBusiness && posMode !== "restaurant") {
       router.push("/dashboard")
     }
-  }, [currentBusiness, router])
+  }, [currentBusiness, posMode, router])
   
   const loadKitchenOrders = async () => {
     if (!currentBusiness) {
@@ -123,7 +125,7 @@ export default function KitchenPage() {
     setShowKOT(true)
   }
 
-  if (!currentBusiness || currentBusiness.type !== "restaurant") {
+  if (!currentBusiness || posMode !== "restaurant") {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">

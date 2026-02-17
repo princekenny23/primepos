@@ -29,13 +29,16 @@ async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
   if (LOCAL_PRINT_AGENT_TOKEN) {
     headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
   }
-  const response = await fetch(`${LOCAL_PRINT_AGENT_URL}${path}`, {
+  const url = `${LOCAL_PRINT_AGENT_URL}${path}`
+  console.log("[Printer Settings] Calling agent:", { url, method: init?.method || "GET" })
+  const response = await fetch(url, {
     ...init,
     headers: { ...headers, ...(init?.headers || {}) },
   })
   if (!response.ok) {
     const body = await response.text().catch(() => "")
-    throw new Error(body || response.statusText)
+    console.error("[Printer Settings] Agent error:", { status: response.status, url, body })
+    throw new Error(`Agent error (${response.status}): ${body || response.statusText}`)
   }
   return response
 }
@@ -44,7 +47,7 @@ export function PrinterSettings() {
   const { toast } = useToast()
   const [connected, setConnected] = useState(false)
   const [printers, setPrinters] = useState<string[]>([])
-  const [selectedPrinter, setSelectedPrinter] = useState<string>(typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") || "" : "")
+  const [selectedPrinter, setSelectedPrinter] = useState<string>("")
   const [isScanning, setIsScanning] = useState(false)
   const [manualPrinter, setManualPrinter] = useState("")
   const [rawOutputVisible, setRawOutputVisible] = useState(false)
@@ -93,7 +96,12 @@ export function PrinterSettings() {
       const combined = Array.from(new Set([...(discovered || []), ...extraPrinters]))
       setRawPrinters(combined)
       if (data?.default && !selectedPrinter) {
-        setSelectedPrinter(String(data.default))
+        const next = String(data.default)
+        setSelectedPrinter(next)
+        if (currentOutlet && typeof window !== "undefined") {
+          const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+          if (outletId) localStorage.setItem(getOutletStorageKey(outletId), next)
+        }
       }
       toast({ title: "Printers discovered", description: `${combined.length} printers found` })
     } catch (err: any) {
@@ -137,6 +145,40 @@ export function PrinterSettings() {
 
   const { currentOutlet } = useBusinessStore()
 
+  const getOutletStorageKey = (outletId?: number | string | null) =>
+    outletId ? `defaultPrinter:${outletId}` : "defaultPrinter"
+
+  const loadDefaultPrinter = async () => {
+    if (!currentOutlet) return
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    if (!outletId) return
+
+    try {
+      const existing: any = await api.get(`${apiEndpoints.printers.list}?outlet=${outletId}`)
+      const printersList = Array.isArray(existing) ? existing : (existing.results || [])
+      const def = printersList.find((p: any) => p.is_default || p.isDefault)
+      const next = def ? String(def.identifier || def.name) : ""
+      if (next) {
+        setSelectedPrinter(next)
+        if (typeof window !== "undefined") {
+          localStorage.setItem(getOutletStorageKey(outletId), next)
+        }
+        return
+      }
+    } catch (err) {
+      // Fall back to local storage below.
+    }
+
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem(getOutletStorageKey(outletId)) || localStorage.getItem("defaultPrinter") || ""
+      if (stored) setSelectedPrinter(stored)
+    }
+  }
+
+  useEffect(() => {
+    loadDefaultPrinter()
+  }, [currentOutlet])
+
   const saveSelection = async () => {
     if (!selectedPrinter) {
       toast({ title: "No printer selected", description: "Please choose a printer before saving." })
@@ -169,6 +211,9 @@ export function PrinterSettings() {
           is_default: true,
         })
         toast({ title: "Printer saved", description: `Saved ${selectedPrinter} for this outlet.` })
+      }
+      if (typeof window !== "undefined") {
+        localStorage.setItem(getOutletStorageKey(outletId), selectedPrinter)
       }
     } catch (err: any) {
       console.error("Error saving printer", err)

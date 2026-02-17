@@ -327,7 +327,29 @@ export default function SalesReportsLandingPage() {
         title="Sales Reports"
         description="View sales, item, and category performance"
       >
-        <div className="sticky top-0 z-30 mb-6 border-b bg-background/95 backdrop-blur">
+        <Tabs defaultValue="sales-payments" className="w-full">
+          <TabsList className="mb-4 flex flex-wrap">
+            <TabsTrigger
+              value="sales-payments"
+              className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+            >
+              Sales & Payments
+            </TabsTrigger>
+            <TabsTrigger
+              value="item-sales"
+              className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+            >
+              Item Sales
+            </TabsTrigger>
+            <TabsTrigger
+              value="category-sales"
+              className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+            >
+              Category Sales
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="sticky top-0 z-30 mb-6 border-b bg-background/95 backdrop-blur">
           <div className="flex flex-col gap-4 px-2 py-4 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-sm text-muted-foreground">{headerRangeLabel}</div>
@@ -368,52 +390,46 @@ export default function SalesReportsLandingPage() {
             </div>
           </div>
         </div>
-
-        <Tabs defaultValue="sales-payments" className="w-full">
-          <TabsList className="flex flex-wrap">
-            <TabsTrigger value="sales-payments">Sales & Payments</TabsTrigger>
-            <TabsTrigger value="item-sales">Item Sales</TabsTrigger>
-            <TabsTrigger value="category-sales">Category Sales</TabsTrigger>
-          </TabsList>
-
           <TabsContent value="sales-payments" className="mt-6 space-y-6">
-            <div className="rounded-md border bg-white p-4">
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold">Sales Chart</h3>
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="rounded-md border bg-white p-4">
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold">Sales Chart</h3>
+                </div>
+                <div className="h-72">
+                  {isLoading ? (
+                    <div className="h-full animate-pulse rounded bg-muted" />
+                  ) : salesChartData.length === 0 ? (
+                    <div className="flex h-full items-center justify-center text-muted-foreground">No sales data</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={salesChartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="label" />
+                        <YAxis />
+                        <Tooltip formatter={(value) => formatCurrency(Number(value || 0))} />
+                        <Bar dataKey="total" name="Sales" fill={CHART_COLORS[0]} radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
               </div>
-              <div className="h-72">
-                {isLoading ? (
-                  <div className="h-full animate-pulse rounded bg-muted" />
-                ) : salesChartData.length === 0 ? (
-                  <div className="flex h-full items-center justify-center text-muted-foreground">No sales data</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={salesChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="label" />
-                      <YAxis />
-                      <Tooltip formatter={(value) => formatCurrency(Number(value || 0))} />
-                      <Bar dataKey="total" name="Sales" fill={CHART_COLORS[0]} radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
 
-            <div className="rounded-md border bg-white">
-              <div className="border-b px-4 py-3">
-                <h3 className="text-sm font-semibold">Sales Details</h3>
+              <div className="rounded-md border bg-white">
+                <div className="border-b px-4 py-3">
+                  <h3 className="text-sm font-semibold">Sales Details</h3>
+                </div>
+                <Table>
+                  <TableBody>
+                    {salesDetailRows.map((row) => (
+                      <TableRow key={row.label}>
+                        <TableCell className="font-medium">{row.label}</TableCell>
+                        <TableCell className="text-right">{row.value}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-              <Table>
-                <TableBody>
-                  {salesDetailRows.map((row) => (
-                    <TableRow key={row.label}>
-                      <TableCell className="font-medium">{row.label}</TableCell>
-                      <TableCell className="text-right">{row.value}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
             </div>
 
             <div className="rounded-md border bg-white p-4">
