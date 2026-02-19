@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
-import { generateKPIData, generateChartData, generateTopSellingItems } from "@/lib/utils/dashboard-stats"
+import { generateKPIData, generateChartData } from "@/lib/utils/dashboard-stats"
+import { saleService } from "@/lib/services/saleService"
 import { productService } from "@/lib/services/productService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
@@ -11,12 +12,11 @@ import { useAuthStore } from "@/stores/authStore"
 import { KPICards } from "@/components/dashboard/kpi-cards"
 import { SalesChart } from "@/components/dashboard/sales-chart"
 import { LowStockAlerts } from "@/components/dashboard/low-stock-alerts"
-import { TopSellingItems } from "@/components/dashboard/top-selling-items"
+import { RecentActivity } from "@/components/dashboard/recent-activity"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Store, Settings2 } from "lucide-react"
+import { Store } from "lucide-react"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
-import { CustomizeDashboardModal } from "@/components/modals/customize-dashboard-modal"
+import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 
 export default function RestaurantDashboardPage() {
@@ -24,12 +24,12 @@ export default function RestaurantDashboardPage() {
   const { currentBusiness, currentOutlet: businessOutlet } = useBusinessStore()
   const { currentOutlet: tenantOutlet, isLoading: tenantLoading } = useTenant()
   const { isAuthenticated } = useAuthStore()
-  const [showCustomize, setShowCustomize] = useState(false)
   const [kpiData, setKpiData] = useState<any>(null)
   const [chartData, setChartData] = useState<any[]>([])
-  const [topItems, setTopItems] = useState<any[]>([])
+  const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
   const [isLoadingData, setIsLoadingData] = useState(true)
+  const [refreshTick, setRefreshTick] = useState(0)
   
   // Use tenant outlet if available, otherwise fall back to business store outlet
   const currentOutlet = tenantOutlet || businessOutlet
@@ -78,16 +78,31 @@ export default function RestaurantDashboardPage() {
       
       setIsLoadingData(true)
       try {
-        const [kpi, chart, top, lowStockData] = await Promise.all([
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const todayStr = today.toISOString().split("T")[0]
+
+        const [kpi, chart, recentSales, lowStockData] = await Promise.all([
           generateKPIData(currentBusiness.id, currentBusiness, outletId),
           generateChartData(currentBusiness.id, outletId),
-          generateTopSellingItems(currentBusiness.id, outletId),
+          saleService.list({ outlet: outletId, status: "completed", start_date: todayStr, limit: 10 }).catch(() => ({ results: [] })),
           productService.getLowStock(outletId).catch(() => []),
         ])
         
         setKpiData(kpi)
         setChartData(chart)
-        setTopItems(top)
+
+        // Convert recent sales to activity format
+        const sales = Array.isArray(recentSales) ? recentSales : (recentSales.results || [])
+        const activities = sales.map((sale: any) => ({
+          id: sale.id || `sale-${Math.random()}`,
+          type: "sale" as const,
+          title: `Sale #${sale.id?.toString().slice(-6)}`,
+          description: `${sale.items?.length || 1} item(s) - Amount: ${sale.total || sale.amount || 0}`,
+          timestamp: new Date(sale.created_at || new Date()),
+          amount: sale.total || sale.amount || 0,
+        }))
+        setRecentActivities(activities)
 
         const lowStock = Array.isArray(lowStockData) ? lowStockData : ((lowStockData as any)?.results || [])
         const processedLowStock = lowStock.map((p: any) => {
@@ -117,7 +132,18 @@ export default function RestaurantDashboardPage() {
     if (currentBusiness) {
       loadDashboardData()
     }
-  }, [currentBusiness, outletId])
+  }, [currentBusiness, outletId, refreshTick])
+
+  useEffect(() => {
+    const handleDashboardRefresh = () => {
+      setRefreshTick((current) => current + 1)
+    }
+
+    window.addEventListener("sale-completed", handleDashboardRefresh)
+    return () => {
+      window.removeEventListener("sale-completed", handleDashboardRefresh)
+    }
+  }, [])
 
   if (!currentBusiness || posMode !== "restaurant" || isLoadingData || tenantLoading || !kpiData) {
     return (
@@ -145,9 +171,9 @@ export default function RestaurantDashboardPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <div className="space-y-5">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="flex items-center gap-3 mb-2">
               <h1 className="text-3xl font-bold">Restaurant Dashboard</h1>
@@ -158,13 +184,11 @@ export default function RestaurantDashboardPage() {
                 </div>
               )}
             </div>
+            <p className="text-sm text-muted-foreground">Daily performance overview for restaurant sales, customers, and financial activity.</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <PageRefreshButton />
             <DateRangeFilter />
-            <Button variant="outline" onClick={() => setShowCustomize(true)}>
-              <Settings2 className="mr-2 h-4 w-4" />
-              Customize
-            </Button>
           </div>
         </div>
 
@@ -172,11 +196,11 @@ export default function RestaurantDashboardPage() {
         <KPICards data={displayKpiData} business={currentBusiness} />
 
         {/* Charts */}
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
+        <div className="grid gap-4">
+          <Card className="h-full">
             <CardHeader>
               <CardTitle>Sales Overview</CardTitle>
-              <CardDescription>Sales and profit trends over the last 7 days</CardDescription>
+              <CardDescription>Sales and profit trends over the last 7 days.</CardDescription>
             </CardHeader>
             <CardContent>
               <SalesChart data={chartData} type="area" />
@@ -184,16 +208,13 @@ export default function RestaurantDashboardPage() {
           </Card>
         </div>
 
-        {/* Low Stock and Top Selling */}
+        {/* Low Stock and Recent Activity */}
         <div className="grid gap-4 md:grid-cols-2">
           <LowStockAlerts items={lowStockItems} />
-          <TopSellingItems items={topItems} business={currentBusiness} />
+          <RecentActivity activities={recentActivities} business={currentBusiness} />
         </div>
 
       </div>
-
-      {/* Modals */}
-      <CustomizeDashboardModal open={showCustomize} onOpenChange={setShowCustomize} />
     </DashboardLayout>
   )
 }

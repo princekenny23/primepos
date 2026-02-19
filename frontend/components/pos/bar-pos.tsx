@@ -118,7 +118,10 @@ export function BarPOS() {
   // Products
   const [products, setProducts] = useState<Product[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
+  const [isLoadingNextProductsPage, setIsLoadingNextProductsPage] = useState(false)
   const [productsError, setProductsError] = useState<string | null>(null)
+  const [productsPage, setProductsPage] = useState(1)
+  const [hasNextProductsPage, setHasNextProductsPage] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   const [searchResults, setSearchResults] = useState<Product[]>([])
@@ -210,24 +213,48 @@ export function BarPOS() {
 
   // ==================== Data Loading ====================
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (page: number = 1) => {
     if (!currentBusiness) return
-    
-    setIsLoadingProducts(true)
+
+    if (page <= 1) {
+      setIsLoadingProducts(true)
+    } else {
+      setIsLoadingNextProductsPage(true)
+    }
     setProductsError(null)
-    
+
     try {
-      const response = await productService.list({ is_active: true })
-      const productsList = Array.isArray(response) ? response : (response.results || [])
+      const response = await productService.list({ is_active: true, page })
+      const productsList = response.results || []
       setProducts(productsList)
+      setProductsPage(page)
+      setHasNextProductsPage(Boolean(response.next))
     } catch (error: any) {
       console.error("Failed to load products:", error)
       setProductsError("Failed to load products.")
-      setProducts([])
+      if (page <= 1) {
+        setProducts([])
+        setProductsPage(1)
+        setHasNextProductsPage(false)
+      }
     } finally {
-      setIsLoadingProducts(false)
+      if (page <= 1) {
+        setIsLoadingProducts(false)
+      } else {
+        setIsLoadingNextProductsPage(false)
+      }
     }
   }, [currentBusiness])
+
+  const handleNextProductsPage = useCallback(() => {
+    if (!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage) return
+    loadProducts(productsPage + 1)
+  }, [hasNextProductsPage, isLoadingNextProductsPage, isLoadingProducts, loadProducts, productsPage])
+
+  const handlePreviousProductsPage = useCallback(() => {
+    if (productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage) return
+    loadProducts(productsPage - 1)
+  }, [isLoadingNextProductsPage, isLoadingProducts, loadProducts, productsPage])
 
   const loadCategories = useCallback(async () => {
     setIsLoadingCategories(true)
@@ -980,7 +1007,7 @@ export function BarPOS() {
   }
 
   return (
-    <div className="flex flex-col bg-background overflow-hidden min-h-[calc(100vh-0px)]">
+    <div className="flex h-full min-h-0 flex-col bg-background overflow-hidden">
       {/* Header Bar - View Toggle + Open Tabs - FIXED */}
       <div className="border-b bg-card flex-shrink-0">
         <div className="px-3 py-2 flex items-center gap-3 overflow-x-auto">
@@ -1060,64 +1087,6 @@ export function BarPOS() {
           {/* Products View */}
           {activeView === "products" && (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-              {/* Search - FIXED at top */}
-              <div className="p-2 border-b flex-shrink-0">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    ref={searchInputRef}
-                    placeholder="Search drinks by name, SKU, or barcode..."
-                    className="pl-9"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    onFocus={() => setShowSearchDropdown(searchResults.length > 0)}
-                    onBlur={() => setTimeout(() => setShowSearchDropdown(false), 120)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setShowSearchDropdown(false)
-                      }
-                    }}
-                  />
-
-                  {showSearchDropdown && searchResults.length > 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-[320px] overflow-y-auto">
-                      {searchResults.map((product) => (
-                        <button
-                          key={product.id}
-                          type="button"
-                          className="w-full px-3 py-2 text-left hover:bg-accent border-b last:border-b-0 transition-colors"
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            handleAddItemToTab(product)
-                            setSearchTerm("")
-                            setShowSearchDropdown(false)
-                            setTimeout(() => searchInputRef.current?.focus(), 100)
-                          }}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm truncate">{product.name}</div>
-                              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                                {product.sku && <span>SKU: {product.sku}</span>}
-                                {product.barcode && <span>Barcode: {product.barcode}</span>}
-                                {product.stock !== undefined && (
-                                  <span className={product.stock <= 10 ? "text-destructive font-medium" : ""}>
-                                    Stock: {product.stock}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="ml-3 text-right">
-                              <div className="font-bold text-sm">{formatCurrency(product.price, currentBusiness)}</div>
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-
               <div className="flex-1 flex min-h-0 overflow-hidden">
                 {/* Category Sidebar */}
                 <div
@@ -1181,7 +1150,7 @@ export function BarPOS() {
                 </div>
 
                 {/* Product Grid - SCROLLABLE */}
-                <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-gray-200">
+                <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden bg-gray-200">
                   <ScrollArea className="flex-1 min-h-0">
                     {isLoadingProducts ? (
                       <div className="flex items-center justify-center h-64">
@@ -1191,7 +1160,7 @@ export function BarPOS() {
                       <div className="flex flex-col items-center justify-center h-64">
                         <AlertCircle className="h-8 w-8 text-destructive mb-2" />
                         <p className="text-destructive mb-2">{productsError}</p>
-                        <Button variant="outline" onClick={loadProducts}>Retry</Button>
+                        <Button variant="outline" onClick={() => loadProducts(1)}>Retry</Button>
                       </div>
                     ) : filteredProducts.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
@@ -1216,6 +1185,30 @@ export function BarPOS() {
                       </div>
                     )}
                   </ScrollArea>
+                  <div className="absolute bottom-4 right-4 flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shadow-lg"
+                      onClick={handlePreviousProductsPage}
+                      disabled={productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage}
+                      title={productsPage > 1 ? "Load previous products" : "Already first page"}
+                    >
+                      Previous Products
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shadow-lg"
+                      onClick={handleNextProductsPage}
+                      disabled={!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage}
+                      title={hasNextProductsPage ? "Load next products" : "No more products"}
+                    >
+                      {isLoadingNextProductsPage ? "Loading..." : hasNextProductsPage ? "Next Products" : "No More"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1368,6 +1361,65 @@ export function BarPOS() {
               <div>
                 <h2 className="font-bold">New Sale</h2>
                 <p className="text-xs text-muted-foreground">Select a tab or add items</p>
+              </div>
+            )}
+
+            {activeView === "products" && (
+              <div className="mt-2">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    ref={searchInputRef}
+                    placeholder="Search drinks by name, SKU, or barcode..."
+                    className="pl-9"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onFocus={() => setShowSearchDropdown(searchResults.length > 0)}
+                    onBlur={() => setTimeout(() => setShowSearchDropdown(false), 120)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        setShowSearchDropdown(false)
+                      }
+                    }}
+                  />
+
+                  {showSearchDropdown && searchResults.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-[320px] overflow-y-auto">
+                      {searchResults.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          className="w-full px-3 py-2 text-left hover:bg-accent border-b last:border-b-0 transition-colors"
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            handleAddItemToTab(product)
+                            setSearchTerm("")
+                            setShowSearchDropdown(false)
+                            setTimeout(() => searchInputRef.current?.focus(), 100)
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">{product.name}</div>
+                              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                                {product.sku && <span>SKU: {product.sku}</span>}
+                                {product.barcode && <span>Barcode: {product.barcode}</span>}
+                                {product.stock !== undefined && (
+                                  <span className={product.stock <= 10 ? "text-destructive font-medium" : ""}>
+                                    Stock: {product.stock}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="ml-3 text-right">
+                              <div className="font-bold text-sm">{formatCurrency(product.price, currentBusiness)}</div>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

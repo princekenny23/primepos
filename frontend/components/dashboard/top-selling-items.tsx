@@ -71,27 +71,27 @@ export function TopSellingItems({ items, business }: TopSellingItemsProps) {
   const totalValue = chartData.reduce((sum, item) => sum + item.value, 0)
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="h-full">
+      <CardHeader className="pb-3">
         <CardTitle>Top Selling Items</CardTitle>
         <CardDescription>Best performing products this period</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-0">
         {chartData.length === 0 ? (
-          <div className="flex h-56 items-center justify-center text-muted-foreground">
+          <div className="flex h-44 items-center justify-center text-muted-foreground">
             No top selling data available
           </div>
         ) : (
           <>
-            <div className="h-56">
+            <div className="h-40">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={chartData}
                     dataKey="value"
                     nameKey="name"
-                    innerRadius={60}
-                    outerRadius={90}
+                    innerRadius={42}
+                    outerRadius={66}
                     paddingAngle={2}
                   >
                     {chartData.map((_, index) => (
@@ -103,12 +103,12 @@ export function TopSellingItems({ items, business }: TopSellingItemsProps) {
               </ResponsiveContainer>
             </div>
 
-            <div className="mt-4 text-center text-sm text-muted-foreground">
+            <div className="mt-3 text-center text-sm text-muted-foreground">
               Total: {formatCurrency(totalValue, business, { showSymbol: true, decimals: 2 })}
             </div>
 
-            <ul className="mt-4 space-y-2">
-              {chartData.slice(0, 6).map((item, index) => (
+            <ul className="mt-3 space-y-1.5 max-h-[8.5rem] overflow-y-auto pr-1">
+              {chartData.slice(0, 5).map((item, index) => (
                 <li key={`${item.name}-${index}`} className="flex items-center justify-between text-sm">
                   <div className="flex items-center gap-2">
                     <span

@@ -25,6 +25,7 @@ import { staffService, roleService, type Staff, type Role } from "@/lib/services
 import { outletService } from "@/lib/services/outletService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
+import { api } from "@/lib/api"
 
 interface AddEditStaffModalProps {
   open: boolean
@@ -39,7 +40,10 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
   const { outlets } = useTenant()
   const [isLoading, setIsLoading] = useState(false)
   const [roles, setRoles] = useState<Role[]>([])
+  const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string; email: string }>>([])
   const [formData, setFormData] = useState({
+    user_id: "",
+    useExistingUser: false,
     name: "",
     email: "",
     phone: "",
@@ -59,9 +63,31 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
     }
   }, [currentBusiness])
 
+  const loadAvailableUsers = useCallback(async () => {
+    if (!currentBusiness) {
+      setAvailableUsers([])
+      return
+    }
+
+    try {
+      const tenantResponse = await api.get<any>(`/tenants/${currentBusiness.id}/`)
+      const tenantUsers = tenantResponse?.users || []
+      const users = tenantUsers.map((user: any) => ({
+        id: String(user.id),
+        name: user.name || user.username || user.email?.split("@")[0] || "Unnamed User",
+        email: user.email || "",
+      }))
+      setAvailableUsers(users)
+    } catch (error) {
+      console.error("Failed to load available users:", error)
+      setAvailableUsers([])
+    }
+  }, [currentBusiness])
+
   useEffect(() => {
     if (open) {
       loadRoles()
+      loadAvailableUsers()
       if (staff) {
         // Edit mode - extract outlet IDs from outlets array
         const outletIds = staff.outlets?.map((o: any) => {
@@ -70,6 +96,8 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
         }) || []
         
         setFormData({
+          user_id: "",
+          useExistingUser: false,
           name: staff.user?.name || "",
           email: staff.user?.email || "",
           phone: staff.user?.phone || "",
@@ -81,6 +109,8 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
       } else {
         // Add mode
         setFormData({
+          user_id: "",
+          useExistingUser: false,
           name: "",
           email: "",
           phone: "",
@@ -91,7 +121,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
         })
       }
     }
-  }, [open, staff, currentBusiness, loadRoles])
+  }, [open, staff, currentBusiness, loadRoles, loadAvailableUsers])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -115,7 +145,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
       return
     }
 
-    if (!staff && !formData.email) {
+    if (!staff && !formData.useExistingUser && !formData.email) {
       toast({
         title: "Validation Error",
         description: "Email is required.",
@@ -124,7 +154,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
       return
     }
 
-    if (!staff && !formData.password) {
+    if (!staff && !formData.useExistingUser && !formData.password) {
       toast({
         title: "Validation Error",
         description: "Password is required.",
@@ -133,7 +163,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
       return
     }
 
-    if (!staff && formData.password !== formData.confirmPassword) {
+    if (!staff && !formData.useExistingUser && formData.password !== formData.confirmPassword) {
       toast({
         title: "Validation Error",
         description: "Passwords do not match.",
@@ -142,10 +172,19 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
       return
     }
 
-    if (!staff && formData.password.length < 8) {
+    if (!staff && !formData.useExistingUser && formData.password.length < 8) {
       toast({
         title: "Validation Error",
         description: "Password must be at least 8 characters.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!staff && formData.useExistingUser && !formData.user_id) {
+      toast({
+        title: "Validation Error",
+        description: "Please select an existing office user.",
         variant: "destructive",
       })
       return
@@ -181,14 +220,18 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
         })
       } else {
         // Create new staff
-        const staffData: any = {
-          name: formData.name.trim(),
-          email: formData.email.trim(),
-          password: formData.password,
+        const staffData: any = {}
+
+        if (formData.useExistingUser && formData.user_id) {
+          staffData.user_id = parseInt(formData.user_id)
+        } else {
+          staffData.name = formData.name.trim()
+          staffData.email = formData.email.trim()
+          staffData.password = formData.password
         }
         
         // Only include phone if provided
-        if (formData.phone && formData.phone.trim()) {
+        if (!formData.useExistingUser && formData.phone && formData.phone.trim()) {
           staffData.phone = formData.phone.trim()
         }
         
@@ -299,6 +342,62 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
         
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4 md:grid-cols-2">
+            {!staff && (
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="user_source">User Source *</Label>
+                <Select
+                  value={formData.useExistingUser ? "existing" : "new"}
+                  onValueChange={(value) => {
+                    const useExisting = value === "existing"
+                    setFormData((prev) => ({
+                      ...prev,
+                      useExistingUser: useExisting,
+                      user_id: useExisting ? prev.user_id : "",
+                    }))
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select user source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="new">Create New User</SelectItem>
+                    <SelectItem value="existing">Select Existing Office User</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {!staff && formData.useExistingUser && (
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="user_id">Select User *</Label>
+                <Select
+                  value={formData.user_id || "none"}
+                  onValueChange={(value) => {
+                    const selected = value === "none" ? "" : value
+                    const selectedUser = availableUsers.find((u) => String(u.id) === selected)
+                    setFormData((prev) => ({
+                      ...prev,
+                      user_id: selected,
+                      name: selectedUser?.name || "",
+                      email: selectedUser?.email || "",
+                    }))
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose an existing office user" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Select a user</SelectItem>
+                    {availableUsers.map((user) => (
+                      <SelectItem key={user.id} value={String(user.id)}>
+                        {user.name} ({user.email})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="name">Full Name *</Label>
               <div className="relative">
@@ -310,7 +409,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   required
                   placeholder="John Doe"
-                  disabled={!!staff} // Name can't be changed after creation
+                  disabled={!!staff || (!!formData.useExistingUser && !staff)}
                 />
               </div>
             </div>
@@ -326,7 +425,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required={!staff}
-                  disabled={!!staff} // Email can't be changed after creation
+                  disabled={!!staff || (!!formData.useExistingUser && !staff)}
                   placeholder="john.doe@example.com"
                 />
               </div>
@@ -343,7 +442,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                   value={formData.phone}
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   placeholder="+265 991 234 567"
-                  disabled={!!staff} // Phone can't be changed after creation
+                  disabled={!!staff || (!!formData.useExistingUser && !staff)}
                 />
               </div>
             </div>
@@ -377,7 +476,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
               </div>
             </div>
 
-            {!staff && (
+            {!staff && !formData.useExistingUser && (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="password">Password *</Label>

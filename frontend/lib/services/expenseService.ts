@@ -94,6 +94,10 @@ export const expenseService = {
     const params = new URLSearchParams()
     if (filters?.tenant) params.append("tenant", filters.tenant)
     if (filters?.outlet) params.append("outlet", filters.outlet)
+    if (filters?.category) params.append("category", filters.category)
+    if (filters?.status) params.append("status", filters.status)
+    if (filters?.start_date) params.append("start_date", filters.start_date)
+    if (filters?.end_date) params.append("end_date", filters.end_date)
     
     const query = params.toString()
     return api.get(`/expenses/stats/${query ? `?${query}` : ""}`)

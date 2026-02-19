@@ -5,6 +5,8 @@ from pathlib import Path
 from decouple import config
 import os
 import dj_database_url
+import sentry_sdk
+from sentry_sdk.integrations.django import DjangoIntegration
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -182,6 +184,14 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
     ),
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': config('THROTTLE_ANON', default='100/hour'),
+        'user': config('THROTTLE_USER', default='1000/hour'),
+    },
 }
 
 # JWT Settings
@@ -249,6 +259,18 @@ LOGGING = {
         },
     },
 }
+
+SENTRY_DSN = config('SENTRY_DSN', default=None)
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        traces_sample_rate=config('SENTRY_TRACES_SAMPLE_RATE', default=0.1, cast=float),
+        profiles_sample_rate=config('SENTRY_PROFILES_SAMPLE_RATE', default=0.0, cast=float),
+        environment=config('SENTRY_ENVIRONMENT', default='production'),
+        release=config('SENTRY_RELEASE', default=None),
+        send_default_pii=True,
+    )
 
 # Database connection established successfully
 if DATABASE_URL:

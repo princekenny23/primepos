@@ -263,7 +263,7 @@ export const saleService = {
     return transformSale(response)
   },
 
-  async getStats(filters?: { start_date?: string; end_date?: string; outlet?: string }): Promise<{
+  async getStats(filters?: { start_date?: string; end_date?: string; outlet?: string; status?: string }): Promise<{
     total_sales: number
     total_revenue: number
     today_sales: number
@@ -273,19 +273,23 @@ export const saleService = {
     if (filters?.start_date) params.append("start_date", filters.start_date)
     if (filters?.end_date) params.append("end_date", filters.end_date)
     if (filters?.outlet) params.append("outlet", filters.outlet)
+    if (filters?.status) params.append("status", filters.status)
     
     const query = params.toString()
     // Use the stats action endpoint: /sales/stats/
     return api.get(`/sales/stats/${query ? `?${query}` : ""}`)
   },
 
-  async getChartData(outletId?: string): Promise<Array<{
+  async getChartData(outletId?: string, status?: string): Promise<Array<{
     date: string
     sales: number
     profit: number
   }>> {
-    const params = outletId ? `?outlet=${outletId}` : ""
-    return api.get(`/sales/chart_data/${params}`)
+    const params = new URLSearchParams()
+    if (outletId) params.append("outlet", outletId)
+    if (status) params.append("status", status)
+    const query = params.toString()
+    return api.get(`/sales/chart_data/${query ? `?${query}` : ""}`)
   },
 
   async getTopSellingItems(filters?: { outlet?: string; start_date?: string; end_date?: string }): Promise<Array<{

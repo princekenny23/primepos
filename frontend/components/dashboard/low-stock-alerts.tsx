@@ -22,14 +22,14 @@ interface LowStockAlertsProps {
 export function LowStockAlerts({ items }: LowStockAlertsProps) {
   if (items.length === 0) {
     return (
-      <Card>
-        <CardHeader>
+      <Card className="h-full">
+        <CardHeader className="pb-3">
           <CardTitle>Low Stock Alerts</CardTitle>
           <CardDescription>Products running low on inventory</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="text-center py-8 text-muted-foreground">
-            <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+        <CardContent className="pt-0">
+          <div className="text-center py-6 text-muted-foreground">
+            <Package className="h-10 w-10 mx-auto mb-2 opacity-50" />
             <p>All products are well stocked</p>
           </div>
         </CardContent>
@@ -38,8 +38,8 @@ export function LowStockAlerts({ items }: LowStockAlertsProps) {
   }
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="h-full">
+      <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2">
           <AlertTriangle className="h-5 w-5 text-orange-500" />
           Low Stock Alerts
@@ -48,9 +48,9 @@ export function LowStockAlerts({ items }: LowStockAlertsProps) {
           {items.length} product{items.length !== 1 ? "s" : ""} need restocking
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {items.slice(0, 5).map((item) => (
+      <CardContent className="pt-0">
+        <div className="space-y-2.5 max-h-[20rem] overflow-y-auto pr-1">
+          {items.slice(0, 4).map((item) => (
             <Alert key={item.id} variant="warning">
               <AlertTriangle className="h-4 w-4" />
               <AlertTitle className="flex items-center justify-between">
@@ -69,9 +69,9 @@ export function LowStockAlerts({ items }: LowStockAlertsProps) {
               </AlertDescription>
             </Alert>
           ))}
-          {items.length > 5 && (
+          {items.length > 4 && (
             <Link href="/dashboard/inventory?filter=low-stock" className="block">
-              <Button variant="outline" className="w-full">
+              <Button variant="outline" size="sm" className="w-full">
                 View All {items.length} Low Stock Items
               </Button>
             </Link>

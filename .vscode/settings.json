@@ -68,6 +68,9 @@
   // TypeScript/JavaScript language server settings (only scan frontend)
   "javascript.preferences.includePackageJsonAutoImports": "on",
   "typescript.preferences.includePackageJsonAutoImports": "on",
+
+  // Prevent global type acquisition from conflicting with workspace types
+  "typescript.disableAutomaticTypeAcquisition": true,
   
   // Disable unnecessary file watching
   "files.exclude": {

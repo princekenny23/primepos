@@ -6,6 +6,7 @@ import { tenantService } from "@/lib/services/tenantService"
 import { outletService } from "@/lib/services/outletService"
 import { useRealAPI } from "@/lib/utils/api-config"
 import { getOutletBusinessTypeDisplay, normalizeOutletBusinessType } from "@/lib/utils/outlet-business-type"
+import type { BusinessSettings, OutletBusinessType } from "@/lib/types"
 
 interface Tenant {
   id: string
@@ -22,11 +23,19 @@ interface Outlet {
   name: string
   address?: string
   phone?: string
-  businessType?: string
+  businessType?: OutletBusinessType
   businessTypeDisplay?: string
-  settings?: Record<string, any>
+  settings?: BusinessSettings
   isActive: boolean
 }
+
+const normalizeBusinessSettings = (settings: any): BusinessSettings => ({
+  posMode: settings?.posMode === "restaurant" || settings?.posMode === "bar" ? settings.posMode : "standard",
+  receiptTemplate: typeof settings?.receiptTemplate === "string" ? settings.receiptTemplate : "default",
+  taxEnabled: typeof settings?.taxEnabled === "boolean" ? settings.taxEnabled : false,
+  taxRate: typeof settings?.taxRate === "number" ? settings.taxRate : 0,
+  ...(settings || {}),
+})
 
 interface TenantContextType {
   currentTenant: Tenant | null
@@ -137,7 +146,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
                   phone: o.phone || "",
                   business_type: normalizeOutletBusinessType(o.business_type || o.businessType),
                   business_type_display: o.business_type_display || o.businessTypeDisplay || getOutletBusinessTypeDisplay(o.business_type || o.businessType),
-                  settings: o.settings || {},
+                  settings: normalizeBusinessSettings(o.settings),
                   is_active: o.isActive !== undefined ? o.isActive : true,
                 }))
                 console.log("Using outlets from outlet service:", tenantOutlets.length)
@@ -171,7 +180,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
               phone: o.phone || "",
               businessType: normalizeOutletBusinessType(o.business_type || o.businessType || tenantData.type),
               businessTypeDisplay: o.business_type_display || o.businessTypeDisplay || getOutletBusinessTypeDisplay(o.business_type || o.businessType || tenantData.type),
-              settings: o.settings || {},
+              settings: normalizeBusinessSettings(o.settings),
               isActive: o.is_active !== undefined ? o.is_active : (o.isActive !== undefined ? o.isActive : true),
             }
           })

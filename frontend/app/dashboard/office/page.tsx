@@ -14,7 +14,7 @@ import { OptionCard, type OptionCardProps } from "@/components/shared/option-car
 const officeOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   {
     id: "users",
-    title: "Users",
+    title: "Users and Staff Management",
     titleKey: "settings.menu.users",
     href: "/dashboard/office/users",
     icon: UserCircle,

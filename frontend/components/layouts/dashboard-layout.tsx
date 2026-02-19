@@ -64,7 +64,6 @@ import { getIndustrySidebarConfig, fullNavigation, type NavigationItem } from "@
 
 export function DashboardLayout({ children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [isFullscreen, setIsFullscreen] = useState(false)
   const [agentStatus, setAgentStatus] = useState<"checking" | "connected" | "disconnected">("checking")
   const pathname = usePathname()
   const router = useRouter()
@@ -76,35 +75,6 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const { t } = useI18n()
   const restoringBusinessRef = useRef(false)
   const redirectedRef = useRef(false)
-
-  // Handle double-click fullscreen on navbar
-  const handleNavbarDoubleClick = async () => {
-    try {
-      if (!document.fullscreenElement) {
-        // Enter fullscreen
-        await document.documentElement.requestFullscreen()
-        setIsFullscreen(true)
-      } else {
-        // Exit fullscreen
-        await document.exitFullscreen()
-        setIsFullscreen(false)
-      }
-    } catch (error) {
-      console.error("Fullscreen request failed:", error)
-    }
-  }
-
-  // Listen for fullscreen changes
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement)
-    }
-
-    document.addEventListener("fullscreenchange", handleFullscreenChange)
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange)
-    }
-  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -144,6 +114,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   // Check if user is SaaS admin (no businessId)
   const isSaaSAdmin = user && !user.businessId
   const isAdminRoute = pathname?.startsWith("/admin")
+  const isPosRoute = pathname?.startsWith("/pos/")
 
   // For SaaS admin routes, use only base navigation (no industry-specific items)
   // For business routes, use industry-specific navigation
@@ -268,9 +239,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Topbar */}
         <header 
           data-navbar="main" 
-          className="sticky top-0 z-30 bg-background border-b cursor-pointer" 
-          onDoubleClick={handleNavbarDoubleClick}
-          title="Double-click to toggle fullscreen"
+          className="sticky top-0 z-30 bg-background border-b"
         >
           <div className="flex items-center justify-between px-4 py-3 lg:px-6">
             <Button
@@ -380,8 +349,8 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="p-4 lg:p-6 space-y-6">
+        <main className={cn("flex-1", isPosRoute ? "overflow-hidden" : "overflow-y-auto")}>
+          <div className={cn(isPosRoute ? "h-full min-h-0" : "p-4 lg:p-6 space-y-6")}>
             {children}
           </div>
         </main>

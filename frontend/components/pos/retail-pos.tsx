@@ -52,7 +52,6 @@ import {
 } from "@/components/ui/table"
 import {
   Ban,
-  ChevronDown,
   History,
   Lock,
   PauseCircle,
@@ -117,7 +116,10 @@ export function RetailPOS() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
+  const [isLoadingNextProductsPage, setIsLoadingNextProductsPage] = useState(false)
   const [productsError, setProductsError] = useState<string | null>(null)
+  const [productsPage, setProductsPage] = useState(1)
+  const [hasNextProductsPage, setHasNextProductsPage] = useState(false)
   const [showUnitSelector, setShowUnitSelector] = useState(false)
   const [selectedProductForUnit, setSelectedProductForUnit] = useState<any>(null)
   const [showUnitModal, setShowUnitModal] = useState(false)
@@ -141,7 +143,6 @@ export function RetailPOS() {
   
   // Focus search on mount and after actions
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const productsScrollRef = useRef<HTMLDivElement>(null)
 
   
 
@@ -191,34 +192,60 @@ export function RetailPOS() {
       .slice(0, 16) // Limit to 16 items for quick selection
   }, [products, selectedCategory])
 
-  const fetchProductsAndCategories = async () => {
+  const fetchProductsAndCategories = async (page: number = 1) => {
     if (!currentBusiness) {
       setIsLoadingProducts(false)
       return
     }
-    
-    setIsLoadingProducts(true)
+
+    if (page <= 1) {
+      setIsLoadingProducts(true)
+    } else {
+      setIsLoadingNextProductsPage(true)
+    }
     setProductsError(null)
-    
+
     try {
       const [productsData, categoriesData] = await Promise.all([
-        productService.list({ is_active: true }),
-        categoryService.list(),
+        productService.list({ is_active: true, page }),
+        page === 1 ? categoryService.list() : Promise.resolve(categories.filter((c) => c !== "all").map((name) => ({ name } as any))),
       ])
       setProducts(productsData.results || productsData)
-      setCategories(["all", ...(categoriesData.map((c: any) => c.name) || [])])
+      setProductsPage(page)
+      setHasNextProductsPage(Boolean((productsData as any).next))
+      if (page === 1) {
+        setCategories(["all", ...(categoriesData.map((c: any) => c.name) || [])])
+      }
     } catch (error: any) {
       console.error("Failed to load products:", error)
       setProductsError("Failed to load products. Please refresh the page.")
-      setProducts([])
-      setCategories(["all"])
+      if (page <= 1) {
+        setProducts([])
+        setCategories(["all"])
+        setProductsPage(1)
+        setHasNextProductsPage(false)
+      }
     } finally {
-      setIsLoadingProducts(false)
+      if (page <= 1) {
+        setIsLoadingProducts(false)
+      } else {
+        setIsLoadingNextProductsPage(false)
+      }
     }
   }
 
+  const handleNextProductsPage = () => {
+    if (!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage) return
+    void fetchProductsAndCategories(productsPage + 1)
+  }
+
+  const handlePreviousProductsPage = () => {
+    if (productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage) return
+    void fetchProductsAndCategories(productsPage - 1)
+  }
+
   useEffect(() => {
-    fetchProductsAndCategories()
+    void fetchProductsAndCategories(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBusiness])
 
@@ -722,13 +749,220 @@ export function RetailPOS() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Products Panel - Clean List View */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-background">
-          {/* Search Bar with Dropdown */}
-          <div className="p-3 border-b bg-card">
-            <div className="relative">
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            {/* Category Filter - Sidebar */}
+            {categories.length > 1 && (
+              <div
+                className={
+                  "border-r bg-gray-200 overflow-y-auto flex-shrink-0 transition-all duration-200 " +
+                  (isCategoryOpen ? "w-40 p-2" : "w-12 p-1.5")
+                }
+              >
+                <div className="mb-2 flex items-center justify-between">
+                  <span className={isCategoryOpen ? "text-xs font-medium" : "sr-only"}>
+                    Categories
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 w-7 p-0"
+                    onClick={() => setIsCategoryOpen((prev) => !prev)}
+                    title={isCategoryOpen ? "Collapse categories" : "Expand categories"}
+                  >
+                    {isCategoryOpen ? "«" : "»"}
+                  </Button>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    key="all"
+                    variant={selectedCategory === "all" ? "default" : "outline"}
+                    className={
+                      "h-9 justify-start px-2.5 text-xs" +
+                      (selectedCategory === "all" ? " ring-2 ring-primary" : "") +
+                      (!isCategoryOpen ? " hidden" : "")
+                    }
+                    onClick={() => setSelectedCategory("all")}
+                  >
+                    All
+                  </Button>
+                  {categories
+                    .filter((category) => category !== "all")
+                    .map((category) => (
+                      <Button
+                        key={category}
+                        variant={selectedCategory === category ? "default" : "outline"}
+                        className={
+                          "h-9 justify-start px-2.5 text-xs" +
+                          (selectedCategory === category ? " ring-2 ring-primary" : "") +
+                          (!isCategoryOpen ? " hidden" : "")
+                        }
+                        onClick={() => setSelectedCategory(category)}
+                      >
+                        {category}
+                      </Button>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* Products Grid - Enhanced */}
+            <div className="relative flex-1 overflow-y-auto bg-gray-200 p-3">
+              {isLoadingProducts ? (
+                <div className="p-8 text-center text-muted-foreground">Loading products...</div>
+              ) : productsError ? (
+                <div className="p-8 text-center text-destructive">{productsError}</div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground">No products found</div>
+              ) : (
+                <ProductGrid
+                  products={filteredProducts as any}
+                  onAddToCart={(
+                    product,
+                    unit,
+                    quantity
+                  ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
+                />
+              )}
+              <div className="absolute bottom-4 right-4 flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shadow-lg"
+                  onClick={handlePreviousProductsPage}
+                  disabled={productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage}
+                  title={productsPage > 1 ? "Load previous products" : "Already first page"}
+                >
+                  Previous Products
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shadow-lg"
+                  onClick={handleNextProductsPage}
+                  disabled={!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage}
+                  title={hasNextProductsPage ? "Load next products" : "No more products"}
+                >
+                  {isLoadingNextProductsPage ? "Loading..." : hasNextProductsPage ? "Next Products" : "No More"}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t bg-card px-2 py-1.5">
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-amber-700"
+                onClick={() => setShowSaleDiscount(true)}
+              >
+                <Tag className="h-4 w-4" />
+                Discount
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-blue-700"
+                onClick={() => setShowRefundReturn(true)}
+              >
+                <RotateCcw className="h-4 w-4" />
+                Refund
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-emerald-700"
+                onClick={handleHoldSale}
+              >
+                <PauseCircle className="h-4 w-4" />
+                Hold
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-indigo-700"
+                onClick={() => setShowHoldSales(true)}
+              >
+                <History className="h-4 w-4" />
+                Retrieve
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-slate-700"
+                onClick={() => setShowCloseRegister(true)}
+              >
+                <Lock className="h-4 w-4" />
+                Close
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-red-600"
+                onClick={handleVoidSale}
+              >
+                <Ban className="h-4 w-4" />
+                Void
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Cart Panel - Table Based */}
+        <div className="flex-1 lg:flex-none w-full lg:w-[520px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
+          {/* Cart Header */}
+          <div className="p-2 border-b space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold">Cart ({cartItemCount})</div>
+              <Tabs value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
+                <TabsList>
+                  <TabsTrigger
+                    value="retail"
+                    className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+                  >
+                    Retail
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="wholesale"
+                    className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+                  >
+                    Wholesale
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+
+            {/* Customer Selection */}
+            {selectedCustomer ? (
+              <div className="flex items-center justify-between rounded bg-muted p-2 text-xs">
+                <span className="truncate font-medium">{selectedCustomer.name}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-5 px-2 text-xs"
+                  onClick={() => setSelectedCustomer(null)}
+                >
+                  Change
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 w-full text-xs"
+                onClick={() => setShowCustomerSelect(true)}
+              >
+                Select Customer
+              </Button>
+            )}
+
+            <div className="relative mt-1">
               <Input
                 ref={searchInputRef}
                 placeholder={t("pos.search_placeholder")}
@@ -744,36 +978,31 @@ export function RetailPOS() {
                   }
                 }}
                 onFocus={() => {
-                  // Only show search dropdown if user has typed search term
                   if (searchTerm.length >= 2 && searchResults.length > 0) {
                     setShowSearchDropdown(true)
                   }
                   setShowQuickSelectDropdown(false)
                 }}
                 onBlur={() => {
-                  // Delay to allow click on dropdown items
                   setTimeout(() => {
                     setShowSearchDropdown(false)
                     setShowQuickSelectDropdown(false)
                   }, 200)
                 }}
                 onClick={() => {
-                  // Don't auto-show dropdowns on click, only show when searching
                   setShowQuickSelectDropdown(false)
                   setShowSearchDropdown(false)
                 }}
                 autoFocus
                 onKeyDown={async (e) => {
-                  // If Enter is pressed, handle barcode lookup professionally when input looks like a barcode
                   if (e.key === "Enter") {
                     const term = searchTerm.trim()
-                    const barcodeLike = /^[0-9A-Za-z]{6,}$/.test(term) // flexible barcode heuristic
+                    const barcodeLike = /^[0-9A-Za-z]{6,}$/.test(term)
 
                     if (barcodeLike) {
                       try {
                         const { products: matchedProducts } = await productService.lookup(term)
 
-                        // Single product match -> add to cart or open unit modal if multiple units exist
                         if (matchedProducts && matchedProducts.length === 1) {
                           const p = matchedProducts[0]
                           const units = p.selling_units || []
@@ -784,9 +1013,7 @@ export function RetailPOS() {
                             setShowSearchDropdown(false)
                             return
                           }
-                          
-                          // Single unit - add product directly
-                          const price = getProductPrice(p)
+
                           addCartWithDetails(p, undefined, undefined, 1)
                           toast({ title: "Added to cart", description: `${p.name} added via barcode` })
                           setSearchTerm("")
@@ -794,14 +1021,12 @@ export function RetailPOS() {
                           return
                         }
 
-                        // No matches - offer to create product prefilled with barcode
                         toast({ title: "No product found", description: "Would you like to create a product with this barcode?" })
                         setProductToCreate({ barcode: term })
                         setShowAddProductModal(true)
                         setSearchTerm("")
                         setShowSearchDropdown(false)
                         return
-
                       } catch (err: any) {
                         console.error("Barcode lookup failed:", err)
                         toast({ title: "Lookup failed", description: err.message || String(err), variant: "destructive" })
@@ -809,21 +1034,18 @@ export function RetailPOS() {
                       }
                     }
 
-                    // Fallback: if searchResults available, add first
                     if (searchResults.length > 0) {
                       handleAddToCart(searchResults[0])
                       setSearchTerm("")
                       setShowSearchDropdown(false)
                     }
-
                   } else if (e.key === "Escape") {
                     setShowSearchDropdown(false)
                     setShowQuickSelectDropdown(false)
                   }
                 }}
               />
-              
-              {/* Quick Select Dropdown - Shows when search bar is clicked and empty */}
+
               {showQuickSelectDropdown && quickSelectItems.length > 0 && (
                 <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-[400px] overflow-y-auto">
                   <div className="px-3 py-2 border-b bg-muted/50">
@@ -836,10 +1058,9 @@ export function RetailPOS() {
                     const sellingUnits = product.selling_units || []
                     const activeUnits = sellingUnits.filter((u: any) => u.is_active !== false)
                     const hasUnits = activeUnits.length > 0
-                    
+
                     const handleQuickSelectUnitSelect = (unitId: string) => {
                       if (unitId === "base") {
-                        // Use base unit
                         const price = getProductPrice(product)
                         addToCart({
                           id: `cart_${Date.now()}_${Math.random()}`,
@@ -850,7 +1071,6 @@ export function RetailPOS() {
                           saleType: saleType,
                         })
                       } else {
-                        // Find selected unit
                         const selectedUnit = activeUnits.find((u: any) => String(u.id) === unitId)
                         if (selectedUnit) {
                           const unitPrice = saleType === "wholesale" && selectedUnit.wholesale_price
@@ -872,7 +1092,7 @@ export function RetailPOS() {
                         searchInputRef.current?.focus()
                       }, 100)
                     }
-                    
+
                     return (
                       <div
                         key={product.id}
@@ -936,8 +1156,7 @@ export function RetailPOS() {
                   })}
                 </div>
               )}
-              
-              {/* Search Results Dropdown */}
+
               {showSearchDropdown && searchResults.length > 0 && (
                 <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-[400px] overflow-y-auto">
                   {searchResults.map((product: any) => {
@@ -945,10 +1164,9 @@ export function RetailPOS() {
                     const sellingUnits = product.selling_units || []
                     const activeUnits = sellingUnits.filter((u: any) => u.is_active !== false)
                     const hasUnits = activeUnits.length > 0
-                    
+
                     const handleSearchUnitSelect = (unitId: string) => {
                       if (unitId === "base") {
-                        // Use base unit
                         const price = getProductPrice(product)
                         addToCart({
                           id: `cart_${Date.now()}_${Math.random()}`,
@@ -959,7 +1177,6 @@ export function RetailPOS() {
                           saleType: saleType,
                         })
                       } else {
-                        // Find selected unit
                         const selectedUnit = activeUnits.find((u: any) => String(u.id) === unitId)
                         if (selectedUnit) {
                           const unitPrice = saleType === "wholesale" && selectedUnit.wholesale_price
@@ -982,7 +1199,7 @@ export function RetailPOS() {
                         searchInputRef.current?.focus()
                       }, 100)
                     }
-                    
+
                     return (
                       <div
                         key={product.id}
@@ -1050,204 +1267,6 @@ export function RetailPOS() {
             </div>
           </div>
 
-          <div className="flex-1 flex min-h-0 overflow-hidden">
-            {/* Category Filter - Sidebar */}
-            {categories.length > 1 && (
-              <div
-                className={
-                  "border-r bg-gray-200 overflow-y-auto flex-shrink-0 transition-all duration-200 " +
-                  (isCategoryOpen ? "w-40 p-3" : "w-12 p-2")
-                }
-              >
-                <div className="mb-2 flex items-center justify-between">
-                  <span className={isCategoryOpen ? "text-xs font-medium" : "sr-only"}>
-                    Categories
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => setIsCategoryOpen((prev) => !prev)}
-                    title={isCategoryOpen ? "Collapse categories" : "Expand categories"}
-                  >
-                    {isCategoryOpen ? "«" : "»"}
-                  </Button>
-                </div>
-                <div className="flex flex-col gap-2">
-                  <Button
-                    key="all"
-                    variant={selectedCategory === "all" ? "default" : "outline"}
-                    className={
-                      "h-10 justify-start px-3 text-sm" +
-                      (selectedCategory === "all" ? " ring-2 ring-primary" : "") +
-                      (!isCategoryOpen ? " hidden" : "")
-                    }
-                    onClick={() => setSelectedCategory("all")}
-                  >
-                    All
-                  </Button>
-                  {categories
-                    .filter((category) => category !== "all")
-                    .map((category) => (
-                      <Button
-                        key={category}
-                        variant={selectedCategory === category ? "default" : "outline"}
-                        className={
-                          "h-10 justify-start px-3 text-sm" +
-                          (selectedCategory === category ? " ring-2 ring-primary" : "") +
-                          (!isCategoryOpen ? " hidden" : "")
-                        }
-                        onClick={() => setSelectedCategory(category)}
-                      >
-                        {category}
-                      </Button>
-                    ))}
-                </div>
-              </div>
-            )}
-
-            {/* Products Grid - Enhanced */}
-            <div className="relative flex-1 overflow-y-auto bg-gray-200 p-4" ref={productsScrollRef}>
-              {isLoadingProducts ? (
-                <div className="p-8 text-center text-muted-foreground">Loading products...</div>
-              ) : productsError ? (
-                <div className="p-8 text-center text-destructive">{productsError}</div>
-              ) : filteredProducts.length === 0 ? (
-                <div className="p-8 text-center text-muted-foreground">No products found</div>
-              ) : (
-                <ProductGrid
-                  products={filteredProducts as any}
-                  onAddToCart={(
-                    product,
-                    unit,
-                    quantity
-                  ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
-                />
-              )}
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="absolute bottom-4 right-4 rounded-full shadow-lg"
-                onClick={() => {
-                  productsScrollRef.current?.scrollBy({ top: 320, behavior: "smooth" })
-                }}
-                title="View more products"
-              >
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-          <div className="border-t bg-card px-3 py-2">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2 text-amber-700"
-                onClick={() => setShowSaleDiscount(true)}
-              >
-                <Tag className="h-4 w-4" />
-                Discount
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2 text-blue-700"
-                onClick={() => setShowRefundReturn(true)}
-              >
-                <RotateCcw className="h-4 w-4" />
-                Refund
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2 text-emerald-700"
-                onClick={handleHoldSale}
-              >
-                <PauseCircle className="h-4 w-4" />
-                Hold
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2 text-indigo-700"
-                onClick={() => setShowHoldSales(true)}
-              >
-                <History className="h-4 w-4" />
-                Retrieve
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2 text-slate-700"
-                onClick={() => setShowCloseRegister(true)}
-              >
-                <Lock className="h-4 w-4" />
-                Close
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2 text-red-600"
-                onClick={handleVoidSale}
-              >
-                <Ban className="h-4 w-4" />
-                Void
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Cart Panel - Table Based */}
-        <div className="flex-1 lg:flex-none w-full lg:w-[520px] border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
-          {/* Cart Header */}
-          <div className="p-3 border-b space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold">Cart ({cartItemCount})</div>
-              <Tabs value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
-                <TabsList>
-                  <TabsTrigger
-                    value="retail"
-                    className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
-                  >
-                    Retail
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="wholesale"
-                    className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
-                  >
-                    Wholesale
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-
-            {/* Customer Selection */}
-            {selectedCustomer ? (
-              <div className="flex items-center justify-between rounded bg-muted p-2 text-xs">
-                <span className="truncate font-medium">{selectedCustomer.name}</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-5 px-2 text-xs"
-                  onClick={() => setSelectedCustomer(null)}
-                >
-                  Change
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 w-full text-xs"
-                onClick={() => setShowCustomerSelect(true)}
-              >
-                Select Customer
-              </Button>
-            )}
-          </div>
-
           {/* Cart Items Table */}
           <div className="flex-1 overflow-y-auto border-b">
             {cart.length === 0 ? (
@@ -1267,7 +1286,7 @@ export function RetailPOS() {
                 </TableHeader>
                 <TableBody>
                   {cartDisplayItems.map((item) => (
-                    <TableRow key={item.id} className="border-b hover:bg-muted/40 h-10">
+                    <TableRow key={item.id} className="border-b hover:bg-muted/40 h-9">
                       <TableCell className="px-2 py-1 text-xs font-medium truncate">{item.product.name}</TableCell>
                       <TableCell className="px-2 py-1 text-xs text-right">{formatCurrency(item.price, currentBusiness)}</TableCell>
                       <TableCell className="px-2 py-1 text-right">
@@ -1311,9 +1330,9 @@ export function RetailPOS() {
           </div>
 
           {/* Summary & Payment Footer */}
-          <div className="p-3 bg-muted/30 space-y-3">
+          <div className="shrink-0 p-2 bg-muted/30 space-y-1.5">
               {/* Summary Grid */}
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-2 gap-1.5 text-[11px] leading-tight">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Subtotal:</span>
                   <span className="font-medium">{formatCurrency(cartSubtotal, currentBusiness)}</span>
@@ -1324,7 +1343,7 @@ export function RetailPOS() {
                     <span className="font-medium text-red-600">-{formatCurrency(discountAmount, currentBusiness)}</span>
                   </div>
                 )}
-                <div className="col-span-2 flex justify-between font-semibold text-sm border-t pt-2">
+                <div className="col-span-2 flex justify-between font-semibold text-xs border-t pt-1.5">
                   <span>Total:</span>
                   <span>{formatCurrency(cartTotal, currentBusiness)}</span>
                 </div>
@@ -1333,7 +1352,7 @@ export function RetailPOS() {
               {/* Action Buttons */}
               <div className="flex gap-2">
                 <Button
-                  className="flex-1 bg-blue-900 hover:bg-blue-800"
+                  className="h-8 flex-1 bg-blue-900 hover:bg-blue-800"
                   size="sm"
                   onClick={handleCheckout}
                   disabled={isProcessingPayment || cart.length === 0}

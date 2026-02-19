@@ -2,13 +2,22 @@
 
 **Maturity Level**: Production Ready (MVP+)  
 **Version**: 1.0.0  
-**Last Updated**: January 29, 2026  
+**Last Updated**: February 17, 2026  
 **Target Users**: Retail stores, restaurants, bars, wholesale businesses in Africa/Global  
 **Deployment**: Render (Backend) + Vercel (Frontend)  
 
 ## 🎯 Project Overview
 
 PrimePOS is a **full-stack, multi-tenant SaaS Point of Sale system** designed to serve small and medium-sized businesses. It supports multiple business types (retail, restaurant, bar, wholesale) with a **single unified codebase** that scales per tenant with configurable features (tax, pricing, outlets, staff limits).
+
+**Recent Progress (Feb 2026):**
+- ✅ Outlet business type selection per outlet (independent of tenant type)
+- ✅ Outlet-specific settings (posMode, receiptTemplate, taxEnabled, taxRate, etc.)
+- ✅ Outlet-aware POS routing (restaurant/bar/retail pages gated by outlet posMode)
+- ✅ Outlet-specific dashboard layouts and navigation
+- ✅ Inventory filtering by outlet across all pages (purchases, stock control, expiry, stock-taking, returns)
+- ✅ Contact field display fixes in settings UI
+- ✅ All code pushed to GitHub (primepos-v1.0)
 
 ### What PrimePOS Does
 ✅ **Multi-Tenant SaaS**: Each customer isolated, independent configuration  
@@ -110,7 +119,16 @@ Every request goes through the **TenantMiddleware** which:
 **Key Data Isolation Points:**
 - `Tenant` - Root business entity
 - `Outlet` - Physical location (multi-outlet support per tenant)
+  - Each outlet can have its own `business_type` (retail, restaurant, bar, wholesale_and_retail)
+  - Each outlet has configurable `settings` (posMode, receiptTemplate, taxEnabled, taxRate, etc.)
+  - Operational modules (POS, dashboard, inventory) gated and filtered by outlet business type
 - All models have `tenant = ForeignKey(Tenant)`
+
+**Outlet Business Type System:**
+- Each outlet independently selects its business type (restaurant, bar, retail, etc.)
+- Outlet settings are derived from business type + custom configuration
+- Frontend routing (POS pages, dashboard layouts) determined by outlet posMode
+- Inventory, reports, and operational features filtered per outlet with business-type-specific logic
 
 ### **Authentication Flow**
 ```
@@ -733,17 +751,19 @@ python manage.py migrate
 | Product management | ✅ | ✅ | Supports variations (sizes, colors, etc.) |
 | Item variations (Square POS compatible) | ✅ | ✅ | Per-variation stock, pricing, SKU, barcode |
 | Cash sales/checkout | ✅ | ✅ | Atomic transaction with stock deduction |
-| Multi-outlet support | ✅ | ✅ | Per-outlet stock tracking |
-| Inventory management | ✅ | ✅ | Location-based stock, movements, transfers |
+| Multi-outlet support | ✅ | ✅ | Per-outlet stock tracking, outlet-specific business type |
+| Outlet business type selection | ✅ | ✅ | Each outlet can have retail/restaurant/bar/wholesale type with specific settings |
+| Outlet-specific operational modules | ✅ | ✅ | POS, dashboard, inventory operations respect outlet business type |
+| Inventory management | ✅ | ✅ | Location-based stock, movements, transfers, outlet-filtered queries |
 | Receipt generation | ✅ | ⚠️ | Preview done; print/PDF pending |
 | Customer management | ✅ | ✅ | Profiles, purchase history |
 | Credit sales (accounts receivable) | ✅ | ✅ | Credit limit validation, payment tracking |
 | Shift management & cash reconciliation | ✅ | ✅ | Opening/closing, cash validation |
 | Cash management | ✅ | ✅ | Drawer sessions, petty cash, settlements |
-| Restaurant features (tables, KOT) | ✅ | ✅ | Table management, kitchen display system |
+| Restaurant features (tables, KOT) | ✅ | ✅ | Table management, kitchen display system, outlet-specific gating |
 | Role-based access control | ✅ | ✅ | Per-tenant custom roles |
-| Reports & analytics | ✅ | ✅ | Sales, products, cash summaries |
-| Stock taking (physical count) | ✅ | ✅ | Variance tracking |
+| Reports & analytics | ✅ | ✅ | Sales, products, cash summaries, outlet-filtered |
+| Stock taking (physical count) | ✅ | ✅ | Variance tracking, outlet-specific |
 | Bulk product import (Excel/CSV) | ✅ | ✅ | With variation support |
 | Multi-language support | ✅ | ✅ | English & Chichewa |
 

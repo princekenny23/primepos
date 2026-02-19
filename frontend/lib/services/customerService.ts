@@ -32,6 +32,8 @@ export interface CustomerFilters {
   search?: string
   tenant?: string
   businessId?: string
+  page?: number
+  limit?: number
 }
 
 export interface CreditSummary {
@@ -87,6 +89,8 @@ export const customerService = {
     if (filters?.search) params.append("search", filters.search)
     if (filters?.tenant) params.append("tenant", filters.tenant)
     if (filters?.businessId) params.append("business", filters.businessId)
+    if (filters?.page) params.append("page", String(filters.page))
+    if (filters?.limit) params.append("limit", String(filters.limit))
     
     const query = params.toString()
     const response = await api.get<any>(`${apiEndpoints.customers.list}${query ? `?${query}` : ""}`)
