@@ -23,8 +23,9 @@ import { useToast } from "@/components/ui/use-toast"
 import { AddEditUserModal } from "@/components/modals/add-edit-user-modal"
 import { ViewUserModal } from "@/components/modals/view-user-modal"
 import { AddEditRoleModal } from "@/components/modals/add-edit-role-modal"
+import { AddEditStaffModal } from "@/components/modals/add-edit-staff-modal"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
-import { roleService, type Role } from "@/lib/services/staffService"
+import { roleService, staffService, type Role, type Staff } from "@/lib/services/staffService"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,19 +52,25 @@ export default function AccountsPage() {
   const { toast } = useToast()
   const { t } = useI18n()
   const [users, setUsers] = useState<User[]>([])
+  const [staffMembers, setStaffMembers] = useState<Staff[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isStaffLoading, setIsStaffLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [activeTab, setActiveTab] = useState("users")
   const [showAddUser, setShowAddUser] = useState(false)
+  const [showAddStaff, setShowAddStaff] = useState(false)
   const [showViewUser, setShowViewUser] = useState(false)
   const [showAddRole, setShowAddRole] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [selectedStaff, setSelectedStaff] = useState<Staff | null>(null)
   const [selectedRole, setSelectedRole] = useState<Role | null>(null)
   const [roleToDelete, setRoleToDelete] = useState<Role | null>(null)
+  const [staffToDelete, setStaffToDelete] = useState<Staff | null>(null)
   const [showDeleteRoleDialog, setShowDeleteRoleDialog] = useState(false)
   const [userToDelete, setUserToDelete] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [showDeleteStaffDialog, setShowDeleteStaffDialog] = useState(false)
   const useReal = useRealAPI()
 
   const loadUsers = useCallback(async () => {
@@ -127,10 +134,34 @@ export default function AccountsPage() {
     }
   }, [currentBusiness, useReal])
 
+  const loadStaff = useCallback(async () => {
+    if (!currentBusiness) {
+      setStaffMembers([])
+      setIsStaffLoading(false)
+      return
+    }
+
+    setIsStaffLoading(true)
+    try {
+      if (useReal) {
+        const response = await staffService.list({ tenant: currentBusiness.id })
+        setStaffMembers(response.results || [])
+      } else {
+        setStaffMembers([])
+      }
+    } catch (error) {
+      console.error("Failed to load staff:", error)
+      setStaffMembers([])
+    } finally {
+      setIsStaffLoading(false)
+    }
+  }, [currentBusiness, useReal])
+
   useEffect(() => {
     loadUsers()
+    loadStaff()
     loadRoles()
-  }, [loadUsers, loadRoles])
+  }, [loadUsers, loadStaff, loadRoles])
   
   const handleDeleteUser = useCallback(async (userId: string) => {
     if (currentBusiness) {
@@ -176,12 +207,29 @@ export default function AccountsPage() {
     })
   }, [roles, searchTerm])
 
+  const filteredStaff = useMemo(() => {
+    const term = searchTerm.toLowerCase()
+    return staffMembers.filter(staff => {
+      const name = staff.user?.name?.toLowerCase() || ""
+      const email = staff.user?.email?.toLowerCase() || ""
+      const role = staff.role?.name?.toLowerCase() || ""
+      return name.includes(term) || email.includes(term) || role.includes(term)
+    })
+  }, [staffMembers, searchTerm])
+
   const tabsConfig: TabConfig[] = [
     {
       value: "users",
       label: "Users",
       icon: UsersIcon,
       badgeCount: users.length,
+      badgeVariant: "secondary",
+    },
+    {
+      value: "staff",
+      label: "Staff",
+      icon: UsersIcon,
+      badgeCount: staffMembers.length,
       badgeVariant: "secondary",
     },
     {
@@ -362,6 +410,113 @@ export default function AccountsPage() {
                             </TableRow>
                           )
                         })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="staff" className="mt-0">
+              <div className="px-6 py-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">Staff</h3>
+                    <p className="text-sm text-gray-600">
+                      {filteredStaff.length} staff member{filteredStaff.length !== 1 ? "s" : ""} found
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => {
+                      setSelectedStaff(null)
+                      setShowAddStaff(true)
+                    }}
+                    className="bg-[#1e3a8a] text-white hover:bg-blue-800"
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Staff
+                  </Button>
+                </div>
+
+                <div className="mb-4 pb-4 border-b border-gray-300">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+                    <Input
+                      placeholder="Search by name, email, or role"
+                      className="pl-10 bg-white border-gray-300"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto rounded-md border border-gray-300 bg-white">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead className="text-gray-900 font-semibold">Name</TableHead>
+                        <TableHead className="text-gray-900 font-semibold">Email</TableHead>
+                        <TableHead className="text-gray-900 font-semibold">Role</TableHead>
+                        <TableHead className="text-gray-900 font-semibold">Outlets</TableHead>
+                        <TableHead className="text-gray-900 font-semibold">Status</TableHead>
+                        <TableHead className="text-gray-900 font-semibold">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isStaffLoading ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center py-8">
+                            <p className="text-gray-600">Loading staff...</p>
+                          </TableCell>
+                        </TableRow>
+                      ) : filteredStaff.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center py-8">
+                            <p className="text-gray-600">No staff found</p>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        filteredStaff.map((staff) => (
+                          <TableRow key={staff.id} className="border-gray-300">
+                            <TableCell className="font-medium">{staff.user?.name || "-"}</TableCell>
+                            <TableCell>{staff.user?.email || "-"}</TableCell>
+                            <TableCell>{staff.role?.name || "Unassigned"}</TableCell>
+                            <TableCell>
+                              {staff.outlets?.length ? staff.outlets.map((o) => o.name).join(", ") : "Not assigned"}
+                            </TableCell>
+                            <TableCell>
+                              <span className={`px-2 py-1 rounded-full text-xs ${staff.is_active ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
+                                {staff.is_active ? "Active" : "Inactive"}
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-gray-300"
+                                  onClick={() => {
+                                    setSelectedStaff(staff)
+                                    setShowAddStaff(true)
+                                  }}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-gray-300 text-destructive"
+                                  onClick={() => {
+                                    setStaffToDelete(staff)
+                                    setShowDeleteStaffDialog(true)
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
                       )}
                     </TableBody>
                   </Table>
@@ -682,6 +837,13 @@ export default function AccountsPage() {
         }}
       />
 
+      <AddEditStaffModal
+        open={showAddStaff}
+        onOpenChange={setShowAddStaff}
+        staff={selectedStaff}
+        onSuccess={loadStaff}
+      />
+
       {/* Delete Confirmation */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
@@ -735,6 +897,45 @@ export default function AccountsPage() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteRole}
+              className="bg-destructive text-destructive-foreground"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showDeleteStaffDialog} onOpenChange={setShowDeleteStaffDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Staff Member?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this staff member record? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!staffToDelete) return
+
+                try {
+                  await staffService.delete(String(staffToDelete.id))
+                  toast({
+                    title: "Staff Deleted",
+                    description: "Staff member has been deleted successfully.",
+                  })
+                  setShowDeleteStaffDialog(false)
+                  setStaffToDelete(null)
+                  loadStaff()
+                } catch (error: any) {
+                  toast({
+                    title: "Error",
+                    description: error.message || "Failed to delete staff member.",
+                    variant: "destructive",
+                  })
+                }
+              }}
               className="bg-destructive text-destructive-foreground"
             >
               Delete

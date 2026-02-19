@@ -5,6 +5,7 @@ import { productService } from "../services/productService"
 import { customerService } from "../services/customerService"
 import { expenseService } from "../services/expenseService"
 import { returnService } from "../services/returnService"
+import { staffService } from "../services/staffService"
 import { requestCache } from "./request-cache"
 
 export interface DashboardKPI {
@@ -35,6 +36,31 @@ export interface ActivityItem {
   amount?: number
 }
 
+function extractResults<T = any>(response: any): T[] {
+  if (Array.isArray(response)) return response
+  return response?.results || []
+}
+
+async function fetchAllCustomers(outletId?: string): Promise<any[]> {
+  const allCustomers: any[] = []
+  let page = 1
+  const maxPages = 100
+
+  while (page <= maxPages) {
+    const response: any = await customerService.list({ outlet: outletId, page })
+    const pageItems = extractResults(response)
+    allCustomers.push(...pageItems)
+
+    if (Array.isArray(response)) break
+    if (!response?.next) break
+    if (pageItems.length === 0) break
+
+    page += 1
+  }
+
+  return allCustomers
+}
+
 /**
  * Generate KPI data for business dashboard
  * Calculates trends by comparing with previous period
@@ -54,17 +80,18 @@ export async function generateKPIData(
     yesterday.setHours(0, 0, 0, 0)
     const yesterdayStr = yesterday.toISOString().split("T")[0]
     
-    const thisMonth = new Date()
-    thisMonth.setDate(1)
-    thisMonth.setHours(0, 0, 0, 0)
-    const thisMonthStr = thisMonth.toISOString().split("T")[0]
+    const thisMonthStart = new Date()
+    thisMonthStart.setDate(1)
+    thisMonthStart.setHours(0, 0, 0, 0)
+    const thisMonthStartStr = thisMonthStart.toISOString().split("T")[0]
     
-    const lastMonth = new Date(thisMonth)
-    lastMonth.setMonth(lastMonth.getMonth() - 1)
-    const lastMonthStr = lastMonth.toISOString().split("T")[0]
-    
-    // Use cache keys for request deduplication
-    const cacheKey = `dashboard-kpi-${businessId}-${outletId || 'all'}-${todayStr}`
+    const lastMonthStart = new Date(thisMonthStart)
+    lastMonthStart.setMonth(lastMonthStart.getMonth() - 1)
+    const lastMonthStartStr = lastMonthStart.toISOString().split("T")[0]
+
+    const lastMonthEnd = new Date(thisMonthStart)
+    lastMonthEnd.setDate(0)
+    const lastMonthEndStr = lastMonthEnd.toISOString().split("T")[0]
     
     // Fetch all data in parallel with caching
     const [
@@ -73,44 +100,72 @@ export async function generateKPIData(
       todaySales,
       yesterdaySales,
       productCount,
+      staffList,
       customersList,
-      expenseStats,
-      expenseStatsLastMonth,
+      thisMonthCustomers,
+      lastMonthCustomers,
+      thisMonthExpenseStats,
+      lastMonthExpenseStats,
+      yesterdayExpenseStats,
       lowStockProducts,
       returnsToday,
       returnsYesterday,
     ] = await Promise.all([
-      requestCache.getOrSet(`stats-${outletId}-${todayStr}`, () => 
-        saleService.getStats({ start_date: todayStr, end_date: todayStr, outlet: outletId }).catch(() => ({ total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }))
+      requestCache.getOrSet(`stats-${businessId}-${outletId || 'all'}-${todayStr}`, () => 
+        saleService.getStats({ start_date: todayStr, end_date: todayStr, outlet: outletId, status: "completed" }).catch((err) => {
+          console.error('Failed to fetch today stats:', err)
+          return { total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }
+        })
       ),
-      requestCache.getOrSet(`stats-${outletId}-${yesterdayStr}`, () =>
-        saleService.getStats({ start_date: yesterdayStr, end_date: yesterdayStr, outlet: outletId }).catch(() => ({ total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }))
+      requestCache.getOrSet(`stats-${businessId}-${outletId || 'all'}-${yesterdayStr}`, () =>
+        saleService.getStats({ start_date: yesterdayStr, end_date: yesterdayStr, outlet: outletId, status: "completed" }).catch((err) => {
+          console.error('Failed to fetch yesterday stats:', err)
+          return { total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }
+        })
       ),
-      requestCache.getOrSet(`sales-${outletId}-${todayStr}`, () =>
-        saleService.list({ outlet: outletId, status: "completed", start_date: todayStr, end_date: todayStr, page: 1 }).catch(() => ({ results: [], count: 0 }))
+      requestCache.getOrSet(`sales-${businessId}-${outletId || 'all'}-${todayStr}`, () =>
+        saleService.list({ outlet: outletId, start_date: todayStr, end_date: todayStr, page: 1 }).catch((err) => {
+          console.error('Failed to fetch today sales:', err)
+          return { results: [], count: 0 }
+        })
       ),
-      requestCache.getOrSet(`sales-${outletId}-${yesterdayStr}`, () =>
-        saleService.list({ outlet: outletId, status: "completed", start_date: yesterdayStr, end_date: yesterdayStr, page: 1 }).catch(() => ({ results: [], count: 0 }))
+      requestCache.getOrSet(`sales-${businessId}-${outletId || 'all'}-${yesterdayStr}`, () =>
+        saleService.list({ outlet: outletId, start_date: yesterdayStr, end_date: yesterdayStr, page: 1 }).catch((err) => {
+          console.error('Failed to fetch yesterday sales:', err)
+          return { results: [], count: 0 }
+        })
       ),
-      requestCache.getOrSet(`products-count-${outletId}`, () =>
-        productService.count({ is_active: true }).catch(() => 0)
+      requestCache.getOrSet(`products-count-${businessId}-${outletId || 'all'}`, () =>
+        productService.count({ is_active: true, outlet: outletId }).catch(() => 0)
       ),
-      requestCache.getOrSet(`customers-${outletId}`, () =>
-        customerService.list({ outlet: outletId }).catch(() => [])
+      requestCache.getOrSet(`staff-active-${businessId}-${outletId || 'all'}`, () =>
+        staffService.list({ is_active: true }).then(res => res.results || []).catch(() => [])
       ),
-      requestCache.getOrSet(`expenses-${outletId}-${thisMonthStr}`, () =>
-        expenseService.stats({ outlet: outletId, start_date: thisMonthStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
+      requestCache.getOrSet(`customers-${businessId}-${outletId || 'all'}`, () =>
+        fetchAllCustomers(outletId).catch(() => [])
       ),
-      requestCache.getOrSet(`expenses-${outletId}-${lastMonthStr}`, () =>
-        expenseService.stats({ outlet: outletId, start_date: lastMonthStr, end_date: yesterdayStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
+      requestCache.getOrSet(`customers-this-month-${businessId}-${outletId || 'all'}`, () =>
+        fetchAllCustomers(outletId).catch(() => [])
       ),
-      requestCache.getOrSet(`low-stock-${outletId}`, () =>
+      requestCache.getOrSet(`customers-last-month-${businessId}-${outletId || 'all'}`, () =>
+        fetchAllCustomers(outletId).catch(() => [])
+      ),
+      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${thisMonthStartStr}-${todayStr}`, () =>
+        expenseService.stats({ outlet: outletId, start_date: thisMonthStartStr, end_date: todayStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
+      ),
+      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${lastMonthStartStr}-${lastMonthEndStr}`, () =>
+        expenseService.stats({ outlet: outletId, start_date: lastMonthStartStr, end_date: lastMonthEndStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
+      ),
+      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${yesterdayStr}`, () =>
+        expenseService.stats({ outlet: outletId, start_date: yesterdayStr, end_date: yesterdayStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
+      ),
+      requestCache.getOrSet(`low-stock-${businessId}-${outletId || 'all'}`, () =>
         productService.getLowStock(outletId).catch(() => [])
       ),
-      requestCache.getOrSet(`returns-${outletId}-${todayStr}`, () =>
+      requestCache.getOrSet(`returns-${businessId}-${outletId || 'all'}-${todayStr}`, () =>
         returnService.list({ outlet: outletId, start_date: todayStr, end_date: todayStr }).catch(() => ({ results: [], count: 0 }))
       ),
-      requestCache.getOrSet(`returns-${outletId}-${yesterdayStr}`, () =>
+      requestCache.getOrSet(`returns-${businessId}-${outletId || 'all'}-${yesterdayStr}`, () =>
         returnService.list({ outlet: outletId, start_date: yesterdayStr, end_date: yesterdayStr }).catch(() => ({ results: [], count: 0 }))
       ),
     ])
@@ -123,8 +178,17 @@ export async function generateKPIData(
       : todayRevenue > 0 ? 100 : 0
     
     // Calculate transaction metrics - use count if available, otherwise use results length
+    console.log('📊 Transaction Debug:', {
+      todaySales,
+      yesterdaySales,
+      todaySalesType: typeof todaySales,
+      isArray: Array.isArray(todaySales),
+      count: todaySales?.count,
+      resultsLength: todaySales?.results?.length
+    })
     const todayTransactions = todaySales.count ?? (Array.isArray(todaySales) ? todaySales.length : (todaySales.results?.length || 0))
     const yesterdayTransactions = yesterdaySales.count ?? (Array.isArray(yesterdaySales) ? yesterdaySales.length : (yesterdaySales.results?.length || 0))
+    console.log('📊 Transaction Counts:', { todayTransactions, yesterdayTransactions })
     const transactionsChange = yesterdayTransactions > 0
       ? ((todayTransactions - yesterdayTransactions) / yesterdayTransactions) * 100
       : todayTransactions > 0 ? 100 : 0
@@ -137,31 +201,51 @@ export async function generateKPIData(
       : todayAvgOrder > 0 ? 100 : 0
     
     // Calculate customer metrics
-    const customersCount = Array.isArray(customersList) ? customersList.length : (customersList.results?.length || 0)
-    // For customer change, we'll use a simple approach - compare total customers
-    // In a real scenario, you might want to track new customers this month vs last month
-    const customersChange = 0 // TODO: Implement proper customer growth tracking
+    const customersCount = extractResults(customersList).length
+    
+    // Calculate customer change - compare new customers this month vs last month
+    const allCustomers = extractResults(customersList)
+    const thisMonthNewCustomers = allCustomers.filter((c: any) => {
+      if (!c.created_at && !c.createdAt) return false
+      const createdDate = new Date(c.created_at || c.createdAt)
+      return createdDate >= thisMonthStart && createdDate <= today
+    }).length
+    
+    const lastMonthNewCustomers = allCustomers.filter((c: any) => {
+      if (!c.created_at && !c.createdAt) return false
+      const createdDate = new Date(c.created_at || c.createdAt)
+      return createdDate >= lastMonthStart && createdDate <= lastMonthEnd
+    }).length
+    
+    const customersChange = lastMonthNewCustomers > 0
+      ? ((thisMonthNewCustomers - lastMonthNewCustomers) / lastMonthNewCustomers) * 100
+      : thisMonthNewCustomers > 0 ? 100 : 0
     
     // Calculate expense metrics
-    const thisMonthExpenses = expenseStats.total_expenses || 0
-    const lastMonthExpenses = expenseStatsLastMonth.total_expenses || 0
+    const thisMonthExpenses = thisMonthExpenseStats.total_expenses || 0
+    const lastMonthExpenses = lastMonthExpenseStats.total_expenses || 0
     const expensesChange = lastMonthExpenses > 0
       ? ((thisMonthExpenses - lastMonthExpenses) / lastMonthExpenses) * 100
       : thisMonthExpenses > 0 ? 100 : 0
     
     // Calculate profit (sales - expenses for today)
-    const todayExpenses = expenseStats.today_expenses || 0
+    const todayExpenses = thisMonthExpenseStats.today_expenses || 0
     const todayProfit = todayRevenue - todayExpenses
-    const yesterdayProfit = yesterdayRevenue - (expenseStatsLastMonth.today_expenses || 0)
+    const yesterdayExpenses = yesterdayExpenseStats.today_expenses || 0
+    const yesterdayProfit = yesterdayRevenue - yesterdayExpenses
     const profitChange = yesterdayProfit > 0
       ? ((todayProfit - yesterdayProfit) / yesterdayProfit) * 100
       : todayProfit > 0 ? 100 : 0
     
     // Calculate outstanding credit
-    const customersWithCredit = Array.isArray(customersList) 
-      ? customersList.filter((c: any) => c.credit_enabled && c.outstanding_balance > 0)
-      : (customersList.results || []).filter((c: any) => c.credit_enabled && c.outstanding_balance > 0)
-    const totalOutstandingCredit = customersWithCredit.reduce((sum: number, c: any) => sum + (c.outstanding_balance || 0), 0)
+    const customersWithCredit = extractResults(customersList).filter((c: any) => c.credit_enabled && Number(c.outstanding_balance || 0) > 0)
+    const totalOutstandingCredit = customersWithCredit.reduce((sum: number, c: any) => sum + Number(c.outstanding_balance || 0), 0)
+    
+    // Calculate outstanding credit change
+    // Since we don't have historical credit balance data, we'll show change as 0
+    // To properly track this, backend would need to store daily/monthly credit snapshots
+    // For now, the card shows the TOTAL outstanding credit amount only
+    const outstandingCreditChange = 0
     
     // Calculate returns
     const returnsTodayCount = Array.isArray(returnsToday) ? returnsToday.length : (returnsToday.count || returnsToday.results?.length || 0)
@@ -173,16 +257,45 @@ export async function generateKPIData(
     // Low stock items count
     const lowStockCount = Array.isArray(lowStockProducts) ? lowStockProducts.length : (lowStockProducts.results?.length || 0)
     
+    // Calculate employees metrics
+    // Filter staff by outlet if outletId is provided (staff can work at multiple outlets)
+    const staffArray = Array.isArray(staffList) ? staffList : (staffList?.results || [])
+    const filteredStaff = outletId 
+      ? staffArray.filter((s: any) => 
+          s.outlets && Array.isArray(s.outlets) && 
+          s.outlets.some((o: any) => String(o.id) === String(outletId))
+        )
+      : staffArray
+    
+    const employeesCount = filteredStaff.length
+    
+    // Calculate employee change - compare active employees this month vs last month
+    const thisMonthNewStaff = filteredStaff.filter((s: any) => {
+      if (!s.created_at) return false
+      const createdDate = new Date(s.created_at)
+      return createdDate >= thisMonthStart && createdDate <= today
+    }).length
+    
+    const lastMonthNewStaff = filteredStaff.filter((s: any) => {
+      if (!s.created_at) return false
+      const createdDate = new Date(s.created_at)
+      return createdDate >= lastMonthStart && createdDate <= lastMonthEnd
+    }).length
+    
+    const employeesChange = lastMonthNewStaff > 0
+      ? ((thisMonthNewStaff - lastMonthNewStaff) / lastMonthNewStaff) * 100
+      : thisMonthNewStaff > 0 ? 100 : 0
+    
     return {
       sales: { value: todayRevenue, change: salesChange },
       customers: { value: customersCount, change: customersChange },
-      products: { value: productCount, change: 0 },
+      products: { value: employeesCount, change: employeesChange },
       expenses: { value: thisMonthExpenses, change: expensesChange },
       profit: { value: todayProfit, change: profitChange },
       transactions: { value: todayTransactions, change: transactionsChange },
       avgOrderValue: { value: todayAvgOrder, change: avgOrderChange },
       lowStockItems: { value: lowStockCount, change: 0 },
-      outstandingCredit: { value: totalOutstandingCredit, change: 0 },
+      outstandingCredit: { value: totalOutstandingCredit, change: outstandingCreditChange },
       returns: { value: returnsTodayCount, change: returnsChange },
     }
   } catch (error) {
@@ -212,8 +325,8 @@ export async function generateChartData(
 ): Promise<ChartDataPoint[]> {
   try {
     // Use cache for chart data
-    const cacheKey = `chart-${outletId || 'all'}`
-    const chartData = await requestCache.getOrSet(cacheKey, () => saleService.getChartData(outletId))
+    const cacheKey = `chart-${businessId}-${outletId || 'all'}-completed`
+    const chartData = await requestCache.getOrSet(cacheKey, () => saleService.getChartData(outletId, "completed"))
     return chartData.map((item: any) => ({
       date: item.date,
       sales: item.sales,
@@ -295,7 +408,7 @@ export async function generateTopSellingItems(
 ) {
   try {
     // Use cache for top selling items
-    const cacheKey = `top-selling-${outletId || 'all'}`
+    const cacheKey = `top-selling-${businessId}-${outletId || 'all'}`
     return await requestCache.getOrSet(cacheKey, () =>
       saleService.getTopSellingItems({ outlet: outletId })
     )

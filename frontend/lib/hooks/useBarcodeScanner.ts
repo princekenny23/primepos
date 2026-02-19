@@ -1,103 +1,177 @@
 import { useEffect, useRef } from "react"
 
 export type BarcodeScannerOptions = {
-  minLength?: number
-  suffixKey?: string
-  scanTimeout?: number
-  maxScanDuration?: number
   onScan?: (code: string) => void
   enabled?: boolean
+  minLength?: number
+  timeout?: number
+  scanTimeout?: number
+  suffixKeys?: string[]
+  suffixKey?: string
+  maxScanDuration?: number
+}
+
+type ScannerConfig = {
+  enabled: boolean
+  minLength: number
+  timeout: number
+  suffixKeys: Set<string>
+}
+
+const DEFAULT_SUFFIX_KEYS = ["Enter", "Tab"]
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Fn"])
+
+function normalizeKey(key: string): string {
+  if (key === "NumpadEnter") return "Enter"
+  return key
+}
+
+function resolveTimeout(options: BarcodeScannerOptions): number {
+  const timeout = options.timeout ?? options.scanTimeout ?? 600
+  if (!Number.isFinite(timeout)) return 600
+  return Math.max(200, Math.min(5000, timeout))
+}
+
+function resolveSuffixKeys(options: BarcodeScannerOptions): Set<string> {
+  const suffix = new Set<string>()
+
+  for (const key of DEFAULT_SUFFIX_KEYS) {
+    suffix.add(normalizeKey(key))
+  }
+
+  if (Array.isArray(options.suffixKeys)) {
+    for (const key of options.suffixKeys) {
+      if (typeof key === "string" && key.trim()) {
+        suffix.add(normalizeKey(key.trim()))
+      }
+    }
+  }
+
+  if (typeof options.suffixKey === "string" && options.suffixKey.trim()) {
+    suffix.add(normalizeKey(options.suffixKey.trim()))
+  }
+
+  return suffix
+}
+
+function toConfig(options: BarcodeScannerOptions): ScannerConfig {
+  return {
+    enabled: options.enabled ?? true,
+    minLength: Math.max(1, options.minLength ?? 4),
+    timeout: resolveTimeout(options),
+    suffixKeys: resolveSuffixKeys(options),
+  }
 }
 
 export function useBarcodeScanner(options: BarcodeScannerOptions = {}) {
-  const {
-    minLength = 3,
-    suffixKey = "Enter",
-    scanTimeout = 300,
-    maxScanDuration = 1200,
-    onScan,
-    enabled = true,
-  } = options
+  const onScanRef = useRef<BarcodeScannerOptions["onScan"]>(options.onScan)
+  const configRef = useRef<ScannerConfig>(toConfig(options))
 
   const bufferRef = useRef("")
-  const lastTimeRef = useRef(0)
-  const startTimeRef = useRef(0)
-  const timeoutRef = useRef<number | null>(null)
+  const lastKeyTimeRef = useRef(0)
+  const resetTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
-    if (!enabled) return
+    onScanRef.current = options.onScan
+  }, [options.onScan])
+
+  useEffect(() => {
+    configRef.current = toConfig(options)
+  }, [
+    options.enabled,
+    options.minLength,
+    options.timeout,
+    options.scanTimeout,
+    options.suffixKey,
+    options.suffixKeys,
+  ])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const clearResetTimer = () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current)
+        resetTimerRef.current = null
+      }
+    }
 
     const resetBuffer = () => {
       bufferRef.current = ""
-      startTimeRef.current = 0
+      lastKeyTimeRef.current = 0
+      clearResetTimer()
     }
 
-    const finalizeScan = (code: string) => {
+    const scheduleReset = (timeout: number) => {
+      clearResetTimer()
+      resetTimerRef.current = window.setTimeout(() => {
+        resetBuffer()
+      }, timeout)
+    }
+
+    const emitScan = (code: string) => {
+      const { minLength } = configRef.current
       const trimmed = code.trim()
       if (trimmed.length < minLength) return
-      console.error("Barcode scan detected:", trimmed)
-      onScan?.(trimmed)
+      onScanRef.current?.(trimmed)
     }
 
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || e.ctrlKey || e.metaKey || e.altKey) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const config = configRef.current
+      if (!config.enabled) return
+      if (event.isComposing) return
+      if (event.ctrlKey || event.altKey || event.metaKey) return
 
       const now = Date.now()
-      const lastTime = lastTimeRef.current
-      const startTime = startTimeRef.current
-
-      if (lastTime && now - lastTime > scanTimeout) {
+      if (
+        bufferRef.current.length > 0 &&
+        lastKeyTimeRef.current > 0 &&
+        now - lastKeyTimeRef.current > config.timeout
+      ) {
         resetBuffer()
       }
 
-      if (startTime && now - startTime > maxScanDuration) {
-        resetBuffer()
-      }
+      const key = normalizeKey(event.key || "")
+      if (!key) return
+      if (MODIFIER_KEYS.has(key)) return
 
-      lastTimeRef.current = now
-
-      if (typeof e.key !== "string") return
-      const key = e.key === "NumpadEnter" ? "Enter" : e.key
-      if (key.length > 1 && key !== suffixKey) return
-
-      if (key === suffixKey) {
+      if (config.suffixKeys.has(key)) {
         const code = bufferRef.current
-        if (timeoutRef.current) {
-          window.clearTimeout(timeoutRef.current)
-          timeoutRef.current = null
-        }
         resetBuffer()
-        finalizeScan(code)
+        emitScan(code)
         return
       }
 
-      if (!startTimeRef.current) {
-        startTimeRef.current = now
-      }
-      bufferRef.current += key
-
-      if (timeoutRef.current) {
-        window.clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
-
-      timeoutRef.current = window.setTimeout(() => {
-        const code = bufferRef.current
+      if (key === "Escape") {
         resetBuffer()
-        finalizeScan(code)
-      }, scanTimeout)
+        return
+      }
+
+      if (key === "Backspace") {
+        if (bufferRef.current.length > 0) {
+          bufferRef.current = bufferRef.current.slice(0, -1)
+          lastKeyTimeRef.current = now
+          scheduleReset(config.timeout)
+        }
+        return
+      }
+
+      if (key.length !== 1) return
+
+      bufferRef.current += key
+      lastKeyTimeRef.current = now
+      scheduleReset(config.timeout)
     }
 
-    window.addEventListener("keydown", handleKey, true)
+    window.addEventListener("keydown", handleKeyDown, true)
 
     return () => {
-      window.removeEventListener("keydown", handleKey, true)
-      if (timeoutRef.current) {
-        window.clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
+      window.removeEventListener("keydown", handleKeyDown, true)
+      clearResetTimer()
+      bufferRef.current = ""
+      lastKeyTimeRef.current = 0
     }
-  }, [enabled, maxScanDuration, minLength, onScan, scanTimeout, suffixKey])
+  }, [])
 }
 
 

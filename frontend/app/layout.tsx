@@ -1,14 +1,20 @@
 import type { Metadata } from "next"
-import { Inter } from "next/font/google"
 import "./globals.css"
 import { Toaster } from "@/components/ui/toaster"
 import { Providers } from "./providers"
-
-const inter = Inter({ subsets: ["latin"] })
+import { BarcodeScannerGlobal } from "./barcode-scanner-global"
 
 export const metadata: Metadata = {
+  applicationName: "PrimePOS",
   title: "PrimePOS - Multi-Business Point of Sale Platform",
   description: "A comprehensive SaaS POS platform for retail, restaurant, pharmacy, wholesale, and more.",
+  manifest: "/manifest.webmanifest",
+  themeColor: "#0f172a",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "PrimePOS",
+  },
   icons: {
     icon: "/icon.svg",
     apple: "/apple-icon.svg",
@@ -22,8 +28,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className="font-sans">
         <Providers>
+          <BarcodeScannerGlobal />
           {children}
           <Toaster />
         </Providers>

@@ -308,6 +308,9 @@ export default function OutletsAndTillsManagementPage() {
                       <Plus className="mr-2 h-4 w-4" />
                       {t("settings.outlets.add_outlet")}
                     </Button>
+                    <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
+                      <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    </Button>
                   </div>
                 </div>
               </CardHeader>
