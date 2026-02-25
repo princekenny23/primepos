@@ -43,7 +43,7 @@ interface RegisterStatus {
 
 export default function POSLandingPage() {
   const router = useRouter()
-  const { currentBusiness, currentOutlet } = useBusinessStore()
+  const { currentBusiness, currentOutlet, setCurrentOutlet } = useBusinessStore()
   const { outlets } = useTenant()
   const { setActiveShift, activeShift } = useShift()
   const [isLoading, setIsLoading] = useState(true)
@@ -146,6 +146,8 @@ export default function POSLandingPage() {
     try {
       const shift = activeShifts.find(s => s.id === selectedShiftId)
       if (shift) {
+        const shiftOutlet = outlets.find((o) => String(o.id) === String(shift.outletId))
+
         // Transform to context format
         const contextShift = {
           id: shift.id,
@@ -161,8 +163,11 @@ export default function POSLandingPage() {
           endTime: shift.endTime,
         }
         setActiveShift(contextShift)
+        if (shiftOutlet) {
+          setCurrentOutlet(shiftOutlet.id)
+        }
         // Redirect to POS
-        router.push("/pos/retail")
+        router.push(getOutletPOSRoute(shiftOutlet || currentOutlet, currentBusiness))
       }
     } catch (error) {
       console.error("Failed to select shift:", error)

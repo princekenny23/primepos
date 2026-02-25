@@ -10,6 +10,7 @@ from django.core.files.base import ContentFile
 import json
 from django.utils import timezone
 from decimal import Decimal
+import re
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -337,7 +338,7 @@ class ReceiptService:
         return buffer
 
     @staticmethod
-    def _generate_escpos_receipt(sale: Sale) -> str:
+    def _generate_escpos_receipt(sale: Sale, paper_width: str = 'auto', printer_name: str = '') -> str:
         """Build a minimal ESC/POS byte payload for thermal printers and return base64-encoded string.
 
         The backend does NOT send this to any printer. The frontend should request a receipt
@@ -345,6 +346,117 @@ class ReceiptService:
         """
         def b(text: str = ""):
             return (text + "\n").encode('utf-8')
+
+        def normalize_width(value) -> str:
+            if value is None:
+                return ''
+            raw = str(value).strip().lower()
+            if raw in ('58', '58mm'):
+                return '58'
+            if raw in ('80', '80mm'):
+                return '80'
+            return ''
+
+        def detect_width_from_text(text: str) -> str:
+            if not text:
+                return ''
+            lowered = text.lower()
+            if any(token in lowered for token in ('58mm', '58 mm', '2inch', '2 inch', '2"')):
+                return '58'
+            if any(token in lowered for token in ('80mm', '80 mm', '3inch', '3 inch', '3"')):
+                return '80'
+            if re.search(r'(^|\D)58(\D|$)', lowered):
+                return '58'
+            if re.search(r'(^|\D)80(\D|$)', lowered):
+                return '80'
+            return ''
+
+        def resolve_paper_width() -> str:
+            explicit = normalize_width(paper_width)
+            if explicit:
+                return explicit
+
+            from_printer_name = detect_width_from_text(printer_name)
+            if from_printer_name:
+                return from_printer_name
+
+            outlet_settings = sale.outlet.settings if sale.outlet and isinstance(sale.outlet.settings, dict) else {}
+            candidates = [
+                outlet_settings.get('paper_width'),
+                outlet_settings.get('printer_paper_width'),
+                outlet_settings.get('receipt_paper_width'),
+                (outlet_settings.get('receipt') or {}).get('paper_width') if isinstance(outlet_settings.get('receipt'), dict) else None,
+                (outlet_settings.get('receipts') or {}).get('paper_width') if isinstance(outlet_settings.get('receipts'), dict) else None,
+                (outlet_settings.get('printing') or {}).get('paper_width') if isinstance(outlet_settings.get('printing'), dict) else None,
+            ]
+
+            for value in candidates:
+                normalized = normalize_width(value)
+                if normalized:
+                    return normalized
+
+            # Safe fallback: 58mm template fits both 58mm and 80mm printers.
+            return '58'
+
+        width = 32 if resolve_paper_width() == '58' else 48
+
+        def wrap_text(text: str, max_width: int) -> list[str]:
+            text = (text or '').strip()
+            if not text:
+                return ['']
+            if len(text) <= max_width:
+                return [text]
+
+            words = text.split()
+            if not words:
+                return [text[:max_width]]
+
+            lines: list[str] = []
+            current = ''
+            for word in words:
+                if len(word) > max_width:
+                    if current:
+                        lines.append(current)
+                        current = ''
+                    start = 0
+                    while start < len(word):
+                        lines.append(word[start:start + max_width])
+                        start += max_width
+                    continue
+
+                candidate = f"{current} {word}".strip()
+                if len(candidate) <= max_width:
+                    current = candidate
+                else:
+                    lines.append(current)
+                    current = word
+
+            if current:
+                lines.append(current)
+            return lines or ['']
+
+        def align_lr(left: str, right: str, max_width: int) -> list[str]:
+            left = (left or '').strip()
+            right = (right or '').strip()
+            if not right:
+                return wrap_text(left, max_width)
+
+            min_gap = 1
+            if len(left) + min_gap + len(right) <= max_width:
+                return [left + (' ' * (max_width - len(left) - len(right))) + right]
+
+            wrapped_left = wrap_text(left, max(1, max_width - len(right) - min_gap))
+            if not wrapped_left:
+                wrapped_left = ['']
+
+            lines = wrapped_left[:-1]
+            last_left = wrapped_left[-1]
+            if len(last_left) + min_gap + len(right) <= max_width:
+                lines.append(last_left + (' ' * (max_width - len(last_left) - len(right))) + right)
+            else:
+                lines.append(last_left)
+                lines.append((' ' * max(0, max_width - len(right))) + right)
+            return lines
 
         # ESC/POS init
         payload = bytearray()
@@ -354,12 +466,16 @@ class ReceiptService:
         business = sale.tenant.name if sale.tenant else "Business"
         outlet = sale.outlet.name if sale.outlet else ""
         currency = sale.tenant.currency if sale.tenant and sale.tenant.currency else "MWK"
-        payload.extend(b(business.upper()))
+        for line in wrap_text(business.upper(), width):
+            payload.extend(b(line))
         if outlet:
-            payload.extend(b(outlet))
+            for line in wrap_text(outlet, width):
+                payload.extend(b(line))
 
-        payload.extend(b(f"Receipt #: {sale.receipt_number}"))
-        payload.extend(b(f"Date: {sale.created_at.strftime('%Y-%m-%d %H:%M:%S')}"))
+        for line in align_lr("Receipt #:", str(sale.receipt_number), width):
+            payload.extend(b(line))
+        for line in align_lr("Date:", sale.created_at.strftime('%Y-%m-%d %H:%M:%S'), width):
+            payload.extend(b(line))
 
         # Cashier info
         cashier_name = None
@@ -382,39 +498,53 @@ class ReceiptService:
                 cashier_name = sale.user.username
 
         if cashier_name:
-            payload.extend(b(f"Cashier: {cashier_name}"))
+            for line in align_lr("Cashier:", cashier_name, width):
+                payload.extend(b(line))
 
         # Customer info
         if sale.customer:
-            payload.extend(b(f"Customer: {sale.customer.name or 'Walk-in'}"))
+            for line in align_lr("Customer:", sale.customer.name or 'Walk-in', width):
+                payload.extend(b(line))
             if sale.customer.phone:
-                payload.extend(b(f"Phone: {sale.customer.phone}"))
+                for line in align_lr("Phone:", sale.customer.phone, width):
+                    payload.extend(b(line))
             if sale.customer.email:
-                payload.extend(b(f"Email: {sale.customer.email}"))
+                for line in align_lr("Email:", sale.customer.email, width):
+                    payload.extend(b(line))
         else:
-            payload.extend(b("Customer: Walk-in"))
+            for line in align_lr("Customer:", "Walk-in", width):
+                payload.extend(b(line))
 
         # Items
-        payload.extend(b("-----------------------------"))
+        payload.extend(b("-" * width))
         for item in sale.items.all():
             name = item.product_name or (item.product.name if item.product else "Item")
             qty = item.quantity or 0
             total = item.total or (item.price or Decimal('0')) * Decimal(qty)
-            price = f"{currency} {total:,.2f}"
-            line = f"{name} x{qty}  {price}"
+            right = f"{currency} {total:,.2f}"
+            left = f"{name} x{qty}"
+            for line in align_lr(left, right, width):
+                payload.extend(b(line))
+
+        payload.extend(b("-" * width))
+        for line in align_lr("Subtotal:", f"{currency} {sale.subtotal:,.2f}", width):
+            payload.extend(b(line))
+        if sale.tax and sale.tax > 0:
+            for line in align_lr("Tax:", f"{currency} {sale.tax:,.2f}", width):
+                payload.extend(b(line))
+        if sale.discount and sale.discount > 0:
+            for line in align_lr("Discount:", f"-{currency} {sale.discount:,.2f}", width):
+                payload.extend(b(line))
+        for line in align_lr("Total:", f"{currency} {sale.total:,.2f}", width):
+            payload.extend(b(line))
+        for line in align_lr("Payment:", sale.get_payment_method_display(), width):
             payload.extend(b(line))
 
-        payload.extend(b("-----------------------------"))
-        payload.extend(b(f"Subtotal: {currency} {sale.subtotal:,.2f}"))
-        if sale.tax and sale.tax > 0:
-            payload.extend(b(f"Tax: {currency} {sale.tax:,.2f}"))
-        if sale.discount and sale.discount > 0:
-            payload.extend(b(f"Discount: -{currency} {sale.discount:,.2f}"))
-        payload.extend(b(f"Total: {currency} {sale.total:,.2f}"))
-        payload.extend(b(f"Payment: {sale.get_payment_method_display()}"))
-
-        payload.extend(b("\nThank you for your business!"))
-        payload.extend(b("Powered by PRIMEPOS +265 997575865"))
+        payload.extend(b(""))
+        for line in wrap_text("Thank you for your business!", width):
+            payload.extend(b(line))
+        for line in wrap_text("Powered by PRIMEPOS +265 997575865", width):
+            payload.extend(b(line))
 
         # Paper cut (may not be supported by all printers)
         try:

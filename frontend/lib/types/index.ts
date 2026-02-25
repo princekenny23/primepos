@@ -57,6 +57,33 @@ export interface User {
     id: string | number
     name?: string
     type?: string
+    permissions?: {
+      allow_sales?: boolean
+      allow_pos?: boolean
+      allow_inventory?: boolean
+      allow_office?: boolean
+      allow_settings?: boolean
+      allow_sales_create?: boolean
+      allow_sales_refund?: boolean
+      allow_sales_reports?: boolean
+      allow_pos_restaurant?: boolean
+      allow_pos_bar?: boolean
+      allow_pos_retail?: boolean
+      allow_pos_discounts?: boolean
+      allow_inventory_products?: boolean
+      allow_inventory_stock_take?: boolean
+      allow_inventory_transfers?: boolean
+      allow_inventory_adjustments?: boolean
+      allow_inventory_suppliers?: boolean
+      allow_office_accounting?: boolean
+      allow_office_hr?: boolean
+      allow_office_reports?: boolean
+      allow_office_analytics?: boolean
+      allow_settings_users?: boolean
+      allow_settings_outlets?: boolean
+      allow_settings_integrations?: boolean
+      allow_settings_advanced?: boolean
+    }
   } | string | number
   is_saas_admin?: boolean
   permissions?: {

@@ -48,7 +48,7 @@ export default function RetailPOSPage() {
   // Show loading while checking shift
   if (isLoading) {
     return (
-      <DashboardLayout>
+      <DashboardLayout showSubNavbar={false}>
         <div className="flex items-center justify-center h-screen">
           <p className="text-muted-foreground">Loading...</p>
         </div>
@@ -59,7 +59,7 @@ export default function RetailPOSPage() {
   // If no active shift, redirect to landing page (handled in useEffect, but show loading while redirecting)
   if (!activeShift) {
     return (
-      <DashboardLayout>
+      <DashboardLayout showSubNavbar={false}>
         <div className="flex items-center justify-center h-screen">
           <p className="text-muted-foreground">Redirecting...</p>
         </div>
@@ -68,7 +68,7 @@ export default function RetailPOSPage() {
   }
 
   return (
-    <DashboardLayout>
+    <DashboardLayout showSubNavbar={false}>
       <RetailPOS />
     </DashboardLayout>
   )

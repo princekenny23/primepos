@@ -43,6 +43,8 @@ export default function LoginPage() {
       console.log("Login successful, checking user type...")
       // Check if user is SaaS admin from backend response
       const isSaaSAdmin = result.user.is_saas_admin === true
+      const userRole = String(result.user.effective_role || result.user.role || "staff").toLowerCase()
+      const isAdminUser = isSaaSAdmin || userRole.includes("admin")
       console.log("Is SaaS Admin:", isSaaSAdmin)
       
       if (isSaaSAdmin || !result.user.tenant) {
@@ -69,6 +71,13 @@ export default function LoginPage() {
         // This will trigger tenant context initialization and load outlets
         try {
           await setCurrentBusiness(String(tenant.id))
+
+          // Non-admin users should land directly on POS
+          if (!isAdminUser) {
+            console.log("Non-admin user detected, redirecting to POS landing...")
+            router.push("/dashboard/pos")
+            return
+          }
           
           // Get the business type from tenant data to determine dashboard route
           const businessType = (tenant.type || "") as "wholesale and retail" | "restaurant" | "bar"

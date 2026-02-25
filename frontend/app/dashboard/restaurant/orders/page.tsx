@@ -52,6 +52,21 @@ export default function OrdersPage() {
   const [showPayment, setShowPayment] = useState(false)
   const useReal = useRealAPI()
 
+  const getEffectiveKotStatus = (kot: any) => {
+    const itemStatuses = (kot.items || []).map((item: any) => item.kitchen_status)
+    if (itemStatuses.length > 0) {
+      const allReadyOrServedOrCancelled = itemStatuses.every((status: string) =>
+        ['ready', 'served', 'cancelled'].includes(status)
+      )
+      if (allReadyOrServedOrCancelled) return 'ready'
+
+      const hasPreparing = itemStatuses.some((status: string) => status === 'preparing')
+      if (hasPreparing) return 'preparing'
+    }
+
+    return kot.status
+  }
+
   const loadOrders = async () => {
     if (!currentBusiness) {
       setOrders([])
@@ -103,7 +118,7 @@ export default function OrdersPage() {
           tax: parseFloat(kot.sale?.tax || '0'),
           discount: parseFloat(kot.sale?.discount || '0'),
           // Use KOT status for kitchen workflow, Sale status for payment
-          kotStatus: kot.status, // pending, preparing, ready, served, cancelled
+          kotStatus: getEffectiveKotStatus(kot), // pending, preparing, ready, served, cancelled
           saleStatus: kot.sale?.status, // pending, completed, refunded, cancelled
           paymentStatus: kot.sale?.payment_status || 'paid', // unpaid, partially_paid, paid, overdue
           paymentMethod: kot.sale?.payment_method || 'cash',
@@ -321,16 +336,6 @@ export default function OrdersPage() {
                 {currentBusiness?.currencySymbol || "MWK"} {totalRevenue.toFixed(2)}
               </div>
               <p className="text-xs text-muted-foreground">From completed orders</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-              <Receipt className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{orders.length}</div>
               <p className="text-xs text-muted-foreground">All time</p>
             </CardContent>
           </Card>

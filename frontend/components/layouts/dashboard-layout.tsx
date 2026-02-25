@@ -26,6 +26,7 @@ import { useRouter } from "next/navigation"
 import { PrimePOSLogo } from "@/components/brand/primepos-logo"
 import { useI18n } from "@/contexts/i18n-context"
 import { getOutletBusinessRouteSegment, getOutletDashboardRoute } from "@/lib/utils/outlet-settings"
+import { canAccessTenantPath, isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
 
 // Navigation translation keys mapping
 const navTranslationKeys: Record<string, string> = {
@@ -57,12 +58,13 @@ function buildAgentHeaders(): Record<string, string> {
 
 interface DashboardLayoutProps {
   children: React.ReactNode
+  showSubNavbar?: boolean
 }
 
 // Import sidebar configuration utilities
 import { getIndustrySidebarConfig, fullNavigation, type NavigationItem } from "@/lib/utils/sidebar"
 
-export function DashboardLayout({ children }: DashboardLayoutProps) {
+export function DashboardLayout({ children, showSubNavbar = true }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [agentStatus, setAgentStatus] = useState<"checking" | "connected" | "disconnected">("checking")
   const pathname = usePathname()
@@ -75,6 +77,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const { t } = useI18n()
   const restoringBusinessRef = useRef(false)
   const redirectedRef = useRef(false)
+  const permissionRedirectRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -116,6 +119,22 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const isAdminRoute = pathname?.startsWith("/admin")
   const isPosRoute = pathname?.startsWith("/pos/")
 
+  const hasTenantAppAccess = (itemName: string) => {
+    if (itemName === "Sales") return isTenantFeatureEnabled(user, "allow_sales")
+    if (itemName === "Sales / POS") return isTenantFeatureEnabled(user, "allow_pos")
+    if (itemName === "Restaurant") {
+      return isTenantFeatureEnabled(user, "allow_pos") && isTenantFeatureEnabled(user, "allow_pos_restaurant")
+    }
+    if (itemName === "Bar") {
+      return isTenantFeatureEnabled(user, "allow_pos") && isTenantFeatureEnabled(user, "allow_pos_bar")
+    }
+    if (itemName === "Inventory") return isTenantFeatureEnabled(user, "allow_inventory")
+    if (itemName === "Office") return isTenantFeatureEnabled(user, "allow_office")
+    if (itemName === "Settings") return isTenantFeatureEnabled(user, "allow_settings")
+
+    return true
+  }
+
   // For SaaS admin routes, use only base navigation (no industry-specific items)
   // For business routes, use industry-specific navigation
   const allNavigation: NavigationItem[] = useMemo(() => {
@@ -135,7 +154,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   }, [isAdminRoute, isSaaSAdmin, currentBusiness?.type, currentOutlet?.id, businessOutlet?.id])
   
   // Filter navigation based on user role
-  const navigation = allNavigation.filter((item) => hasPermission(item.permission))
+  const navigation = allNavigation
+    .filter((item) => hasPermission(item.permission))
+    .filter((item) => hasTenantAppAccess(item.name))
   
   // For admin routes, don't require business selection
   // For regular dashboard routes, redirect if no business (unless SaaS admin)
@@ -172,6 +193,19 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       }
     }
   }, [isAdminRoute, isSaaSAdmin, currentBusiness, pathname, router, user])
+
+  useEffect(() => {
+    if (!pathname || isAdminRoute || !pathname.startsWith("/dashboard") && !pathname.startsWith("/pos/")) return
+    if (canAccessTenantPath(user, pathname)) {
+      permissionRedirectRef.current = false
+      return
+    }
+
+    if (!permissionRedirectRef.current) {
+      permissionRedirectRef.current = true
+      router.replace("/dashboard")
+    }
+  }, [isAdminRoute, pathname, router, user])
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -345,7 +379,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
               </Button>
             </div>
           </div>
-          <SubNavbar />
+          {showSubNavbar && <SubNavbar />}
         </header>
 
         {/* Page Content */}

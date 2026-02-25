@@ -35,7 +35,7 @@ export default function RestaurantPOSPage() {
   // Show loading while checking shift
   if (isLoading) {
     return (
-      <DashboardLayout>
+      <DashboardLayout showSubNavbar={false}>
         <div className="flex items-center justify-center h-screen">
           <p className="text-muted-foreground">Loading...</p>
         </div>
@@ -46,14 +46,14 @@ export default function RestaurantPOSPage() {
   // If no active shift, show Register Closed screen
   if (!activeShift) {
     return (
-      <DashboardLayout>
+      <DashboardLayout showSubNavbar={false}>
         <RegisterClosedScreen />
       </DashboardLayout>
     )
   }
 
   return (
-    <DashboardLayout>
+    <DashboardLayout showSubNavbar={false}>
       <RestaurantPOS />
     </DashboardLayout>
   )

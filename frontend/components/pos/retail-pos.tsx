@@ -58,6 +58,7 @@ import {
   RotateCcw,
   Tag,
   Trash2,
+  Wallet,
 } from "lucide-react"
 import { useShift } from "@/contexts/shift-context"
 import { saleService } from "@/lib/services/saleService"
@@ -680,6 +681,13 @@ export function RetailPOS() {
     })
   }
 
+  const handleOpenDrawer = () => {
+    toast({
+      title: "Drawer",
+      description: "Cash drawer functionality coming soon.",
+    })
+  }
+
   const handleVoidSale = async () => {
     if (cart.length === 0) {
       toast({ title: "Void Sale", description: "Cart is already empty." })
@@ -858,8 +866,7 @@ export function RetailPOS() {
             <div className="flex flex-wrap gap-1.5">
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-amber-700"
+                className="h-9 gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
                 onClick={() => setShowSaleDiscount(true)}
               >
                 <Tag className="h-4 w-4" />
@@ -867,8 +874,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-blue-700"
+                className="h-9 gap-1.5 bg-blue-600 text-white hover:bg-blue-700"
                 onClick={() => setShowRefundReturn(true)}
               >
                 <RotateCcw className="h-4 w-4" />
@@ -876,8 +882,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-emerald-700"
+                className="h-9 gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
                 onClick={handleHoldSale}
               >
                 <PauseCircle className="h-4 w-4" />
@@ -885,8 +890,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-indigo-700"
+                className="h-9 gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700"
                 onClick={() => setShowHoldSales(true)}
               >
                 <History className="h-4 w-4" />
@@ -894,8 +898,15 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-slate-700"
+                className="h-9 gap-1.5 bg-orange-600 text-white hover:bg-orange-700"
+                onClick={handleOpenDrawer}
+              >
+                <Wallet className="h-4 w-4" />
+                Drawer
+              </Button>
+              <Button
+                size="sm"
+                className="h-9 gap-1.5 bg-slate-600 text-white hover:bg-slate-700"
                 onClick={() => setShowCloseRegister(true)}
               >
                 <Lock className="h-4 w-4" />
@@ -903,8 +914,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="h-8 gap-1.5 text-red-600"
+                className="h-9 gap-1.5 bg-red-600 text-white hover:bg-red-700"
                 onClick={handleVoidSale}
               >
                 <Ban className="h-4 w-4" />

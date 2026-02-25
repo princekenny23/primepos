@@ -11,6 +11,8 @@ import {
   Store,
 } from "lucide-react"
 import { OptionCard, type OptionCardProps } from "@/components/shared/option-card"
+import { useAuthStore } from "@/stores/authStore"
+import { isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
 
 const settingsOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   {
@@ -59,11 +61,23 @@ const settingsOptions: (Omit<OptionCardProps, "iconSize">)[] = [
 ]
 
 export default function SettingsPage() {
+  const { user } = useAuthStore()
+
+  const filteredSettingsOptions = settingsOptions.filter((option) => {
+    if (!isTenantFeatureEnabled(user, "allow_settings")) return false
+    if (option.id === "outlets-and-tills-management") return isTenantFeatureEnabled(user, "allow_settings_outlets")
+    if (option.id === "integrations") return isTenantFeatureEnabled(user, "allow_settings_integrations")
+    if (option.id === "business-info" || option.id === "tax" || option.id === "notifications" || option.id === "activity-logs") {
+      return isTenantFeatureEnabled(user, "allow_settings_advanced")
+    }
+    return true
+  })
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {settingsOptions.map((option) => (
+          {filteredSettingsOptions.map((option) => (
             <OptionCard
               key={option.id}
               {...option}

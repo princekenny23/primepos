@@ -277,8 +277,12 @@ class KitchenOrderTicketViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             
             if new_status == 'ready':
                 item.prepared_at = timezone.now()
-                # Update KOT status if all items are ready
-                if kot.sale.items.exclude(kitchen_status='ready').exclude(kitchen_status='served').exclude(kitchen_status='cancelled').count() == 0:
+            
+            item.save()
+
+            if new_status == 'ready':
+                # Update KOT status if all items are ready/served/cancelled
+                if not kot.sale.items.exclude(kitchen_status__in=['ready', 'served', 'cancelled']).exists():
                     kot.status = 'ready'
                     kot.ready_at = timezone.now()
             elif new_status == 'preparing' and kot.status == 'pending':
@@ -286,11 +290,10 @@ class KitchenOrderTicketViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 kot.started_at = timezone.now()
             elif new_status == 'served':
                 # Update KOT status if all items are served
-                if kot.sale.items.exclude(kitchen_status='served').exclude(kitchen_status='cancelled').count() == 0:
+                if not kot.sale.items.exclude(kitchen_status__in=['served', 'cancelled']).exists():
                     kot.status = 'served'
                     kot.served_at = timezone.now()
-            
-            item.save()
+
             kot.save()
             
             return Response({

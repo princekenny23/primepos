@@ -17,6 +17,7 @@ import { Store } from "lucide-react"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
+import { useAuthStore } from "@/stores/authStore"
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -30,6 +31,17 @@ export default function DashboardPage() {
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
   const [isLoadingData, setIsLoadingData] = useState(true)
   const loadingRef = useRef(false)
+  const { user } = useAuthStore()
+  const userRole = String(user?.effective_role || user?.role || "staff").toLowerCase()
+  const isAdminUser = Boolean(user?.is_saas_admin) || userRole.includes("admin")
+  const tenantPermissions =
+    user && typeof user.tenant === "object" && user.tenant !== null
+      ? (user.tenant as any).permissions
+      : undefined
+  const canSeeInventoryWidgets =
+    !tenantPermissions ||
+    user?.is_saas_admin ||
+    (tenantPermissions.allow_inventory !== false && tenantPermissions.allow_inventory_products !== false)
   
   // Memoize outlet ID to prevent unnecessary re-renders
   const outletId = useMemo(() => currentOutlet?.id || tenantOutlet?.id, [currentOutlet?.id, tenantOutlet?.id])
@@ -44,12 +56,17 @@ export default function DashboardPage() {
     // Only redirect if we're on the main dashboard page, not if already on business-specific dashboard
     const currentPath = window.location.pathname
     if (currentPath === "/dashboard" || currentPath === "/dashboard/") {
+      if (!isAdminUser) {
+        router.push("/dashboard/pos")
+        return
+      }
+
       if (posMode !== "standard") {
         router.push(getOutletDashboardRoute(outlet, currentBusiness))
         return
       }
     }
-  }, [currentBusiness, outlet, posMode, router])
+  }, [currentBusiness, outlet, posMode, router, isAdminUser])
   
   // Load dashboard data with optimized callback
   const loadDashboardData = useCallback(async () => {
@@ -209,7 +226,7 @@ export default function DashboardPage() {
 
         {/* Low Stock and Recent Activity */}
         <div className="grid gap-4 md:grid-cols-2">
-          <LowStockAlerts items={lowStockItems} />
+          {canSeeInventoryWidgets && <LowStockAlerts items={lowStockItems} />}
           <RecentActivity activities={recentActivities} business={currentBusiness} />
         </div>
 
