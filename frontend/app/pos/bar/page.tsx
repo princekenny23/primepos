@@ -45,7 +45,7 @@ export default function BarPOSPage() {
 
   // Wrap Bar POS in DashboardLayout to show sidebar/topbar
   return (
-    <DashboardLayout>
+    <DashboardLayout showSubNavbar={false}>
       <BarPOS />
     </DashboardLayout>
   )

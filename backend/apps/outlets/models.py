@@ -18,8 +18,9 @@ class Outlet(models.Model):
     business_type = models.CharField(
         max_length=30,
         choices=BUSINESS_TYPE_CHOICES,
-        default="wholesale_and_retail",
-        help_text="Business type for this outlet",
+        null=True,
+        blank=True,
+        help_text="Business type for this outlet (inherits from tenant if not set)",
     )
     settings = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
@@ -36,8 +37,16 @@ class Outlet(models.Model):
             models.Index(fields=['tenant', 'business_type']),
         ]
 
+    def get_effective_business_type(self):
+        """Get outlet business type, falling back to tenant type if not set"""
+        return self.business_type or self.tenant.type
+
     def __str__(self):
-        return f"{self.tenant.name} - {self.name} ({self.get_business_type_display()})"
+        business_type_display = dict(self.BUSINESS_TYPE_CHOICES).get(
+            self.get_effective_business_type(), 
+            self.get_effective_business_type()
+        )
+        return f"{self.tenant.name} - {self.name} ({business_type_display})"
 
 
 class Till(models.Model):

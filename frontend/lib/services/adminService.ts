@@ -65,5 +65,13 @@ export const adminService = {
   async getAnalytics(): Promise<PlatformAnalytics> {
     return api.get(apiEndpoints.admin.analytics)
   },
+
+  async getTenantPermissions(tenantId: string): Promise<any> {
+    return api.get(`${apiEndpoints.admin.tenants}${tenantId}/permissions/`)
+  },
+
+  async updateTenantPermissions(tenantId: string, permissions: any): Promise<any> {
+    return api.put(`${apiEndpoints.admin.tenants}${tenantId}/permissions/`, permissions)
+  },
 }
 

@@ -52,3 +52,87 @@ def create_default_tenant_roles(sender, instance, created, **kwargs):
             import logging
             logger = logging.getLogger(__name__)
             logger.warning(f"Failed to create default roles for tenant {instance.id}: {str(e)}")
+
+
+class TenantPermissions(models.Model):
+    """
+    Granular permissions for tenant apps and features.
+    SaaS admin can enable/disable entire apps or specific features.
+    """
+    tenant = models.OneToOneField(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name='permissions',
+        help_text='Related tenant'
+    )
+    
+    # App-level permissions
+    allow_sales = models.BooleanField(default=True, help_text='Enable Sales app')
+    allow_pos = models.BooleanField(default=True, help_text='Enable POS app')
+    allow_inventory = models.BooleanField(default=True, help_text='Enable Inventory app')
+    allow_office = models.BooleanField(default=True, help_text='Enable Office app')
+    allow_settings = models.BooleanField(default=True, help_text='Enable Settings app')
+    
+    # Sales features
+    allow_sales_create = models.BooleanField(default=True, help_text='Create new sales')
+    allow_sales_refund = models.BooleanField(default=True, help_text='Process refunds')
+    allow_sales_reports = models.BooleanField(default=True, help_text='View sales reports')
+    
+    # POS features
+    allow_pos_restaurant = models.BooleanField(default=True, help_text='Restaurant POS mode')
+    allow_pos_bar = models.BooleanField(default=True, help_text='Bar POS mode')
+    allow_pos_retail = models.BooleanField(default=True, help_text='Retail POS mode')
+    allow_pos_discounts = models.BooleanField(default=True, help_text='Apply discounts in POS')
+    
+    # Inventory features
+    allow_inventory_products = models.BooleanField(default=True, help_text='Manage products')
+    allow_inventory_stock_take = models.BooleanField(default=True, help_text='Perform stock take')
+    allow_inventory_transfers = models.BooleanField(default=True, help_text='Stock transfers between outlets')
+    allow_inventory_adjustments = models.BooleanField(default=True, help_text='Stock adjustments')
+    allow_inventory_suppliers = models.BooleanField(default=True, help_text='Manage suppliers')
+    
+    # Office features
+    allow_office_accounting = models.BooleanField(default=True, help_text='Accounting module')
+    allow_office_hr = models.BooleanField(default=True, help_text='HR & Payroll module')
+    allow_office_reports = models.BooleanField(default=True, help_text='Office reports')
+    allow_office_analytics = models.BooleanField(default=True, help_text='Analytics dashboard')
+    
+    # Settings features
+    allow_settings_users = models.BooleanField(default=True, help_text='Manage users')
+    allow_settings_outlets = models.BooleanField(default=True, help_text='Manage outlets')
+    allow_settings_integrations = models.BooleanField(default=True, help_text='Third-party integrations')
+    allow_settings_advanced = models.BooleanField(default=True, help_text='Advanced settings')
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'tenant_permissions'
+        verbose_name = 'Tenant Permission'
+        verbose_name_plural = 'Tenant Permissions'
+    
+    def __str__(self):
+        return f"Permissions for {self.tenant.name}"
+    
+    def has_app_permission(self, app_name):
+        """Check if tenant has access to an app"""
+        field_name = f"allow_{app_name}"
+        return getattr(self, field_name, False)
+    
+    def has_feature_permission(self, feature_name):
+        """Check if tenant has access to a feature"""
+        return getattr(self, feature_name, False)
+
+
+# Signal to create default permissions when a tenant is created
+@receiver(post_save, sender=Tenant)
+def create_default_tenant_permissions(sender, instance, created, **kwargs):
+    """Automatically create default permissions for a new tenant"""
+    if created:
+        try:
+            TenantPermissions.objects.create(tenant=instance)
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to create default permissions for tenant {instance.id}: {str(e)}")

@@ -15,12 +15,13 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Search, Building2, Users, DollarSign, AlertTriangle, Eye, MoreVertical, Loader2, Edit, Trash2 } from "lucide-react"
+import { Search, Building2, Users, DollarSign, AlertTriangle, Eye, MoreVertical, Loader2, Edit, Trash2, Shield } from "lucide-react"
 import { useState, useEffect } from "react"
 import { SuspendTenantModal } from "@/components/modals/suspend-tenant-modal"
 import { ViewTenantDetailsModal } from "@/components/modals/view-tenant-details-modal"
 import { EditTenantModal } from "@/components/modals/edit-tenant-modal"
 import { DeleteTenantModal } from "@/components/modals/delete-tenant-modal"
+import { ManagePermissionsModal } from "@/components/modals/manage-permissions-modal"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +36,7 @@ export default function AdminTenantsPage() {
   const [showViewDetails, setShowViewDetails] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showPermissionsModal, setShowPermissionsModal] = useState(false)
   const [selectedTenant, setSelectedTenant] = useState<AdminTenant | null>(null)
   const [activeTab, setActiveTab] = useState("all")
   const [tenants, setTenants] = useState<AdminTenant[]>([])
@@ -304,6 +306,15 @@ export default function AdminTenantsPage() {
                                     <Edit className="mr-2 h-4 w-4" />
                                     Edit Tenant
                                   </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedTenant(tenant)
+                                      setShowPermissionsModal(true)
+                                    }}
+                                  >
+                                    <Shield className="mr-2 h-4 w-4" />
+                                    Manage Permissions
+                                  </DropdownMenuItem>
                                   {tenant.is_active ? (
                                     <DropdownMenuItem
                                       onClick={() => {
@@ -366,6 +377,11 @@ export default function AdminTenantsPage() {
             onOpenChange={setShowEditModal}
             tenant={selectedTenant}
             onUpdate={loadTenants}
+          />
+          <ManagePermissionsModal
+            open={showPermissionsModal}
+            onOpenChange={setShowPermissionsModal}
+            tenant={selectedTenant}
           />
           <DeleteTenantModal
             open={showDeleteModal}

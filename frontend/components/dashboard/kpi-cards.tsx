@@ -14,16 +14,29 @@ interface KPICardProps {
   icon: React.ReactNode
   trend?: "up" | "down"
   business?: Business | null
+  colorVariant?: "blue" | "emerald" | "amber" | "green" | "indigo" | "orange" | "slate"
 }
 
-function KPICard({ title, value, change, changeLabel, icon, trend, business }: KPICardProps) {
+function KPICard({ title, value, change, changeLabel, icon, trend, business, colorVariant = "slate" }: KPICardProps) {
   const isPositive = trend === "up" || (change !== undefined && change >= 0)
   
+  const colorMap = {
+    blue: { bg: "bg-blue-50", border: "border-blue-200", icon: "text-blue-600", header: "bg-blue-100/50" },
+    emerald: { bg: "bg-emerald-50", border: "border-emerald-200", icon: "text-emerald-600", header: "bg-emerald-100/50" },
+    amber: { bg: "bg-amber-50", border: "border-amber-200", icon: "text-amber-600", header: "bg-amber-100/50" },
+    green: { bg: "bg-green-50", border: "border-green-200", icon: "text-green-600", header: "bg-green-100/50" },
+    indigo: { bg: "bg-indigo-50", border: "border-indigo-200", icon: "text-indigo-600", header: "bg-indigo-100/50" },
+    orange: { bg: "bg-orange-50", border: "border-orange-200", icon: "text-orange-600", header: "bg-orange-100/50" },
+    slate: { bg: "bg-slate-50", border: "border-slate-200", icon: "text-slate-600", header: "bg-slate-100/50" }
+  }
+  
+  const colors = colorMap[colorVariant]
+  
   return (
-    <Card className="h-full">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-0 pt-2 px-3">
+    <Card className={cn("h-full border-2", colors.bg, colors.border)}>
+      <CardHeader className={cn("flex flex-row items-center justify-between space-y-0 pb-0 pt-2 px-3 rounded-t-lg", colors.header)}>
         <CardTitle className="text-xs font-medium leading-tight">{title}</CardTitle>
-        <div className="h-4 w-4 text-blue-900">
+        <div className={cn("h-4 w-4", colors.icon)}>
           {icon}
         </div>
       </CardHeader>
@@ -77,6 +90,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           icon={<DollarSign className="h-6 w-6" />}
           trend={data.sales.change >= 0 ? "up" : "down"}
           business={business}
+          colorVariant="blue"
         />
         <KPICard
           title="Transactions"
@@ -86,6 +100,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           icon={<ShoppingCart className="h-6 w-6" />}
           trend={data.transactions.change >= 0 ? "up" : "down"}
           business={business}
+          colorVariant="emerald"
         />
         <KPICard
           title="Expenses"
@@ -95,6 +110,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           icon={<ArrowDownRight className="h-6 w-6" />}
           trend={data.expenses.change >= 0 ? "down" : "up"}
           business={business}
+          colorVariant="amber"
         />
         <KPICard
           title="Profit"
@@ -104,6 +120,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           icon={<ArrowUpRight className="h-6 w-6" />}
           trend={data.profit.change >= 0 ? "up" : "down"}
           business={business}
+          colorVariant="green"
         />
       </div>
 
@@ -117,6 +134,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           icon={<Users className="h-6 w-6" />}
           trend={data.customers.change >= 0 ? "up" : "down"}
           business={business}
+          colorVariant="indigo"
         />
         <KPICard
           title="Outstanding Credit"
@@ -125,6 +143,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           changeLabel="receivables"
           icon={<CreditCard className="h-6 w-6" />}
           business={business}
+          colorVariant="orange"
         />
         <KPICard
           title="Employees"
@@ -133,6 +152,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           changeLabel="total"
           icon={<Users className="h-6 w-6" />}
           business={business}
+          colorVariant="slate"
         />
         <KPICard
           title="Purchases (Avg Order Value)"
@@ -142,6 +162,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           icon={<ShoppingCart className="h-6 w-6" />}
           trend={data.avgOrderValue.change >= 0 ? "up" : "down"}
           business={business}
+          colorVariant="blue"
         />
       </div>
     </div>

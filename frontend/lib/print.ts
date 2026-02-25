@@ -131,8 +131,31 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
   return lines.join("\n")
 }
 
-async function getEscposPayload(saleIdOrReceipt: string): Promise<{ contentBase64: string; receiptNumber: string } | null> {
+async function getEscposPayload(
+  saleIdOrReceipt: string,
+  printerName?: string | null
+): Promise<{ contentBase64: string; receiptNumber: string } | null> {
   try {
+    const saleId = String(saleIdOrReceipt || "").trim()
+
+    if (saleId) {
+      try {
+        const params = new URLSearchParams()
+        params.set("paper_width", "auto")
+        if (printerName) params.set("printer_name", printerName)
+
+        const response: any = await api.get(`/sales/${saleId}/escpos-receipt/?${params.toString()}`)
+        if (response?.content) {
+          return {
+            contentBase64: response.content,
+            receiptNumber: String(response.receipt_number || saleId),
+          }
+        }
+      } catch (err) {
+        console.warn("[Print] Dynamic ESC/POS endpoint failed, trying stored receipt APIs:", err)
+      }
+    }
+
     let receipt
     try {
       receipt = await receiptService.getBySale(saleIdOrReceipt)
@@ -199,7 +222,7 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
 
   if (saleId) {
     try {
-      const escpos = await getEscposPayload(saleId)
+      const escpos = await getEscposPayload(saleId, printerName)
       if (escpos) {
         contentBase64 = escpos.contentBase64
         receiptNumber = escpos.receiptNumber

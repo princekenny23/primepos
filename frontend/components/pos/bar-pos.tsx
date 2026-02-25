@@ -744,6 +744,13 @@ export function BarPOS() {
     }
   }
 
+  const handleOpenDrawer = () => {
+    toast({
+      title: "Drawer",
+      description: "Cash drawer functionality coming soon.",
+    })
+  }
+
   // Close tab with payment data from PaymentMethodModal
   const handleCloseTabWithPayment = async (
     method: "cash" | "card" | "mobile" | "credit",
@@ -1290,8 +1297,7 @@ export function BarPOS() {
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                variant="outline"
-                className="gap-2 text-amber-700"
+                className="h-9 gap-2 bg-amber-600 text-white hover:bg-amber-700"
                 onClick={() => setShowDiscountModal(true)}
               >
                 <Tag className="h-4 w-4" />
@@ -1299,8 +1305,7 @@ export function BarPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="gap-2 text-blue-700"
+                className="h-9 gap-2 bg-blue-600 text-white hover:bg-blue-700"
                 onClick={() => setShowRefundModal(true)}
               >
                 <RotateCcw className="h-4 w-4" />
@@ -1308,8 +1313,7 @@ export function BarPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="gap-2 text-emerald-700"
+                className="h-9 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
                 onClick={handleHoldSale}
               >
                 <PauseCircle className="h-4 w-4" />
@@ -1317,8 +1321,7 @@ export function BarPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="gap-2 text-indigo-700"
+                className="h-9 gap-2 bg-indigo-600 text-white hover:bg-indigo-700"
                 onClick={() => setShowHoldSales(true)}
               >
                 <History className="h-4 w-4" />
@@ -1326,8 +1329,15 @@ export function BarPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="gap-2 text-slate-700"
+                className="h-9 gap-2 bg-orange-600 text-white hover:bg-orange-700"
+                onClick={handleOpenDrawer}
+              >
+                <Wallet className="h-4 w-4" />
+                Drawer
+              </Button>
+              <Button
+                size="sm"
+                className="h-9 gap-2 bg-slate-600 text-white hover:bg-slate-700"
                 onClick={() => setShowCloseRegister(true)}
               >
                 <Lock className="h-4 w-4" />
@@ -1335,8 +1345,7 @@ export function BarPOS() {
               </Button>
               <Button
                 size="sm"
-                variant="outline"
-                className="gap-2 text-red-600"
+                className="h-9 gap-2 bg-red-600 text-white hover:bg-red-700"
                 onClick={handleVoidSale}
               >
                 <Ban className="h-4 w-4" />

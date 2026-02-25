@@ -52,7 +52,7 @@ export function PaymentPopup({
 }: PaymentPopupProps) {
   const [selectedMethod, setSelectedMethod] = useState<string>('cash');
   const [receivedAmount, setReceivedAmount] = useState<string>('');
-  const [showNumpad, setShowNumpad] = useState(false);
+  const [showNumpad, setShowNumpad] = useState(true);
 
   const handleNumpadClick = (value: string) => {
     if (value === 'Backspace') {
@@ -216,7 +216,7 @@ export function PaymentPopup({
             {/* Toggle Keypad Button */}
             <button
               onClick={() => setShowNumpad(!showNumpad)}
-              className="mb-4 w-full text-xs text-emerald-600 hover:text-emerald-700 font-medium py-1"
+              className="mb-4 w-full bg-slate-600 hover:bg-slate-700 text-white font-semibold py-2 rounded transition-colors text-sm"
             >
               {showNumpad ? '▼ Hide Keypad' : '▶ Show Keypad'}
             </button>

@@ -8,6 +8,8 @@ import {
   Truck,
 } from "lucide-react"
 import { OptionCard, type OptionCardProps } from "@/components/shared/option-card"
+import { useAuthStore } from "@/stores/authStore"
+import { isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
 
 const inventoryOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   {
@@ -41,11 +43,29 @@ const inventoryOptions: (Omit<OptionCardProps, "iconSize">)[] = [
 ]
 
 export default function InventoryPage() {
+  const { user } = useAuthStore()
+
+  const filteredInventoryOptions = inventoryOptions.filter((option) => {
+    if (!isTenantFeatureEnabled(user, "allow_inventory")) return false
+
+    if (option.id === "stock-items") return isTenantFeatureEnabled(user, "allow_inventory_products")
+    if (option.id === "stock-taking") return isTenantFeatureEnabled(user, "allow_inventory_stock_take")
+    if (option.id === "suppliers") return isTenantFeatureEnabled(user, "allow_inventory_suppliers")
+    if (option.id === "stock-control") {
+      return (
+        isTenantFeatureEnabled(user, "allow_inventory_adjustments") ||
+        isTenantFeatureEnabled(user, "allow_inventory_transfers")
+      )
+    }
+
+    return true
+  })
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {inventoryOptions.map((option) => (
+          {filteredInventoryOptions.map((option) => (
             <OptionCard
               key={option.id}
               {...option}

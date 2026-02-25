@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Tenant
+from .models import Tenant, TenantPermissions
 from apps.outlets.serializers import OutletSerializer
 
 
@@ -8,12 +8,13 @@ class TenantSerializer(serializers.ModelSerializer):
     outlets = OutletSerializer(many=True, read_only=True)
     # Users will be serialized separately to avoid circular import
     users = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
     
     class Meta:
         model = Tenant
         fields = ('id', 'name', 'type', 'pos_type', 'currency', 'currency_symbol', 'phone', 'email', 
                   'address', 'logo', 'settings', 'is_active', 'created_at', 'updated_at', 
-                  'outlets', 'users')
+                  'outlets', 'users', 'permissions')
         read_only_fields = ('id', 'created_at', 'updated_at')
     
     def validate_name(self, value):
@@ -92,3 +93,63 @@ class TenantSerializer(serializers.ModelSerializer):
         
         return result
 
+    def get_permissions(self, obj):
+        """Get tenant app/feature permissions"""
+        permissions_obj = getattr(obj, 'permissions', None)
+        if not permissions_obj:
+            permissions_obj, _ = TenantPermissions.objects.get_or_create(tenant=obj)
+        return TenantPermissionsSerializer(permissions_obj).data
+
+
+class TenantPermissionsSerializer(serializers.ModelSerializer):
+    """Serializer for tenant permissions"""
+    tenant_name = serializers.CharField(source='tenant.name', read_only=True)
+    
+    class Meta:
+        model = TenantPermissions
+        fields = '__all__'
+        read_only_fields = ('id', 'tenant', 'tenant_name', 'created_at', 'updated_at')
+    
+    def validate(self, data):
+        """Validate that parent app is enabled if any features are enabled"""
+        # Sales features depend on allow_sales
+        if data.get('allow_sales_create') or data.get('allow_sales_refund') or data.get('allow_sales_reports'):
+            if not data.get('allow_sales', getattr(self.instance, 'allow_sales', True)):
+                raise serializers.ValidationError(
+                    "Cannot enable sales features when Sales app is disabled"
+                )
+        
+        # POS features depend on allow_pos
+        if any([data.get('allow_pos_restaurant'), data.get('allow_pos_bar'), 
+                data.get('allow_pos_retail'), data.get('allow_pos_discounts')]):
+            if not data.get('allow_pos', getattr(self.instance, 'allow_pos', True)):
+                raise serializers.ValidationError(
+                    "Cannot enable POS features when POS app is disabled"
+                )
+        
+        # Inventory features depend on allow_inventory
+        if any([data.get('allow_inventory_products'), data.get('allow_inventory_stock_take'),
+                data.get('allow_inventory_transfers'), data.get('allow_inventory_adjustments'),
+                data.get('allow_inventory_suppliers')]):
+            if not data.get('allow_inventory', getattr(self.instance, 'allow_inventory', True)):
+                raise serializers.ValidationError(
+                    "Cannot enable inventory features when Inventory app is disabled"
+                )
+        
+        # Office features depend on allow_office
+        if any([data.get('allow_office_accounting'), data.get('allow_office_hr'),
+                data.get('allow_office_reports'), data.get('allow_office_analytics')]):
+            if not data.get('allow_office', getattr(self.instance, 'allow_office', True)):
+                raise serializers.ValidationError(
+                    "Cannot enable office features when Office app is disabled"
+                )
+        
+        # Settings features depend on allow_settings
+        if any([data.get('allow_settings_users'), data.get('allow_settings_outlets'),
+                data.get('allow_settings_integrations'), data.get('allow_settings_advanced')]):
+            if not data.get('allow_settings', getattr(self.instance, 'allow_settings', True)):
+                raise serializers.ValidationError(
+                    "Cannot enable settings features when Settings app is disabled"
+                )
+        
+        return data

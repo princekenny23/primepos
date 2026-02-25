@@ -8,7 +8,7 @@ from django.db.models import Count, Sum, Q
 from django.utils import timezone
 from datetime import timedelta
 from apps.tenants.models import Tenant
-from apps.tenants.serializers import TenantSerializer
+from apps.tenants.serializers import TenantSerializer, TenantPermissionsSerializer
 from apps.tenants.permissions import IsSaaSAdmin
 from apps.outlets.models import Outlet
 from apps.accounts.models import User
@@ -54,6 +54,32 @@ class AdminTenantViewSet(viewsets.ModelViewSet):
         tenant.is_active = True
         tenant.save()
         return Response({"message": "Tenant activated successfully"})
+    
+    @action(detail=True, methods=['get', 'put', 'patch'], url_path='permissions')
+    def permissions(self, request, pk=None):
+        """Get or update tenant permissions"""
+        tenant = self.get_object()
+        
+        # Get or create permissions instance
+        from apps.tenants.models import TenantPermissions
+        permissions_obj, created = TenantPermissions.objects.get_or_create(tenant=tenant)
+        
+        if request.method == 'GET':
+            serializer = TenantPermissionsSerializer(permissions_obj)
+            return Response(serializer.data)
+        
+        elif request.method in ['PUT', 'PATCH']:
+            partial = request.method == 'PATCH'
+            serializer = TenantPermissionsSerializer(
+                permissions_obj, 
+                data=request.data, 
+                partial=partial
+            )
+            
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['GET'])

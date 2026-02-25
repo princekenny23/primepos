@@ -53,22 +53,32 @@ class OutletSerializer(serializers.ModelSerializer):
     """Outlet serializer"""
     tills = TillSerializer(many=True, read_only=True)
     tenant = serializers.SerializerMethodField(read_only=True)  # Make tenant read-only for security
-    business_type_display = serializers.CharField(source='get_business_type_display', read_only=True)
+    business_type_display = serializers.SerializerMethodField(read_only=True)
+    effective_business_type = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Outlet
         fields = (
             'id', 'tenant', 'name', 'address', 'phone', 'email',
-            'business_type', 'business_type_display',
+            'business_type', 'business_type_display', 'effective_business_type',
             'settings', 'is_active', 'created_at', 'updated_at', 'tills'
         )
-        read_only_fields = ('id', 'tenant', 'created_at', 'updated_at', 'business_type_display')
+        read_only_fields = ('id', 'tenant', 'created_at', 'updated_at', 'business_type_display', 'effective_business_type')
     
     def get_tenant(self, obj):
         """Return tenant ID as string for frontend compatibility"""
         if obj.tenant:
             return str(obj.tenant.id)
         return None
+    
+    def get_business_type_display(self, obj):
+        """Return effective business type display"""
+        effective_type = obj.get_effective_business_type()
+        return dict(obj.BUSINESS_TYPE_CHOICES).get(effective_type, effective_type)
+    
+    def get_effective_business_type(self, obj):
+        """Return effective business type (outlet type or tenant type)"""
+        return obj.get_effective_business_type()
     
     def validate(self, attrs):
         """
