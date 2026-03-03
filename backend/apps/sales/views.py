@@ -289,16 +289,19 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 except ProductUnit.DoesNotExist:
                     raise serializers.ValidationError(f"Item {idx + 1}: Unit {unit_id} not found or inactive")
             
-            # Check stock availability and deduct from product stock (UNITS ONLY ARCHITECTURE)
+            # Check stock availability (UNITS ONLY ARCHITECTURE)
             if product.stock < quantity_in_base_units:
                 raise serializers.ValidationError(
                     f"Item {idx + 1}: Insufficient stock for {product.name}. "
                     f"Available: {product.stock} {product.unit}, Requested: {quantity_in_base_units} {product.unit}"
                 )
-            
-            # Deduct from product stock
-            product.stock -= quantity_in_base_units
-            product.save(update_fields=['stock'])
+
+            # Option B for delivery-required sales:
+            # reserve/deduct is handled by Distribution delivery workflow, not instant POS deduction.
+            should_deduct_now = not bool(getattr(sale, 'delivery_required', False))
+            if should_deduct_now:
+                product.stock -= quantity_in_base_units
+                product.save(update_fields=['stock'])
             
             # Calculate item total - round to 2 decimal places
             item_total = (price * Decimal(quantity)).quantize(Decimal('0.01'))
@@ -325,17 +328,18 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 kitchen_status=kitchen_status
             )
             
-            # Record stock movement (UNITS ONLY ARCHITECTURE - all inventory is tracked via units)
-            StockMovement.objects.create(
-                tenant=tenant,
-                product=product,
-                outlet=sale.outlet,
-                user=request.user,
-                movement_type='sale',
-                quantity=quantity_in_base_units,
-                reference_id=str(sale.id),
-                reason=f"Sale {sale.receipt_number}"
-            )
+            # Record immediate stock movement only for non-delivery-required sales.
+            if should_deduct_now:
+                StockMovement.objects.create(
+                    tenant=tenant,
+                    product=product,
+                    outlet=sale.outlet,
+                    user=request.user,
+                    movement_type='sale',
+                    quantity=quantity_in_base_units,
+                    reference_id=str(sale.id),
+                    reason=f"Sale {sale.receipt_number}"
+                )
         
         # Calculate totals - round to 2 decimal places to match DecimalField precision
         tax = sale.tax or Decimal('0')

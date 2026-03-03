@@ -144,6 +144,7 @@ class Sale(models.Model):
         default='unpaid',
         help_text="Payment status for credit sales"
     )
+    delivery_required = models.BooleanField(default=False)
     is_void = models.BooleanField(default=False, help_text="Indicates if this sale was voided")
     void_reason = models.TextField(default='', blank=True, help_text="Reason for voiding a sale")
     

@@ -434,6 +434,22 @@ export const apiEndpoints = {
     stats: "/sales/stats/",
     void: "/sales/void/",
   },
+  // Distribution
+  distribution: {
+    vehicles: "/distribution/vehicles/",
+    availableVehicles: "/distribution/vehicles/available/",
+    drivers: "/distribution/drivers/",
+    availableDrivers: "/distribution/drivers/available/",
+    deliveryOrders: "/distribution/delivery-orders/",
+    deliveries: "/distribution/deliveries/",
+    createDeliveryFromSale: "/distribution/delivery-orders/create-from-sale/",
+    assignDeliveryOrder: (id: string | number) => `/distribution/delivery-orders/${id}/assign/`,
+    startTrip: (id: string | number) => `/distribution/delivery-orders/${id}/start-trip/`,
+    confirmDelivery: (id: string | number) => `/distribution/delivery-orders/${id}/confirm-delivery/`,
+    cancelDelivery: (id: string | number) => `/distribution/delivery-orders/${id}/cancel-delivery/`,
+    trips: "/distribution/trips/",
+    activeTrips: "/distribution/trips/active/",
+  },
   // Receipts
   receipts: {
     list: "/receipts/",

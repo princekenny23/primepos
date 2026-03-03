@@ -27,6 +27,7 @@ export interface CreateSaleData {
   outlet: string
   shift?: string
   customer?: string
+  delivery_required?: boolean
   items_data: Array<{
     product_id: string
     quantity: number
@@ -193,6 +194,9 @@ export const saleService = {
     }
     if (data.status) {
       backendData.status = data.status
+    }
+    if (typeof data.delivery_required === "boolean") {
+      backendData.delivery_required = data.delivery_required
     }
     
     console.log("Sending sale request to backend:", {

@@ -15,11 +15,13 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, ShoppingCart, Home, Package, Settings, DollarSign, AlertCircle } from "lucide-react"
+import { Loader2, ShoppingCart, Home, Package, Settings, DollarSign, AlertCircle, Truck } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { adminService } from "@/lib/services/adminService"
 
 interface TenantPermissions {
+  has_distribution: boolean
+
   // Apps
   allow_sales: boolean
   allow_pos: boolean
@@ -76,6 +78,8 @@ export function ManagePermissionsModal({
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [permissions, setPermissions] = useState<TenantPermissions>({
+    has_distribution: false,
+
     // Apps - default all enabled
     allow_sales: true,
     allow_pos: true,
@@ -364,6 +368,27 @@ export function ManagePermissionsModal({
                     checked={permissions.allow_settings}
                     onChange={(checked) => handleToggle('allow_settings', checked)}
                     description="Master switch for system settings"
+                  />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <Truck className="h-5 w-5" />
+                    <div>
+                      <CardTitle className="text-lg">Distribution</CardTitle>
+                      <CardDescription>Fleet and delivery workflows</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <PermissionSwitch
+                    id="has_distribution"
+                    label="Enable Distribution Module"
+                    checked={permissions.has_distribution}
+                    onChange={(checked) => handleToggle('has_distribution', checked)}
+                    description="Shows distribution menu and enables delivery operations"
                   />
                 </CardContent>
               </Card>

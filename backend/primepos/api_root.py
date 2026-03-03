@@ -66,6 +66,16 @@ def api_root(request):
                 'profit_loss': '/api/v1/reports/profit-loss/',
                 'stock_movement': '/api/v1/reports/stock-movement/',
             },
+            'distribution': {
+                'vehicles': '/api/v1/distribution/vehicles/',
+                'drivers': '/api/v1/distribution/drivers/',
+                'delivery_orders': '/api/v1/distribution/delivery-orders/',
+                'create_delivery_order_from_sale': '/api/v1/distribution/delivery-orders/create-from-sale/',
+                'trips': '/api/v1/distribution/trips/',
+                'active_trips': '/api/v1/distribution/trips/active/',
+                'available_vehicles': '/api/v1/distribution/vehicles/available/',
+                'available_drivers': '/api/v1/distribution/drivers/available/',
+            },
             'admin': {
                 'tenants': '/api/v1/admin/tenants/',
                 'analytics': '/api/v1/admin/analytics/',

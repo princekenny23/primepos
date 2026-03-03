@@ -57,7 +57,6 @@ export default function InventoryPage() {
         isTenantFeatureEnabled(user, "allow_inventory_transfers")
       )
     }
-
     return true
   })
 

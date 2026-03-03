@@ -12,6 +12,7 @@ const breadcrumbMap: Record<string, string> = {
   pos: "POS Terminal",
   products: "Products",
   inventory: "Inventory",
+  distribution: "Distribution",
   outlets: "Outlets",
   reports: "Reports",
   customers: "Customers",

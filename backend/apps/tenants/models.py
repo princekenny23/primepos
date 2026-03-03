@@ -26,6 +26,7 @@ class Tenant(models.Model):
     address = models.TextField(blank=True)
     logo = models.ImageField(upload_to='tenants/logos/', blank=True, null=True, help_text='Business logo')
     settings = models.JSONField(default=dict, blank=True)
+    has_distribution = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

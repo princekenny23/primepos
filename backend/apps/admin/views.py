@@ -66,19 +66,28 @@ class AdminTenantViewSet(viewsets.ModelViewSet):
         
         if request.method == 'GET':
             serializer = TenantPermissionsSerializer(permissions_obj)
-            return Response(serializer.data)
+            data = serializer.data
+            data['has_distribution'] = tenant.has_distribution
+            return Response(data)
         
         elif request.method in ['PUT', 'PATCH']:
             partial = request.method == 'PATCH'
+            request_data = request.data.copy()
+            has_distribution = request_data.pop('has_distribution', None)
             serializer = TenantPermissionsSerializer(
                 permissions_obj, 
-                data=request.data, 
+                data=request_data,
                 partial=partial
             )
             
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data)
+                if has_distribution is not None:
+                    tenant.has_distribution = str(has_distribution).lower() in ['true', '1', 'yes', 'on']
+                    tenant.save(update_fields=['has_distribution'])
+                response_data = serializer.data
+                response_data['has_distribution'] = tenant.has_distribution
+                return Response(response_data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

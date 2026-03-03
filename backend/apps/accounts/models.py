@@ -235,6 +235,28 @@ def create_default_roles_for_tenant(tenant):
             'can_settings': False,
             'can_dashboard': True,
         },
+        'Dispatcher': {
+            'description': 'Manage delivery assignments and dispatch workflows',
+            'can_sales': True,
+            'can_inventory': False,
+            'can_products': False,
+            'can_customers': True,
+            'can_reports': False,
+            'can_staff': False,
+            'can_settings': False,
+            'can_dashboard': True,
+        },
+        'Driver': {
+            'description': 'Track and update assigned deliveries only',
+            'can_sales': False,
+            'can_inventory': False,
+            'can_products': False,
+            'can_customers': False,
+            'can_reports': False,
+            'can_staff': False,
+            'can_settings': False,
+            'can_dashboard': True,
+        },
     }
     
     created_roles = {}

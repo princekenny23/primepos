@@ -11,6 +11,14 @@ export function getTenantPermissions(user?: User | null): TenantPermissions | un
   return undefined
 }
 
+export function hasDistributionAccess(user: User | null | undefined): boolean {
+  if (!user || user.is_saas_admin) return true
+  if (user.tenant && typeof user.tenant === "object") {
+    return (user.tenant as any).has_distribution === true
+  }
+  return false
+}
+
 export function isTenantFeatureEnabled(
   user: User | null | undefined,
   permissionKey: keyof NonNullable<TenantPermissions>
@@ -22,6 +30,19 @@ export function isTenantFeatureEnabled(
 
 export function canAccessTenantPath(user: User | null | undefined, pathname: string): boolean {
   if (!pathname || pathname.startsWith("/admin") || pathname.startsWith("/auth")) return true
+
+  const role = (user?.effective_role || user?.role || "").toLowerCase()
+
+  if (role === "driver") {
+    if (
+      pathname.startsWith("/dashboard/inventory") ||
+      pathname.startsWith("/dashboard/settings") ||
+      pathname.startsWith("/dashboard/office") ||
+      pathname.startsWith("/dashboard/sales")
+    ) {
+      return false
+    }
+  }
 
   if (pathname.startsWith("/dashboard/sales")) {
     if (!isTenantFeatureEnabled(user, "allow_sales")) return false
@@ -46,6 +67,10 @@ export function canAccessTenantPath(user: User | null | undefined, pathname: str
         isTenantFeatureEnabled(user, "allow_inventory_transfers")
       if (!canStockControl) return false
     }
+  }
+
+  if (pathname.startsWith("/dashboard/distribution")) {
+    if (!hasDistributionAccess(user)) return false
   }
 
   if (pathname.startsWith("/dashboard/office")) {

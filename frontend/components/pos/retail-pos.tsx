@@ -57,11 +57,13 @@ import {
   PauseCircle,
   RotateCcw,
   Tag,
+  Truck,
   Trash2,
   Wallet,
 } from "lucide-react"
 import { useShift } from "@/contexts/shift-context"
 import { saleService } from "@/lib/services/saleService"
+import { distributionService } from "@/lib/services/distributionService"
 import { useToast } from "@/components/ui/use-toast"
 import { printReceipt } from "@/lib/print"
 import type { Customer } from "@/lib/services/customerService"
@@ -136,6 +138,7 @@ export function RetailPOS() {
   const [showRefundReturn, setShowRefundReturn] = useState(false)
   const [showSaleDiscount, setShowSaleDiscount] = useState(false)
   const [saleDiscount, setSaleDiscount] = useState<SaleDiscount | null>(null)
+  const [isDeliveryRequired, setIsDeliveryRequired] = useState(false)
   const [isCategoryOpen, setIsCategoryOpen] = useState(true)
   const [showHoldSales, setShowHoldSales] = useState(false)
   const [heldSales, setHeldSales] = useState<HeldSale[]>([])
@@ -541,6 +544,84 @@ export function RetailPOS() {
     setShowPaymentMethod(true)
   }
 
+  const handleDeliveryCheckout = async () => {
+    if (cart.length === 0) {
+      toast({
+        title: "Cart is empty",
+        description: "Please add items to cart before sending to deliveries.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!currentOutlet || !activeShift) {
+      toast({
+        title: "Missing context",
+        description: "Please select outlet and start a shift before sending to deliveries.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsProcessingPayment(true)
+    try {
+      const subtotal = Math.round(cartSubtotal * 100) / 100
+      const discount = Math.round(discountAmount * 100) / 100
+      const tax = 0
+      const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+      const items_data = cart.map((item) => ({
+        product_id: item.productId,
+        variation_id: (item as any).variationId || undefined,
+        unit_id: (item as any).unitId || undefined,
+        quantity: item.quantity,
+        price: Math.round(item.price * 100) / 100,
+        notes: item.notes || "",
+      }))
+
+      const sale = await saleService.create({
+        outlet: String(currentOutlet.id),
+        shift: String(activeShift.id),
+        customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+        delivery_required: true,
+        items_data,
+        subtotal,
+        tax,
+        discount,
+        discount_type: saleDiscount?.type,
+        discount_reason: saleDiscount?.reason,
+        total,
+        payment_method: "tab",
+        notes: "Delivery sale",
+      } as any)
+
+      await distributionService.createFromSale({
+        sale_id: Number(sale.id),
+        warehouse_id: Number(currentOutlet.id),
+        customer_id: selectedCustomer?.id ? Number(selectedCustomer.id) : undefined,
+      })
+
+      clearCart()
+      setSelectedCustomer(null)
+      setSaleDiscount(null)
+      setIsDeliveryRequired(false)
+
+      toast({
+        title: "Sent to deliveries",
+        description: "Sale created and delivery order generated.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Delivery failed",
+        description: error.message || "Failed to send to deliveries.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsProcessingPayment(false)
+      setIsDeliveryRequired(false)
+    }
+  }
+
   const handlePaymentConfirm = async (method: "cash" | "card" | "mobile" | "tab", amount?: number, change?: number) => {
     setShowPaymentMethod(false)
     
@@ -584,6 +665,7 @@ export function RetailPOS() {
         outlet: currentOutlet!.id,
         shift: activeShift!.id,
         customer: selectedCustomer?.id || undefined,
+        delivery_required: isDeliveryRequired,
         items_data: items_data,
         subtotal: Math.round(subtotal * 100) / 100,
         tax: Math.round(tax * 100) / 100,
@@ -638,6 +720,7 @@ export function RetailPOS() {
       clearCart()
       setSelectedCustomer(null)
       setSaleDiscount(null)
+      setIsDeliveryRequired(false)
 
   // Receipt preview removed: we no longer open a preview modal in the POS terminal
       // Attempt to auto-print (non-blocking). Uses the Local Print Agent and saved default printer.
@@ -662,6 +745,7 @@ export function RetailPOS() {
       })
     } finally {
       setIsProcessingPayment(false)
+      setIsDeliveryRequired(false)
     }
   }
 
@@ -919,6 +1003,14 @@ export function RetailPOS() {
               >
                 <Ban className="h-4 w-4" />
                 Void
+              </Button>
+              <Button
+                size="sm"
+                className="h-9 gap-1.5 bg-sky-600 text-white hover:bg-sky-700"
+                onClick={handleDeliveryCheckout}
+              >
+                <Truck className="h-4 w-4" />
+                Delivery
               </Button>
             </div>
           </div>
@@ -1364,7 +1456,10 @@ export function RetailPOS() {
                 <Button
                   className="h-8 flex-1 bg-blue-900 hover:bg-blue-800"
                   size="sm"
-                  onClick={handleCheckout}
+                  onClick={() => {
+                    setIsDeliveryRequired(false)
+                    void handleCheckout()
+                  }}
                   disabled={isProcessingPayment || cart.length === 0}
                 >
                   {isProcessingPayment ? "Processing..." : "PAY"}

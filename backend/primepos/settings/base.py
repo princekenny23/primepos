@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     'apps.expenses',
     'apps.quotations',
     'apps.bar',
+    'apps.distribution',
     'apps.admin.apps.AdminConfig',  # Use explicit config to avoid label conflict
 ]
 

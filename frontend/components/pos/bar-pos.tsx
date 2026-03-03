@@ -53,6 +53,7 @@ import { useBusinessStore } from "@/stores/businessStore"
 import { productService, categoryService } from "@/lib/services/productService"
 import { tabService, type Tab, type TabListItem, type BarTable, type TabItem } from "@/lib/services/barTabService"
 import { saleService } from "@/lib/services/saleService"
+import { distributionService } from "@/lib/services/distributionService"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Product, Category } from "@/lib/types"
 import { 
@@ -60,7 +61,7 @@ import {
   Lock, RefreshCw, Users, ArrowRightLeft, Merge, Split, Clock, User,
   Table2, Armchair, List, AlertCircle, Check, Trash2,
   RotateCcw, Percent, Pencil,
-  Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Ban
+  Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Ban, Truck
 } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { PaymentPopup } from "@/components/pos/payment-popup"
@@ -153,6 +154,7 @@ export function BarPOS() {
   const [showTransferTab, setShowTransferTab] = useState(false)
   const [showMergeTabs, setShowMergeTabs] = useState(false)
   const [showSplitTab, setShowSplitTab] = useState(false)
+  const [isDeliveryRequired, setIsDeliveryRequired] = useState(false)
   
   // Payment Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -741,6 +743,81 @@ export function BarPOS() {
         description: error.message || "Unable to record void sale.",
         variant: "destructive",
       })
+    }
+  }
+
+  const handleSendToDeliveries = async () => {
+    if (!outlet) {
+      toast({ title: "Error", description: "Outlet not available.", variant: "destructive" })
+      return
+    }
+    if (!activeShift) {
+      toast({ title: "Error", description: "No active shift. Please start a shift.", variant: "destructive" })
+      return
+    }
+
+    const deliveryItems = currentTab
+      ? currentTab.items.filter((item) => !item.is_voided)
+      : cart
+
+    if (deliveryItems.length === 0) {
+      toast({ title: "Error", description: "Cart is empty.", variant: "destructive" })
+      return
+    }
+
+    setIsProcessing(true)
+    try {
+      const subtotal = currentTab ? Number(currentTab.subtotal) : Math.round(cartSubtotal * 100) / 100
+      const discount = currentTab ? Number(currentTab.discount || 0) : Math.round(discountAmount * 100) / 100
+      const tax = currentTab ? Number(currentTab.tax || 0) : 0
+      const total = currentTab ? Number(currentTab.total) : Math.round((subtotal - discount + tax) * 100) / 100
+
+      const sale = await saleService.create({
+        outlet: String(outlet.id),
+        shift: String(activeShift.id),
+        customer: currentTab?.customer ? String(currentTab.customer) : selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+        delivery_required: true,
+        items_data: deliveryItems.map((item) => ({
+          product_id: String('product' in item ? (item as TabItem).product : (item as CartItem).productId),
+          quantity: item.quantity,
+          price: Math.round(item.price * 100) / 100,
+          notes: item.notes || "",
+        })),
+        subtotal,
+        tax,
+        discount,
+        total,
+        payment_method: "tab" as any,
+        notes: "Delivery sale",
+      } as any)
+
+      await distributionService.createFromSale({
+        sale_id: Number(sale.id),
+        warehouse_id: Number(outlet.id),
+        customer_id: currentTab?.customer ? Number(currentTab.customer) : selectedCustomer?.id ? Number(selectedCustomer.id) : undefined,
+      })
+
+      setCurrentTab(null)
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+      setShowPaymentModal(false)
+      setIsDeliveryRequired(false)
+
+      toast({
+        title: "Sent to deliveries",
+        description: "Sale created and delivery order generated.",
+      })
+    } catch (error: any) {
+      console.error("Delivery send error:", error)
+      toast({
+        title: "Delivery failed",
+        description: error.message || "Failed to send to deliveries.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsProcessing(false)
+      setIsDeliveryRequired(false)
     }
   }
 
@@ -1351,6 +1428,15 @@ export function BarPOS() {
                 <Ban className="h-4 w-4" />
                 Void
               </Button>
+              <Button
+                size="sm"
+                className="h-9 gap-2 bg-sky-600 text-white hover:bg-sky-700"
+                onClick={handleSendToDeliveries}
+                disabled={(currentTab ? currentTab.items.filter((item) => !item.is_voided).length : cart.length) === 0}
+              >
+                <Truck className="h-4 w-4" />
+                Delivery
+              </Button>
             </div>
           </div>
         </div>
@@ -1536,7 +1622,10 @@ export function BarPOS() {
             <div className="flex gap-2">
               <Button
                 className="flex-1 h-14 text-lg bg-blue-900 hover:bg-blue-800"
-                onClick={() => setShowPaymentModal(true)}
+                onClick={() => {
+                  setIsDeliveryRequired(false)
+                  setShowPaymentModal(true)
+                }}
                 disabled={cart.length === 0}
               >
                 <Wallet className="h-5 w-5 mr-2" />
@@ -2055,6 +2144,7 @@ export function BarPOS() {
                 outlet: String(outlet.id),
                 shift: String(activeShift.id),
                 customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+                delivery_required: isDeliveryRequired,
                 items_data,
                 subtotal,
                 tax,
@@ -2098,6 +2188,7 @@ export function BarPOS() {
               setCart([])
               setSaleDiscount(null)
               setSelectedCustomer(null)
+              setIsDeliveryRequired(false)
               setShowPaymentModal(false)
             } catch (error: any) {
               console.error("Quick sale error:", error)
@@ -2108,6 +2199,7 @@ export function BarPOS() {
               })
             } finally {
               setIsProcessing(false)
+              setIsDeliveryRequired(false)
             }
           }
         }}
