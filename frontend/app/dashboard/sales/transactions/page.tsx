@@ -299,7 +299,6 @@ export default function TransactionsPage() {
     try {
       await distributionService.createFromSale({
         sale_id: Number(sale.id),
-        status: "draft",
       })
       toast({
         title: "Delivery created",
