@@ -26,7 +26,7 @@ import { useRouter } from "next/navigation"
 import { PrimePOSLogo } from "@/components/brand/primepos-logo"
 import { useI18n } from "@/contexts/i18n-context"
 import { getOutletBusinessRouteSegment, getOutletDashboardRoute } from "@/lib/utils/outlet-settings"
-import { canAccessTenantPath, isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
+import { canAccessTenantPath, hasDistributionAccess, isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
 
 // Navigation translation keys mapping
 const navTranslationKeys: Record<string, string> = {
@@ -129,6 +129,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
       return isTenantFeatureEnabled(user, "allow_pos") && isTenantFeatureEnabled(user, "allow_pos_bar")
     }
     if (itemName === "Inventory") return isTenantFeatureEnabled(user, "allow_inventory")
+    if (itemName === "Distribution") return hasDistributionAccess(user)
     if (itemName === "Office") return isTenantFeatureEnabled(user, "allow_office")
     if (itemName === "Settings") return isTenantFeatureEnabled(user, "allow_settings")
 

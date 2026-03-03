@@ -23,10 +23,11 @@ import { printReceipt } from "@/lib/print"
 import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import { useShift } from "@/contexts/shift-context"
 import { saleService } from "@/lib/services/saleService"
+import { distributionService } from "@/lib/services/distributionService"
 import { useToast } from "@/components/ui/use-toast"
 import type { Customer } from "@/lib/services/customerService"
 import type { Product } from "@/lib/types"
-import { Package, Plus, Minus, ShoppingCart, X, User, Tag, RotateCcw, Lock, Ban } from "lucide-react"
+import { Package, Plus, Minus, ShoppingCart, X, User, Tag, RotateCcw, Lock, Ban, Truck } from "lucide-react"
 
 interface ProductUnit {
   id: string | number
@@ -49,6 +50,7 @@ export function SingleProductPOS() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [showCustomerSelect, setShowCustomerSelect] = useState(false)
   const [showPaymentMethod, setShowPaymentMethod] = useState(false)
+  const [isDeliveryRequired, setIsDeliveryRequired] = useState(false)
   // Receipt preview removed from POS terminal
   const [products, setProducts] = useState<Product[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
@@ -178,6 +180,73 @@ export function SingleProductPOS() {
     setShowPaymentMethod(true)
   }
 
+  const handleDelivery = async () => {
+    if (!currentBusiness || !currentOutlet || !activeShift) {
+      toast({
+        title: "Error",
+        description: "Missing required information. Please ensure you have an active shift.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (cart.length === 0) {
+      toast({
+        title: "Error",
+        description: "Cart is empty. Add items to cart first.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsProcessingPayment(true)
+    try {
+      const paymentTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+
+      const sale = await saleService.create({
+        outlet: String(currentOutlet.id),
+        shift: String(activeShift.id),
+        customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+        delivery_required: true,
+        items_data: cart.map((item) => ({
+          product_id: String(item.productId),
+          quantity: item.quantity,
+          price: item.price,
+        })),
+        subtotal: paymentTotal,
+        total: paymentTotal,
+        payment_method: "tab" as any,
+        discount: 0,
+        tax: 0,
+      } as any)
+
+      await distributionService.createFromSale({
+        sale_id: Number(sale.id),
+        warehouse_id: Number(currentOutlet.id),
+        customer_id: selectedCustomer?.id ? Number(selectedCustomer.id) : undefined,
+      })
+
+      clearCart()
+      setSelectedCustomer(null)
+      setIsDeliveryRequired(false)
+
+      toast({
+        title: "Sent to deliveries",
+        description: "Sale created and delivery order generated.",
+      })
+    } catch (error: any) {
+      console.error("Failed to send delivery:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send to deliveries. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsProcessingPayment(false)
+      setIsDeliveryRequired(false)
+    }
+  }
+
   const handlePayment = async (paymentMethod: string, amount: number) => {
     if (!currentBusiness || !currentOutlet || !activeShift) {
       toast({
@@ -198,6 +267,7 @@ export function SingleProductPOS() {
         outlet: String(currentOutlet.id),
         shift: String(activeShift.id),
         customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+        delivery_required: isDeliveryRequired,
         items_data: cart.map((item) => ({
           product_id: String(item.productId),
           quantity: item.quantity,
@@ -255,6 +325,7 @@ export function SingleProductPOS() {
     } finally {
       setIsProcessingPayment(false)
       setShowPaymentMethod(false)
+      setIsDeliveryRequired(false)
     }
   }
 
@@ -585,6 +656,17 @@ export function SingleProductPOS() {
                 <Ban className="h-4 w-4" />
                 <span className="text-xs">Void</span>
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-2 text-sky-700"
+                disabled={cart.length === 0}
+                title="Delivery sale"
+                onClick={handleDelivery}
+              >
+                <Truck className="h-4 w-4" />
+                <span className="text-xs">Delivery</span>
+              </Button>
             </div>
           </div>
 
@@ -600,7 +682,10 @@ export function SingleProductPOS() {
               <Button
                 className="w-full h-12 text-base font-semibold bg-blue-900 hover:bg-blue-800"
                 size="lg"
-                onClick={handleCheckout}
+                onClick={() => {
+                  setIsDeliveryRequired(false)
+                  handleCheckout()
+                }}
                 disabled={isProcessingPayment || cart.length === 0}
               >
                 {isProcessingPayment ? (

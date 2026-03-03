@@ -57,6 +57,7 @@ export interface User {
     id: string | number
     name?: string
     type?: string
+    has_distribution?: boolean
     permissions?: {
       allow_sales?: boolean
       allow_pos?: boolean

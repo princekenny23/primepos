@@ -69,6 +69,7 @@ class SaleSerializer(serializers.ModelSerializer):
             'subtotal', 'tax', 'discount', 'total', 'payment_method', 'status',
             'cash_received', 'change_given',
             'due_date', 'amount_paid', 'payment_status',
+            'delivery_required',
             # breakdown fields (read-only)
             'cash_amount', 'card_amount', 'mobile_amount', 'bank_transfer_amount', 'other_amount', 'tab_amount', 'credit_amount',
             'table', 'table_id', 'guests', 'priority',

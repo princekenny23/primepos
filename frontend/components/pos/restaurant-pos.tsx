@@ -54,6 +54,7 @@ import { productService, categoryService } from "@/lib/services/productService"
 import { tabService, type Tab, type TabListItem, type TabItem } from "@/lib/services/barTabService"
 import { tableService, type Table as RestaurantTable } from "@/lib/services/tableService"
 import { saleService } from "@/lib/services/saleService"
+import { distributionService } from "@/lib/services/distributionService"
 import { kitchenService } from "@/lib/services/kitchenService"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Product, Category } from "@/lib/types"
@@ -62,7 +63,7 @@ import {
   Lock, RefreshCw, Users, ArrowRightLeft, Merge, Split, Clock, User,
   Table2, Armchair, List, AlertCircle, Check, Trash2,
   RotateCcw, Percent, Pencil,
-  Wallet, ShieldAlert, XCircle, Zap, History, ChefHat
+  Wallet, ShieldAlert, XCircle, Zap, History, ChefHat, Truck
 } from "lucide-react"
 import { Tag, PauseCircle, Ban } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
@@ -149,6 +150,7 @@ export function RestaurantPOS() {
   const [showTransferTab, setShowTransferTab] = useState(false)
   const [showMergeTabs, setShowMergeTabs] = useState(false)
   const [showSplitTab, setShowSplitTab] = useState(false)
+  const [isDeliveryRequired, setIsDeliveryRequired] = useState(false)
   
   // Payment Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -1067,6 +1069,7 @@ export function RestaurantPOS() {
         outlet: String(outlet.id),
         shift: activeShift?.id ? String(activeShift.id) : undefined,
         customer: currentTab?.customer ? String(currentTab.customer) : undefined,
+        delivery_required: isDeliveryRequired,
         items_data: items.map((item) => ({
           product_id: String('product' in item ? (item as TabItem).product : (item as CartItem).productId),
           quantity: item.quantity,
@@ -1100,6 +1103,7 @@ export function RestaurantPOS() {
         title: "Sent to kitchen",
         description: `Created kitchen ticket for ${items.length} item${items.length === 1 ? "" : "s"}.`,
       })
+      setIsDeliveryRequired(false)
     } catch (error: any) {
       console.error("Failed to send to kitchen:", error)
       toast({
@@ -1109,6 +1113,90 @@ export function RestaurantPOS() {
       })
     } finally {
       setIsSendingToKitchen(false)
+      setIsDeliveryRequired(false)
+    }
+  }
+
+  const handleSendToDeliveries = async () => {
+    if (!outlet) {
+      toast({
+        title: "Select Outlet",
+        description: "Please choose an outlet before sending to deliveries",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const items = currentTab
+      ? currentTab.items.filter((item) => !item.is_voided)
+      : cart
+
+    if (items.length === 0) {
+      toast({
+        title: "No Items",
+        description: "Add items to the cart or tab before sending to deliveries",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSendingToKitchen(true)
+    try {
+      const discountValue = discountAmount
+      const discountType: "percentage" | "amount" | undefined = discountValue > 0
+        ? (saleDiscount?.type === "percentage" ? "percentage" : "amount")
+        : undefined
+
+      const salePayload = {
+        outlet: String(outlet.id),
+        shift: activeShift?.id ? String(activeShift.id) : undefined,
+        customer: currentTab?.customer ? String(currentTab.customer) : undefined,
+        delivery_required: true,
+        items_data: items.map((item) => ({
+          product_id: String('product' in item ? (item as TabItem).product : (item as CartItem).productId),
+          quantity: item.quantity,
+          price: item.price,
+          notes: item.notes || undefined,
+          kitchen_status: "pending" as const,
+        })),
+        subtotal: currentTab ? currentTab.subtotal : cartSubtotal,
+        tax: currentTab ? currentTab.tax : 0,
+        discount: discountValue,
+        discount_type: discountType,
+        total: currentTab ? currentTab.total : cartSubtotal,
+        payment_method: "tab" as const,
+        table_id: currentTab?.table ? String(currentTab.table) : undefined,
+        status: "pending" as const,
+      }
+
+      const sale = await saleService.create(salePayload)
+
+      await distributionService.createFromSale({
+        sale_id: Number(sale.id),
+        warehouse_id: Number(outlet.id),
+        customer_id: currentTab?.customer ? Number(currentTab.customer) : undefined,
+      })
+
+      setCurrentTab(null)
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+      setIsDeliveryRequired(false)
+
+      toast({
+        title: "Sent to deliveries",
+        description: `Delivery order created for ${items.length} item${items.length === 1 ? "" : "s"}.`,
+      })
+    } catch (error: any) {
+      console.error("Failed to send to deliveries:", error)
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to send to deliveries",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSendingToKitchen(false)
+      setIsDeliveryRequired(false)
     }
   }
 
@@ -1519,6 +1607,15 @@ export function RestaurantPOS() {
                 <Ban className="h-4 w-4" />
                 Void
               </Button>
+              <Button
+                size="sm"
+                className="h-9 gap-2 bg-sky-600 text-white hover:bg-sky-700"
+                onClick={handleSendToDeliveries}
+                disabled={cart.length === 0}
+              >
+                <Truck className="h-4 w-4" />
+                Delivery
+              </Button>
             </div>
           </div>
         </div>
@@ -1704,7 +1801,10 @@ export function RestaurantPOS() {
             <div className="flex gap-2">
               <Button
                 className="flex-1 h-14 text-lg bg-blue-900 hover:bg-blue-800"
-                onClick={() => setShowPaymentModal(true)}
+                onClick={() => {
+                  setIsDeliveryRequired(false)
+                  setShowPaymentModal(true)
+                }}
                 disabled={cart.length === 0}
               >
                 <Wallet className="h-5 w-5 mr-2" />
