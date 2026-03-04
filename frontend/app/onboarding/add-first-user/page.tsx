@@ -25,7 +25,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 export default function AddFirstUserPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet } = useBusinessStore()
-  const { user } = useAuthStore()
+  const { user, refreshUser } = useAuthStore()
   const [isLoading, setIsLoading] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -89,6 +89,8 @@ export default function AddFirstUserPage() {
         outlet: currentOutlet?.id, // Assign to current outlet if available
         password: formData.password, // Include password for manual creation
       })
+
+      await refreshUser()
       
       console.log("User created successfully:", result.user.email)
       if (currentOutlet) {

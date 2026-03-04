@@ -372,16 +372,13 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
     
     def perform_create(self, serializer):
-        # Get tenant from request context
-        tenant = None
-        if hasattr(self.request, 'tenant') and self.request.tenant:
-            tenant = self.request.tenant
-        elif self.request.user.tenant:
-            tenant = self.request.user.tenant
-        
+        # Resolve tenant from request context and support SaaS admin tenant targeting
+        tenant = self.get_tenant_for_request(self.request)
         if not tenant:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError("Tenant is required. Please ensure you are authenticated and have a tenant assigned.")
+            raise ValidationError(
+                "Tenant is required. Provide tenant or tenant_id in request data/query when acting as SaaS admin."
+            )
         
         # Get outlet from request (header, query param, or request data)
         outlet = self.get_outlet_for_request(self.request)
