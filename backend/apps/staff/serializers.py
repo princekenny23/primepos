@@ -123,6 +123,19 @@ class StaffSerializer(serializers.ModelSerializer):
             attrs['password'] = password
         
         return attrs
+
+    @staticmethod
+    def _map_staff_role_to_user_role(role_obj):
+        if not role_obj:
+            return 'staff'
+        role_name = (getattr(role_obj, 'name', '') or '').strip().lower()
+        if 'admin' in role_name:
+            return 'admin'
+        if 'manager' in role_name:
+            return 'manager'
+        if 'cashier' in role_name:
+            return 'cashier'
+        return 'staff'
     
     def create(self, validated_data):
         """Create staff member, creating user if needed"""
@@ -250,6 +263,13 @@ class StaffSerializer(serializers.ModelSerializer):
                 staff_data.pop('role', None)
                 
                 staff = Staff.objects.create(**staff_data)
+
+                # Keep accounts_user.role synchronized with assigned staff role
+                if not user.is_saas_admin:
+                    mapped_role = self._map_staff_role_to_user_role(staff.role)
+                    if user.role != mapped_role:
+                        user.role = mapped_role
+                        user.save(update_fields=['role'])
                 
                 # Assign outlets
                 if outlet_ids:
@@ -291,6 +311,14 @@ class StaffSerializer(serializers.ModelSerializer):
                 setattr(instance, attr, value)
         
         instance.save()
+
+        # Keep accounts_user.role synchronized with assigned staff role
+        user = instance.user
+        if user and not user.is_saas_admin:
+            mapped_role = self._map_staff_role_to_user_role(instance.role)
+            if user.role != mapped_role:
+                user.role = mapped_role
+                user.save(update_fields=['role'])
         
         # Update outlets if provided
         if outlet_ids is not None:

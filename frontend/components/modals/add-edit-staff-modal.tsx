@@ -207,10 +207,10 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
         
         // Only include role if one is selected
         if (formData.role_id && formData.role_id.trim()) {
-          updateData.role = parseInt(formData.role_id)
+          updateData.role_id = parseInt(formData.role_id)
         } else {
           // Clear role if none selected
-          updateData.role = null
+          updateData.role_id = null
         }
         
         await staffService.update(staff.id, updateData)
@@ -247,7 +247,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
         if (formData.role_id && formData.role_id.trim() && formData.role_id !== "none") {
           const roleId = parseInt(formData.role_id)
           if (!isNaN(roleId)) {
-            staffData.role = roleId
+            staffData.role_id = roleId
           }
         }
         

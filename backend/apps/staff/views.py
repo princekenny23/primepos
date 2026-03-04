@@ -53,11 +53,13 @@ class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         return queryset
     
     def perform_create(self, serializer):
-        """Always set tenant from request context"""
-        tenant = getattr(self.request, 'tenant', None) or self.request.user.tenant
+        """Always set tenant from request context (supports SaaS admin tenant targeting)"""
+        tenant = self.get_tenant_for_request(self.request)
         if not tenant:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError("Tenant is required. Please ensure you are authenticated and have a tenant assigned.")
+            raise ValidationError(
+                "Tenant is required. Provide tenant or tenant_id in request data/query when acting as SaaS admin."
+            )
         serializer.save(tenant=tenant)
     
     def update(self, request, *args, **kwargs):
@@ -212,11 +214,13 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             raise
     
     def perform_create(self, serializer):
-        """Always set tenant from request context"""
-        tenant = getattr(self.request, 'tenant', None) or self.request.user.tenant
+        """Always set tenant from request context (supports SaaS admin tenant targeting)"""
+        tenant = self.get_tenant_for_request(self.request)
         if not tenant:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError("Tenant is required. Please ensure you are authenticated and have a tenant assigned.")
+            raise ValidationError(
+                "Tenant is required. Provide tenant or tenant_id in request data/query when acting as SaaS admin."
+            )
         serializer.save(tenant=tenant)
     
     def update(self, request, *args, **kwargs):

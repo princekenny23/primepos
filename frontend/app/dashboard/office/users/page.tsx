@@ -17,6 +17,7 @@ import { Plus, Search, Mail, Phone, Shield, Building2, Edit, Trash2, Eye, Lock, 
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { userService } from "@/lib/services/userService"
 import { useBusinessStore } from "@/stores/businessStore"
+import { useAuthStore } from "@/stores/authStore"
 import { useRealAPI } from "@/lib/utils/api-config"
 import { api } from "@/lib/api"
 import { useToast } from "@/components/ui/use-toast"
@@ -49,6 +50,7 @@ import { useI18n } from "@/contexts/i18n-context"
 
 export default function AccountsPage() {
   const { currentBusiness } = useBusinessStore()
+  const refreshUser = useAuthStore((state) => state.refreshUser)
   const { toast } = useToast()
   const { t } = useI18n()
   const [users, setUsers] = useState<User[]>([])
@@ -162,6 +164,15 @@ export default function AccountsPage() {
     loadStaff()
     loadRoles()
   }, [loadUsers, loadStaff, loadRoles])
+
+  const handleAccessStateRefresh = useCallback(async () => {
+    await Promise.allSettled([
+      loadUsers(),
+      loadStaff(),
+      loadRoles(),
+      refreshUser(),
+    ])
+  }, [loadUsers, loadStaff, loadRoles, refreshUser])
   
   const handleDeleteUser = useCallback(async (userId: string) => {
     if (currentBusiness) {
@@ -816,7 +827,7 @@ export default function AccountsPage() {
         open={showAddUser}
         onOpenChange={setShowAddUser}
         user={selectedUser}
-        onSuccess={loadUsers}
+        onSuccess={handleAccessStateRefresh}
       />
 
       <ViewUserModal
@@ -833,7 +844,7 @@ export default function AccountsPage() {
         }}
         role={selectedRole}
         onSuccess={() => {
-          loadRoles()
+          handleAccessStateRefresh()
         }}
       />
 
@@ -841,7 +852,7 @@ export default function AccountsPage() {
         open={showAddStaff}
         onOpenChange={setShowAddStaff}
         staff={selectedStaff}
-        onSuccess={loadStaff}
+        onSuccess={handleAccessStateRefresh}
       />
 
       {/* Delete Confirmation */}
