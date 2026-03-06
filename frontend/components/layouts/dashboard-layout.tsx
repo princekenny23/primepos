@@ -189,8 +189,8 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
     return key ? t(key) : name
   }
 
-  // Check if user is SaaS admin (no businessId)
-  const isSaaSAdmin = user && !user.businessId
+  // Check if user is SaaS admin from explicit backend flag
+  const isSaaSAdmin = Boolean(user?.is_saas_admin)
   const isAdminRoute = pathname?.startsWith("/admin")
   const isPosRoute = pathname?.startsWith("/pos/")
 
@@ -243,7 +243,13 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
     const isTenantDashboardRoute = pathname?.match(/^\/dashboard\/(retail|restaurant|bar)/)
 
     if (!isSaaSAdmin && !currentBusiness && isDashboardRoute) {
-      if (isTenantDashboardRoute && user?.tenant && !restoringBusinessRef.current) {
+      const hasAuthToken = typeof window !== "undefined" && !!localStorage.getItem("authToken")
+
+      if (!user && hasAuthToken) {
+        return
+      }
+
+      if (user?.tenant && !restoringBusinessRef.current) {
         restoringBusinessRef.current = true
         const tenantId = typeof user.tenant === 'object'
           ? String((user.tenant as any).id || user.tenant)
@@ -254,7 +260,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
             console.error("Failed to restore business from tenant:", error)
             if (!redirectedRef.current) {
               redirectedRef.current = true
-              router.push("/admin")
+              router.push("/onboarding/setup-business")
             }
           })
           .finally(() => {
@@ -265,7 +271,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
 
       if (!redirectedRef.current) {
         redirectedRef.current = true
-        router.push("/admin")
+        router.push("/onboarding/setup-business")
       }
     }
   }, [isAdminRoute, isSaaSAdmin, currentBusiness, pathname, router, user])

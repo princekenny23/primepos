@@ -49,7 +49,22 @@ export default function DashboardPage() {
   // Redirect based on business type (only if on main dashboard, not if already on business-specific dashboard)
   useEffect(() => {
     if (!currentBusiness) {
-      router.push("/admin")
+      const hasAuthToken = typeof window !== "undefined" && !!localStorage.getItem("authToken")
+      if (!user && hasAuthToken) return
+
+      if (user?.tenant) {
+        const tenantId = typeof user.tenant === "object"
+          ? String((user.tenant as any).id || user.tenant)
+          : String(user.tenant)
+        const { setCurrentBusiness } = useBusinessStore.getState()
+        setCurrentBusiness(tenantId).catch((error: any) => {
+          console.error("Failed to restore business from user tenant:", error)
+          router.push(user?.is_saas_admin ? "/admin" : "/onboarding/setup-business")
+        })
+        return
+      }
+
+      router.push(user?.is_saas_admin ? "/admin" : "/onboarding/setup-business")
       return
     }
     
@@ -66,7 +81,7 @@ export default function DashboardPage() {
         return
       }
     }
-  }, [currentBusiness, outlet, posMode, router, isAdminUser])
+  }, [currentBusiness, outlet, posMode, router, isAdminUser, user])
   
   // Load dashboard data with optimized callback
   const loadDashboardData = useCallback(async () => {
