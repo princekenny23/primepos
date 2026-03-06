@@ -145,7 +145,19 @@ class StockTakeSerializer(serializers.ModelSerializer):
         """Validate that outlet belongs to the tenant"""
         request = self.context.get('request')
         if request:
-            tenant = getattr(request, 'tenant', None) or request.user.tenant
+            tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+
+            if not tenant and getattr(request.user, 'is_saas_admin', False):
+                tenant_id = request.data.get('tenant') or request.data.get('tenant_id')
+                if not tenant_id:
+                    tenant_id = request.query_params.get('tenant') or request.query_params.get('tenant_id')
+                if tenant_id:
+                    from apps.tenants.models import Tenant
+                    try:
+                        tenant = Tenant.objects.get(id=int(tenant_id))
+                    except (Tenant.DoesNotExist, ValueError, TypeError):
+                        tenant = None
+
             if tenant and value.tenant != tenant:
                 from rest_framework.exceptions import ValidationError  # pyright: ignore[reportMissingImports]
                 raise ValidationError("Outlet does not belong to your tenant")

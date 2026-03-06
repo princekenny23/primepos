@@ -12,6 +12,8 @@ export interface Till {
     is_active?: boolean
   } | string
   outlet_id?: number
+  tenant?: string | number
+  tenant_id?: string | number
   is_active: boolean
   is_in_use: boolean
   created_at?: string
@@ -55,6 +57,11 @@ export const tillService = {
       outlet_id: data.outlet_id || (typeof data.outlet === 'object' ? parseInt(data.outlet.id) : parseInt(data.outlet as string)),
       is_active: data.is_active !== undefined ? data.is_active : true,
     }
+    if (data.tenant_id !== undefined) {
+      backendData.tenant_id = data.tenant_id
+    } else if (data.tenant !== undefined) {
+      backendData.tenant_id = data.tenant
+    }
     return api.post(apiEndpoints.tills.create, backendData)
   },
 
@@ -62,6 +69,11 @@ export const tillService = {
     const backendData: any = {
       name: data.name,
       is_active: data.is_active,
+    }
+    if (data.tenant_id !== undefined) {
+      backendData.tenant_id = data.tenant_id
+    } else if (data.tenant !== undefined) {
+      backendData.tenant_id = data.tenant
     }
     
     // Only include outlet_id if provided (for changing outlet)

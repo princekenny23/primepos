@@ -12,6 +12,23 @@ import {
   Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { useTenant } from "@/contexts/tenant-context"
 import { useRole } from "@/contexts/role-context"
@@ -27,6 +44,8 @@ import { PrimePOSLogo } from "@/components/brand/primepos-logo"
 import { useI18n } from "@/contexts/i18n-context"
 import { getOutletBusinessRouteSegment, getOutletDashboardRoute } from "@/lib/utils/outlet-settings"
 import { canAccessTenantPath, hasDistributionAccess, isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
+import { useToast } from "@/components/ui/use-toast"
+import { authService } from "@/lib/services/authService"
 
 // Navigation translation keys mapping
 const navTranslationKeys: Record<string, string> = {
@@ -67,17 +86,73 @@ import { getIndustrySidebarConfig, fullNavigation, type NavigationItem } from "@
 export function DashboardLayout({ children, showSubNavbar = true }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [agentStatus, setAgentStatus] = useState<"checking" | "connected" | "disconnected">("checking")
+  const [switchAuthOpen, setSwitchAuthOpen] = useState(false)
+  const [pendingOutletId, setPendingOutletId] = useState<string | null>(null)
+  const [switchUsername, setSwitchUsername] = useState("")
+  const [switchPassword, setSwitchPassword] = useState("")
+  const [isVerifyingSwitch, setIsVerifyingSwitch] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
-  const { currentTenant, currentOutlet, isLoading } = useTenant()
+  const { currentTenant, currentOutlet, outlets, switchOutlet, isLoading } = useTenant()
   const { hasPermission, role } = useRole()
   const { activeShift } = useShift()
   const { user } = useAuthStore()
   const { currentBusiness, currentOutlet: businessOutlet } = useBusinessStore()
   const { t } = useI18n()
+  const { toast } = useToast()
   const restoringBusinessRef = useRef(false)
   const redirectedRef = useRef(false)
   const permissionRedirectRef = useRef(false)
+
+  const requestOutletSwitch = (outletId: string) => {
+    if (!outletId || outletId === String(currentOutlet?.id || "")) return
+    setPendingOutletId(outletId)
+    setSwitchUsername(user?.email || "")
+    setSwitchPassword("")
+    setSwitchAuthOpen(true)
+  }
+
+  const closeSwitchAuth = () => {
+    setSwitchAuthOpen(false)
+    setPendingOutletId(null)
+    setSwitchUsername("")
+    setSwitchPassword("")
+    setIsVerifyingSwitch(false)
+  }
+
+  const confirmOutletSwitch = async () => {
+    if (!pendingOutletId || !user?.email) {
+      closeSwitchAuth()
+      return
+    }
+
+    if (!switchUsername.trim() || !switchPassword.trim()) {
+      toast({
+        title: "Login details required",
+        description: "Enter your username and password to switch dashboard outlet.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsVerifyingSwitch(true)
+    try {
+      await authService.verifyCredentials(switchUsername.trim(), switchPassword)
+      await switchOutlet(pendingOutletId)
+      closeSwitchAuth()
+      toast({
+        title: "Outlet switched",
+        description: "Dashboard outlet switched successfully.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error?.message || "Invalid login details. Please try again.",
+        variant: "destructive",
+      })
+      setIsVerifyingSwitch(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -286,17 +361,38 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
               <Menu className="h-5 w-5" />
             </Button>
 
-            {/* Tenant and Outlet Info - Display only, no switching */}
+            {/* Tenant and Outlet Info */}
             {!isAdminRoute && !isLoading && currentTenant && (
-              <div className="flex items-center gap-4 mr-4 select-none pointer-events-none">
+              <div className="flex items-center gap-4 mr-4">
                 <div className="text-sm">
                   <span className="font-medium">{currentTenant.name}</span>
                 </div>
                 {currentOutlet ? (
-                  <div className="flex items-center gap-2 text-sm">
-                    <Store className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium">{currentOutlet.name}</span>
-                  </div>
+                  outlets.length > 1 ? (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Store className="h-4 w-4 text-muted-foreground" />
+                      <Select
+                        value={String(currentOutlet.id)}
+                        onValueChange={requestOutletSwitch}
+                      >
+                        <SelectTrigger className="h-9 w-[220px]">
+                          <SelectValue placeholder="Select outlet" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {outlets.map((outlet) => (
+                            <SelectItem key={String(outlet.id)} value={String(outlet.id)}>
+                              {outlet.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm select-none">
+                      <Store className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">{currentOutlet.name}</span>
+                    </div>
+                  )
                 ) : (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Store className="h-4 w-4" />
@@ -390,6 +486,51 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
           </div>
         </main>
       </div>
+
+      <Dialog open={switchAuthOpen} onOpenChange={(open) => (!open ? closeSwitchAuth() : setSwitchAuthOpen(open))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Login</DialogTitle>
+            <DialogDescription>
+              Enter your password to switch dashboard outlet.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="switch-dashboard-username">Username</Label>
+              <Input
+                id="switch-dashboard-username"
+                type="text"
+                value={switchUsername}
+                onChange={(event) => setSwitchUsername(event.target.value)}
+                placeholder="Enter username or email"
+                disabled={isVerifyingSwitch}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="switch-dashboard-password">Password</Label>
+              <Input
+                id="switch-dashboard-password"
+                type="password"
+                value={switchPassword}
+                onChange={(event) => setSwitchPassword(event.target.value)}
+                placeholder="Enter your password"
+                disabled={isVerifyingSwitch}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeSwitchAuth} disabled={isVerifyingSwitch}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={confirmOutletSwitch} disabled={isVerifyingSwitch}>
+              {isVerifyingSwitch ? "Verifying..." : "Verify & Switch"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

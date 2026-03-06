@@ -50,10 +50,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useBusinessStore } from "@/stores/businessStore"
+import { useAuthStore } from "@/stores/authStore"
 import { productService, categoryService } from "@/lib/services/productService"
 import { tabService, type Tab, type TabListItem, type BarTable, type TabItem } from "@/lib/services/barTabService"
 import { saleService } from "@/lib/services/saleService"
 import { distributionService } from "@/lib/services/distributionService"
+import { authService } from "@/lib/services/authService"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Product, Category } from "@/lib/types"
 import { 
@@ -96,6 +98,19 @@ type HeldSale = {
   timestamp: string
 }
 
+type PosRowAction = "discount" | "refund" | "hold" | "retrieve" | "drawer" | "close" | "void" | "delivery"
+
+const POS_ROW_ACTION_LABELS: Record<PosRowAction, string> = {
+  discount: "Discount",
+  refund: "Refund",
+  hold: "Hold",
+  retrieve: "Retrieve",
+  drawer: "Drawer",
+  close: "Close",
+  void: "Void",
+  delivery: "Delivery",
+}
+
 const drinkCategories = [
   { id: "all", name: "All", icon: Wine },
   { id: "beer", name: "Beer", icon: Wine },
@@ -108,6 +123,7 @@ const drinkCategories = [
 
 export function BarPOS() {
   const router = useRouter()
+  const { user } = useAuthStore()
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { currentOutlet: tenantOutlet } = useTenant()
   const { activeShift } = useShift()
@@ -172,6 +188,11 @@ export function BarPOS() {
   const [heldSales, setHeldSales] = useState<HeldSale[]>([])
   const [pendingHoldId, setPendingHoldId] = useState<string | null>(null)
   const [showReplaceCartConfirm, setShowReplaceCartConfirm] = useState(false)
+  const [showRowActionConfirm, setShowRowActionConfirm] = useState(false)
+  const [pendingRowAction, setPendingRowAction] = useState<PosRowAction | null>(null)
+  const [rowActionUsername, setRowActionUsername] = useState("")
+  const [rowActionPassword, setRowActionPassword] = useState("")
+  const [isVerifyingRowAction, setIsVerifyingRowAction] = useState(false)
 
   // Processing states
   const [isProcessing, setIsProcessing] = useState(false)
@@ -828,6 +849,80 @@ export function BarPOS() {
     })
   }
 
+  const closeRowActionConfirm = () => {
+    setShowRowActionConfirm(false)
+    setPendingRowAction(null)
+    setRowActionUsername("")
+    setRowActionPassword("")
+    setIsVerifyingRowAction(false)
+  }
+
+  const requestRowActionConfirmation = (action: PosRowAction) => {
+    setPendingRowAction(action)
+    setRowActionUsername(user?.email || "")
+    setRowActionPassword("")
+    setShowRowActionConfirm(true)
+  }
+
+  const handleConfirmRowAction = async () => {
+    if (!pendingRowAction) return
+
+    if (!rowActionUsername.trim() || !rowActionPassword.trim()) {
+      toast({
+        title: "Login details required",
+        description: "Enter username and password to continue.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsVerifyingRowAction(true)
+
+    try {
+      await authService.verifyCredentials(rowActionUsername.trim(), rowActionPassword)
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error?.message || "Invalid login details. Please try again.",
+        variant: "destructive",
+      })
+      setIsVerifyingRowAction(false)
+      return
+    }
+
+    const action = pendingRowAction
+    closeRowActionConfirm()
+
+    switch (action) {
+      case "discount":
+        setShowDiscountModal(true)
+        break
+      case "refund":
+        setShowRefundModal(true)
+        break
+      case "hold":
+        handleHoldSale()
+        break
+      case "retrieve":
+        setShowHoldSales(true)
+        break
+      case "drawer":
+        handleOpenDrawer()
+        break
+      case "close":
+        setShowCloseRegister(true)
+        break
+      case "void":
+        await handleVoidSale()
+        break
+      case "delivery":
+        await handleSendToDeliveries()
+        break
+      default:
+        break
+    }
+  }
+
   // Close tab with payment data from PaymentMethodModal
   const handleCloseTabWithPayment = async (
     method: "cash" | "card" | "mobile" | "credit",
@@ -1375,7 +1470,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-amber-600 text-white hover:bg-amber-700"
-                onClick={() => setShowDiscountModal(true)}
+                onClick={() => requestRowActionConfirmation("discount")}
               >
                 <Tag className="h-4 w-4" />
                 Discount
@@ -1383,7 +1478,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-blue-600 text-white hover:bg-blue-700"
-                onClick={() => setShowRefundModal(true)}
+                onClick={() => requestRowActionConfirmation("refund")}
               >
                 <RotateCcw className="h-4 w-4" />
                 Refund
@@ -1391,7 +1486,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-                onClick={handleHoldSale}
+                onClick={() => requestRowActionConfirmation("hold")}
               >
                 <PauseCircle className="h-4 w-4" />
                 Hold
@@ -1399,7 +1494,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-indigo-600 text-white hover:bg-indigo-700"
-                onClick={() => setShowHoldSales(true)}
+                onClick={() => requestRowActionConfirmation("retrieve")}
               >
                 <History className="h-4 w-4" />
                 Retrieve
@@ -1407,7 +1502,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-orange-600 text-white hover:bg-orange-700"
-                onClick={handleOpenDrawer}
+                onClick={() => requestRowActionConfirmation("drawer")}
               >
                 <Wallet className="h-4 w-4" />
                 Drawer
@@ -1415,7 +1510,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-slate-600 text-white hover:bg-slate-700"
-                onClick={() => setShowCloseRegister(true)}
+                onClick={() => requestRowActionConfirmation("close")}
               >
                 <Lock className="h-4 w-4" />
                 Close
@@ -1423,7 +1518,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-red-600 text-white hover:bg-red-700"
-                onClick={handleVoidSale}
+                onClick={() => requestRowActionConfirmation("void")}
               >
                 <Ban className="h-4 w-4" />
                 Void
@@ -1431,7 +1526,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-sky-600 text-white hover:bg-sky-700"
-                onClick={handleSendToDeliveries}
+                onClick={() => requestRowActionConfirmation("delivery")}
                 disabled={(currentTab ? currentTab.items.filter((item) => !item.is_voided).length : cart.length) === 0}
               >
                 <Truck className="h-4 w-4" />
@@ -2513,6 +2608,56 @@ export function BarPOS() {
         open={showCloseRegister}
         onOpenChange={setShowCloseRegister}
       />
+
+      <Dialog
+        open={showRowActionConfirm}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeRowActionConfirm()
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Login</DialogTitle>
+            <DialogDescription>
+              Enter your username and password to continue with {pendingRowAction ? POS_ROW_ACTION_LABELS[pendingRowAction] : "this action"}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="bar-row-action-username">Username</Label>
+              <Input
+                id="bar-row-action-username"
+                type="text"
+                value={rowActionUsername}
+                onChange={(event) => setRowActionUsername(event.target.value)}
+                placeholder="Enter username or email"
+                disabled={isVerifyingRowAction}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="bar-row-action-password">Password</Label>
+              <Input
+                id="bar-row-action-password"
+                type="password"
+                value={rowActionPassword}
+                onChange={(event) => setRowActionPassword(event.target.value)}
+                placeholder="Enter password"
+                disabled={isVerifyingRowAction}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeRowActionConfirm} disabled={isVerifyingRowAction}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void handleConfirmRowAction()} disabled={isVerifyingRowAction}>
+              {isVerifyingRowAction ? "Verifying..." : "Verify & Continue"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Tab Finder Modal - Square POS Style */}
       <TabFinderModal

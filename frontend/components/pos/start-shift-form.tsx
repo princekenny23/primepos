@@ -7,6 +7,14 @@ import { Calendar as CalendarIcon, Store, Calendar, CreditCard, DollarSign, File
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { DatePicker } from "@/components/ui/date-picker"
 import {
@@ -20,6 +28,9 @@ import { useTenant } from "@/contexts/tenant-context"
 import { useShift, Till } from "@/contexts/shift-context"
 import { useRole } from "@/contexts/role-context"
 import { useBusinessStore } from "@/stores/businessStore"
+import { useAuthStore } from "@/stores/authStore"
+import { authService } from "@/lib/services/authService"
+import { useToast } from "@/components/ui/use-toast"
 import { cn } from "@/lib/utils"
 import { getOutletPOSRoute } from "@/lib/utils/outlet-settings"
 
@@ -43,6 +54,8 @@ export function StartShiftForm({ onSuccess, redirectTo }: StartShiftFormProps = 
   const { startShift, getTillsForOutlet, checkShiftExists } = useShift()
   const { role } = useRole()
   const { currentBusiness } = useBusinessStore()
+  const { user } = useAuthStore()
+  const { toast } = useToast()
   
   // Determine redirect based on current route or prop
   const getRedirectPath = () => {
@@ -70,7 +83,17 @@ export function StartShiftForm({ onSuccess, redirectTo }: StartShiftFormProps = 
   const [tills, setTills] = useState<Till[]>([])
   const [loadingTills, setLoadingTills] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showLoginConfirm, setShowLoginConfirm] = useState(false)
+  const [confirmEmail, setConfirmEmail] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [isVerifyingUser, setIsVerifyingUser] = useState(false)
   const [errors, setErrors] = useState<FormErrors>({})
+
+  useEffect(() => {
+    if (user?.email) {
+      setConfirmEmail(user.email)
+    }
+  }, [user?.email])
 
   // Load tills when outlet changes
   useEffect(() => {
@@ -177,13 +200,7 @@ export function StartShiftForm({ onSuccess, redirectTo }: StartShiftFormProps = 
     return Object.keys(newErrors).length === 0
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    if (!validateForm()) {
-      return
-    }
-
+  const executeStartShift = async () => {
     setIsSubmitting(true)
     setErrors({})
 
@@ -227,6 +244,45 @@ export function StartShiftForm({ onSuccess, redirectTo }: StartShiftFormProps = 
       })
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!validateForm()) {
+      return
+    }
+
+    setConfirmEmail(user?.email || "")
+    setConfirmPassword("")
+    setShowLoginConfirm(true)
+  }
+
+  const handleConfirmStartShift = async () => {
+    if (!confirmEmail.trim() || !confirmPassword.trim()) {
+      toast({
+        title: "Login required",
+        description: "Enter email and password to start shift.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsVerifyingUser(true)
+    try {
+      await authService.verifyCredentials(confirmEmail.trim(), confirmPassword)
+      setShowLoginConfirm(false)
+      setConfirmPassword("")
+      await executeStartShift()
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error?.message || "Invalid credentials. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsVerifyingUser(false)
     }
   }
 
@@ -430,6 +486,59 @@ export function StartShiftForm({ onSuccess, redirectTo }: StartShiftFormProps = 
           </>
         )}
       </Button>
+
+      <Dialog open={showLoginConfirm} onOpenChange={setShowLoginConfirm}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Login</DialogTitle>
+            <DialogDescription>
+              Enter your login details to start shift.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="shift-confirm-email">Email</Label>
+              <Input
+                id="shift-confirm-email"
+                type="email"
+                value={confirmEmail}
+                onChange={(e) => setConfirmEmail(e.target.value)}
+                disabled={isVerifyingUser}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="shift-confirm-password">Password</Label>
+              <Input
+                id="shift-confirm-password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Enter password"
+                disabled={isVerifyingUser}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowLoginConfirm(false)}
+              disabled={isVerifyingUser}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmStartShift}
+              disabled={isVerifyingUser || isSubmitting}
+            >
+              {isVerifyingUser ? "Verifying..." : "Verify & Start"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   )
 }

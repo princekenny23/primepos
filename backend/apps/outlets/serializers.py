@@ -38,11 +38,26 @@ class TillSerializer(serializers.ModelSerializer):
         
         request = self.context.get('request')
         if request:
-            tenant = getattr(request, 'tenant', None) or request.user.tenant
-            if tenant:
-                from .models import Outlet
+            from .models import Outlet
+
+            if getattr(request.user, 'is_saas_admin', False):
+                tenant_id = request.data.get('tenant') or request.data.get('tenant_id')
+                if not tenant_id:
+                    tenant_id = request.query_params.get('tenant') or request.query_params.get('tenant_id')
+
                 try:
-                    outlet = Outlet.objects.get(id=value, tenant=tenant)
+                    if tenant_id:
+                        Outlet.objects.get(id=value, tenant_id=int(tenant_id))
+                    else:
+                        Outlet.objects.get(id=value)
+                    return value
+                except (Outlet.DoesNotExist, ValueError, TypeError):
+                    raise serializers.ValidationError("Invalid outlet for selected tenant")
+
+            tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+            if tenant:
+                try:
+                    Outlet.objects.get(id=value, tenant=tenant)
                     return value
                 except Outlet.DoesNotExist:
                     raise serializers.ValidationError("Outlet does not belong to your tenant")
@@ -173,10 +188,25 @@ class PrinterSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request:
             return value
-        tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
         from .models import Outlet
+
+        if getattr(request.user, 'is_saas_admin', False):
+            tenant_id = request.data.get('tenant') or request.data.get('tenant_id')
+            if not tenant_id:
+                tenant_id = request.query_params.get('tenant') or request.query_params.get('tenant_id')
+
+            try:
+                if tenant_id:
+                    Outlet.objects.get(id=value, tenant_id=int(tenant_id))
+                else:
+                    Outlet.objects.get(id=value)
+                return value
+            except (Outlet.DoesNotExist, ValueError, TypeError):
+                raise serializers.ValidationError('Invalid outlet for selected tenant')
+
+        tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
         try:
-            outlet = Outlet.objects.get(id=value, tenant=tenant)
+            Outlet.objects.get(id=value, tenant=tenant)
             return value
         except Outlet.DoesNotExist:
             raise serializers.ValidationError('Outlet does not belong to your tenant')

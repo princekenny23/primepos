@@ -9,11 +9,34 @@ def get_effective_role(user):
     return str(role).strip().lower()
 
 
+def resolve_distribution_tenant(request):
+    tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+    if tenant:
+        return tenant
+
+    if getattr(request.user, 'is_saas_admin', False):
+        tenant_id = None
+        if hasattr(request, 'data'):
+            tenant_id = request.data.get('tenant') or request.data.get('tenant_id')
+        if not tenant_id:
+            tenant_id = request.query_params.get('tenant') or request.query_params.get('tenant_id')
+
+        if tenant_id:
+            from apps.tenants.models import Tenant
+
+            try:
+                return Tenant.objects.get(id=int(tenant_id))
+            except (Tenant.DoesNotExist, ValueError, TypeError):
+                return None
+
+    return None
+
+
 class HasDistributionFeature(permissions.BasePermission):
     def has_permission(self, request, view):
-        tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+        tenant = resolve_distribution_tenant(request)
         if not tenant:
-            raise PermissionDenied('Tenant context is required for Distribution module.')
+            raise PermissionDenied('Tenant context is required for Distribution module. Provide tenant_id when acting as SaaS admin.')
         if not getattr(tenant, 'has_distribution', False):
             raise PermissionDenied('Distribution module is not enabled for this tenant.')
         return True

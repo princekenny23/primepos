@@ -8,15 +8,14 @@ export const metadata: Metadata = {
   applicationName: "PrimePOS",
   title: "PrimePOS - Multi-Business Point of Sale Platform",
   description: "A comprehensive SaaS POS platform for retail, restaurant, pharmacy, wholesale, and more.",
-  manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
     title: "PrimePOS",
   },
   icons: {
-    icon: "/icon.svg",
-    apple: "/apple-icon.svg",
+    icon: "/logo.png",
+    apple: "/logo.png",
   },
 }
 

@@ -34,6 +34,7 @@ export interface StockTakeData {
   outlet: string
   operating_date: string
   description?: string
+  tenant?: string
 }
 
 export interface StockTakeItemData {
