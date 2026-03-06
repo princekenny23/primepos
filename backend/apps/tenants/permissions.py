@@ -1,6 +1,95 @@
 from rest_framework import permissions
 
 
+def _get_request_value(request, keys):
+    for key in keys:
+        value = None
+        if hasattr(request, 'data'):
+            value = request.data.get(key)
+        if value in (None, '', 'null'):
+            value = request.query_params.get(key)
+        if value not in (None, '', 'null'):
+            return value
+    return None
+
+
+def _to_int(value):
+    try:
+        if value in (None, '', 'null'):
+            return None
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def resolve_tenant_from_request(request):
+    """
+    Resolve tenant context for both tenant users and SaaS admins.
+    SaaS admins can provide tenant context directly (tenant_id / X-Tenant-ID)
+    or indirectly through related resource IDs (outlet/till/shift/sale).
+    """
+    user = getattr(request, 'user', None)
+    if not user or not user.is_authenticated:
+        return None
+
+    tenant = getattr(request, 'tenant', None) or getattr(user, 'tenant', None)
+    if tenant:
+        return tenant
+
+    if not getattr(user, 'is_saas_admin', False):
+        return None
+
+    tenant_id = _get_request_value(request, ['tenant', 'tenant_id'])
+    if tenant_id in (None, '', 'null'):
+        tenant_id = request.headers.get('X-Tenant-ID')
+
+    tenant_id_int = _to_int(tenant_id)
+    if tenant_id_int:
+        from .models import Tenant
+        try:
+            return Tenant.objects.get(id=tenant_id_int)
+        except Tenant.DoesNotExist:
+            return None
+
+    outlet_id = _get_request_value(request, ['outlet', 'outlet_id', 'warehouse', 'warehouse_id'])
+    if outlet_id in (None, '', 'null'):
+        outlet_id = request.headers.get('X-Outlet-ID')
+    outlet_id_int = _to_int(outlet_id)
+    if outlet_id_int:
+        from apps.outlets.models import Outlet
+        try:
+            return Outlet.objects.select_related('tenant').get(id=outlet_id_int).tenant
+        except Outlet.DoesNotExist:
+            pass
+
+    till_id_int = _to_int(_get_request_value(request, ['till', 'till_id']))
+    if till_id_int:
+        from apps.outlets.models import Till
+        try:
+            return Till.objects.select_related('outlet__tenant').get(id=till_id_int).outlet.tenant
+        except Till.DoesNotExist:
+            pass
+
+    shift_id_int = _to_int(_get_request_value(request, ['shift', 'shift_id']))
+    if shift_id_int:
+        from apps.shifts.models import Shift
+        try:
+            shift = Shift.objects.select_related('outlet__tenant').get(id=shift_id_int)
+            return shift.outlet.tenant if shift.outlet else None
+        except Shift.DoesNotExist:
+            pass
+
+    sale_id_int = _to_int(_get_request_value(request, ['sale', 'sale_id', 'sales_order', 'sales_order_id']))
+    if sale_id_int:
+        from apps.sales.models import Sale
+        try:
+            return Sale.objects.select_related('tenant').get(id=sale_id_int).tenant
+        except Sale.DoesNotExist:
+            pass
+
+    return None
+
+
 class IsSaaSAdmin(permissions.BasePermission):
     """Permission check for SaaS admin users"""
     
@@ -74,22 +163,8 @@ class TenantFilterMixin:
         Raises:
             ValidationError if tenant is required but missing (for non-SaaS admins)
         """
-        # SaaS admins can access any tenant
         if request.user.is_saas_admin:
-            # Check if tenant_id is provided in request data
-            tenant_id = None
-            if hasattr(request, 'data'):
-                tenant_id = request.data.get('tenant') or request.data.get('tenant_id')
-            if not tenant_id:
-                tenant_id = request.query_params.get('tenant') or request.query_params.get('tenant_id')
-            if tenant_id:
-                try:
-                    from .models import Tenant
-                    return Tenant.objects.get(id=int(tenant_id))
-                except (Tenant.DoesNotExist, ValueError, TypeError):
-                    pass
-            # If no tenant_id provided, return None (SaaS admin can work without tenant)
-            return None
+            return resolve_tenant_from_request(request)
         
         # Refresh user to ensure tenant is loaded (important during onboarding)
         user = request.user
@@ -103,10 +178,7 @@ class TenantFilterMixin:
             except User.DoesNotExist:
                 pass
         
-        # Get tenant from request context (set by middleware) or user
-        tenant = getattr(request, 'tenant', None) or user.tenant
-        
-        return tenant
+        return getattr(request, 'tenant', None) or user.tenant
     
     def require_tenant(self, request):
         """
@@ -122,22 +194,15 @@ class TenantFilterMixin:
         """
         from rest_framework.exceptions import ValidationError
         
-        # SaaS admins can work without tenant or provide tenant_id in request
+        # SaaS admins must still provide/derive tenant context for tenant-bound resources
         if request.user.is_saas_admin:
             tenant = self.get_tenant_for_request(request)
-            if not tenant:
-                # SaaS admin can work without tenant, but if tenant_id is provided, it must be valid
-                tenant_id = None
-                if hasattr(request, 'data'):
-                    tenant_id = request.data.get('tenant') or request.data.get('tenant_id')
-                if tenant_id:
-                    try:
-                        from .models import Tenant
-                        return Tenant.objects.get(id=int(tenant_id))
-                    except (Tenant.DoesNotExist, ValueError, TypeError):
-                        raise ValidationError(f"Invalid tenant ID: {tenant_id}")
-                # SaaS admin can proceed without tenant
-                return None
+            if tenant:
+                return tenant
+            raise ValidationError(
+                "Tenant is required. Provide tenant_id (or X-Tenant-ID), or include a tenant-scoped resource "
+                "like outlet_id/till_id/shift_id/sale_id in request."
+            )
         
         tenant = self.get_tenant_for_request(request)
         
@@ -167,7 +232,12 @@ class TenantFilterMixin:
         
         # Check request data (for POST/PUT)
         if not outlet_id and hasattr(request, 'data'):
-            outlet_id = request.data.get('outlet') or request.data.get('outlet_id')
+            outlet_id = (
+                request.data.get('outlet')
+                or request.data.get('outlet_id')
+                or request.data.get('warehouse')
+                or request.data.get('warehouse_id')
+            )
         
         if not outlet_id:
             return None

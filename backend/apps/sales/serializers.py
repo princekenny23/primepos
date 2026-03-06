@@ -3,6 +3,7 @@ from decimal import Decimal, InvalidOperation
 from .models import Sale, SaleItem, Receipt
 from .models import ReceiptTemplate
 from apps.products.serializers import ProductSerializer
+from apps.tenants.permissions import resolve_tenant_from_request
 
 
 class SaleItemSerializer(serializers.ModelSerializer):
@@ -161,7 +162,7 @@ class SaleSerializer(serializers.ModelSerializer):
         if not request:
             return value
         
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request)
         if not tenant:
             raise serializers.ValidationError("Unable to determine tenant")
         
@@ -181,7 +182,7 @@ class SaleSerializer(serializers.ModelSerializer):
         if not request:
             return value
         
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request)
         if not tenant:
             return value  # Will be validated in validate method
         
@@ -201,7 +202,7 @@ class SaleSerializer(serializers.ModelSerializer):
         if not request:
             return value
         
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request)
         if not tenant:
             return value
         

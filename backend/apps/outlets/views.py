@@ -389,20 +389,30 @@ class TillViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def perform_create(self, serializer):
         """Validate outlet belongs to tenant and save till"""
         outlet_id = serializer.validated_data.get('outlet_id')
-        tenant = self.get_tenant_for_request(self.request)
-        
-        if not tenant:
-            from rest_framework.exceptions import ValidationError
-            raise ValidationError(
-                "Tenant is required. Provide tenant or tenant_id in request data/query when acting as SaaS admin."
-            )
-        
-        # CRITICAL: Validate outlet belongs to tenant
+        from rest_framework.exceptions import ValidationError
+
+        if not outlet_id:
+            raise ValidationError("outlet_id is required")
+
         from .models import Outlet
         try:
-            outlet = Outlet.objects.get(id=outlet_id, tenant=tenant)
+            outlet = Outlet.objects.select_related('tenant').get(id=outlet_id)
         except Outlet.DoesNotExist:
-            from rest_framework.exceptions import ValidationError
+            raise ValidationError("Invalid outlet.")
+
+        if self.request.user.is_saas_admin:
+            # Optional tenant scoping for SaaS admins: if tenant_id is provided,
+            # ensure it matches the selected outlet. If not provided, infer from outlet.
+            tenant = self.get_tenant_for_request(self.request)
+            if tenant and outlet.tenant_id != tenant.id:
+                raise ValidationError("Invalid outlet for selected tenant.")
+            serializer.save(outlet=outlet)
+            return
+
+        tenant = self.require_tenant(self.request)
+
+        # CRITICAL: Validate outlet belongs to authenticated tenant
+        if outlet.tenant_id != tenant.id:
             raise ValidationError("Outlet does not belong to your tenant.")
         
         serializer.save(outlet=outlet)

@@ -70,6 +70,19 @@ export class ApiClient {
             "X-Outlet-ID": outletId,
           }
         }
+
+        // Add tenant ID header if available (critical for SaaS admin context)
+        const businessRaw = localStorage.getItem("primepos-business")
+        if (businessRaw) {
+          const parsed = JSON.parse(businessRaw)
+          const tenantId = parsed?.state?.currentBusiness?.id
+          if (tenantId) {
+            config.headers = {
+              ...config.headers,
+              "X-Tenant-ID": String(tenantId),
+            }
+          }
+        }
       } catch (error) {
         // Silently fail if localStorage is not available
       }
