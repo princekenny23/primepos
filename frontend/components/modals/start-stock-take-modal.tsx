@@ -24,6 +24,7 @@ import { useRouter } from "next/navigation"
 import { useTenant } from "@/contexts/tenant-context"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { ClipboardCheck } from "lucide-react"
+import { useBusinessStore } from "@/stores/businessStore"
 
 interface StartStockTakeModalProps {
   open: boolean
@@ -34,6 +35,7 @@ export function StartStockTakeModal({ open, onOpenChange }: StartStockTakeModalP
   const { toast } = useToast()
   const router = useRouter()
   const { outlets } = useTenant()
+  const { currentBusiness } = useBusinessStore()
   const [isLoading, setIsLoading] = useState(false)
   const [formData, setFormData] = useState({
     outletId: "",
@@ -60,6 +62,7 @@ export function StartStockTakeModal({ open, onOpenChange }: StartStockTakeModalP
         outlet: formData.outletId,
         operating_date: formData.date,
         description: formData.description || "",
+        tenant: currentBusiness?.id ? String(currentBusiness.id) : undefined,
       })
       
       toast({

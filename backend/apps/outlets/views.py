@@ -389,11 +389,13 @@ class TillViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def perform_create(self, serializer):
         """Validate outlet belongs to tenant and save till"""
         outlet_id = serializer.validated_data.get('outlet_id')
-        tenant = getattr(self.request, 'tenant', None) or self.request.user.tenant
+        tenant = self.get_tenant_for_request(self.request)
         
         if not tenant:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError("Tenant is required. Please ensure you are authenticated and have a tenant assigned.")
+            raise ValidationError(
+                "Tenant is required. Provide tenant or tenant_id in request data/query when acting as SaaS admin."
+            )
         
         # CRITICAL: Validate outlet belongs to tenant
         from .models import Outlet
@@ -445,10 +447,10 @@ class TillViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = self.get_tenant_for_request(request)
         if not tenant:
             return Response(
-                {"detail": "Tenant is required"},
+                {"detail": "Tenant is required. Provide tenant or tenant_id when acting as SaaS admin."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         

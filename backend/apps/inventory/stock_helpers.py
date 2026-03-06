@@ -75,7 +75,7 @@ def get_batch_for_sale(product, outlet, required_quantity):
 
 
 @transaction.atomic
-def deduct_stock(product, outlet, quantity, user, reference_id, reason=''):
+def deduct_stock(product, outlet, quantity, user, reference_id, reason='', movement_type='sale'):
     """
     Deduct stock from batches using FIFO expiry logic
     UNITS ONLY ARCHITECTURE: Changed from variation-based to product-based
@@ -140,10 +140,10 @@ def deduct_stock(product, outlet, quantity, user, reference_id, reason=''):
                 product=product,
                 outlet=outlet,
                 user=user,
-                movement_type='sale',
+                movement_type=movement_type,
                 quantity=deduct_qty,
                 reference_id=reference_id,
-                reason=reason or f"Sale {reference_id}"
+                reason=reason or f"{movement_type.title()} {reference_id}"
             )
         )
         
@@ -171,7 +171,7 @@ def deduct_stock(product, outlet, quantity, user, reference_id, reason=''):
 
 
 @transaction.atomic
-def add_stock(product, outlet, quantity, batch_number, expiry_date, cost_price=None, user=None, reason=''):
+def add_stock(product, outlet, quantity, batch_number, expiry_date, cost_price=None, user=None, reason='', movement_type='purchase'):
     """
     Add stock to a batch (creates batch if doesn't exist)
     UNITS ONLY ARCHITECTURE: Changed from variation-based to product-based
@@ -219,9 +219,9 @@ def add_stock(product, outlet, quantity, batch_number, expiry_date, cost_price=N
         product=product,
         outlet=outlet,
         user=user,
-        movement_type='purchase',
+        movement_type=movement_type,
         quantity=quantity,
-        reason=reason or f"Stock addition - Batch {batch_number}"
+        reason=reason or f"{movement_type.title()} - Batch {batch_number}"
     )
     
     # Update LocationStock
@@ -279,7 +279,8 @@ def adjust_stock(product, outlet, new_quantity, user, reason='Stock adjustment')
             batch_number=batch_number,
             expiry_date=expiry_date,
             user=user,
-            reason=reason
+            reason=reason,
+            movement_type='adjustment'
         )
     else:
         # Removing stock (treat as negative adjustment)
@@ -290,7 +291,8 @@ def adjust_stock(product, outlet, new_quantity, user, reason='Stock adjustment')
             quantity=abs(difference),
             user=user,
             reference_id=batch_number,
-            reason=reason
+            reason=reason,
+            movement_type='adjustment'
         )
         return None
 

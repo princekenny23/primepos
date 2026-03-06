@@ -8,7 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from apps.tenants.permissions import TenantFilterMixin
 from .models import DeliveryOrder, Driver, Trip, Vehicle
-from .permissions import HasDistributionFeature, get_effective_role
+from .permissions import HasDistributionFeature, get_effective_role, resolve_distribution_tenant
 from .serializers import (
     AssignDeliveryOrderSerializer,
     CancelDeliverySerializer,
@@ -34,9 +34,9 @@ class DistributionBaseViewSet(TenantFilterMixin, viewsets.ModelViewSet):
         return queryset.filter(tenant=tenant)
 
     def get_tenant(self):
-        tenant = getattr(self.request, 'tenant', None) or getattr(self.request.user, 'tenant', None)
+        tenant = resolve_distribution_tenant(self.request)
         if not tenant:
-            raise PermissionDenied('Tenant context is required.')
+            raise PermissionDenied('Tenant context is required. Provide tenant_id when acting as SaaS admin.')
         return tenant
 
     def perform_create(self, serializer):

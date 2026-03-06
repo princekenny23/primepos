@@ -23,7 +23,6 @@ import { CreditCard, Building2 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { tillService, type Till } from "@/lib/services/tillService"
-import { outletService } from "@/lib/services/outletService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 
@@ -111,6 +110,7 @@ export function AddEditTillModal({
       const tillData: Partial<Till> = {
         name: formData.name.trim(),
         outlet_id: parseInt(formData.outlet_id),
+        tenant_id: String(currentBusiness.id),
         is_active: formData.is_active,
       }
 

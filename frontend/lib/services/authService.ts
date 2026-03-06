@@ -132,6 +132,14 @@ export const authService = {
     return response
   },
 
+  async verifyCredentials(email: string, password: string): Promise<boolean> {
+    await api.post(apiEndpoints.auth.login, {
+      email,
+      password,
+    })
+    return true
+  },
+
   async logout(): Promise<void> {
     try {
       await api.post(apiEndpoints.auth.logout, {})

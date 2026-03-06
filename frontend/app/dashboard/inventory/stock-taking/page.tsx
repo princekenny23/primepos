@@ -52,6 +52,7 @@ import { useBusinessStore } from "@/stores/businessStore"
 import { useRealAPI } from "@/lib/utils/api-config"
 import Link from "next/link"
 import { useI18n } from "@/contexts/i18n-context"
+import * as XLSX from "xlsx"
 
 interface StockTake {
   id: string
@@ -69,6 +70,118 @@ interface StockTake {
   participants?: number
   completedAt?: string
   operatingDate?: string
+}
+
+interface ImportedStockTakeRow {
+  productName: string
+  countedQuantity: number
+  sku?: string
+  barcode?: string
+}
+
+const normalizeHeader = (value: string) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[\s\-_]+/g, "")
+
+const normalizeValue = (value: unknown) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase()
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number") return value
+  const parsed = Number(String(value ?? "").trim())
+  return Number.isFinite(parsed) ? parsed : NaN
+}
+
+function parseImportRows(file: File): Promise<ImportedStockTakeRow[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = (event) => {
+      try {
+        const data = event.target?.result
+        if (!data) {
+          reject(new Error("Unable to read file content."))
+          return
+        }
+
+        const workbook = XLSX.read(data, { type: "array" })
+        const firstSheetName = workbook.SheetNames[0]
+        if (!firstSheetName) {
+          reject(new Error("No worksheet found in file."))
+          return
+        }
+
+        const sheet = workbook.Sheets[firstSheetName]
+        const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+          defval: "",
+          raw: false,
+        })
+
+        if (!rawRows.length) {
+          reject(new Error("The selected file is empty."))
+          return
+        }
+
+        const mappedRows: ImportedStockTakeRow[] = rawRows
+          .map((rawRow) => {
+            const normalized: Record<string, unknown> = {}
+            Object.entries(rawRow).forEach(([key, val]) => {
+              normalized[normalizeHeader(key)] = val
+            })
+
+            const productName = String(
+              normalized.productname ||
+                normalized.name ||
+                normalized.product ||
+                ""
+            ).trim()
+
+            const countedQuantityRaw =
+              normalized.countedquantity || normalized.quantity || normalized.count || ""
+            const countedQuantity = toNumber(countedQuantityRaw)
+
+            const sku = String(normalized.sku || "").trim()
+            const barcode = String(normalized.barcode || "").trim()
+
+            return {
+              productName,
+              countedQuantity,
+              sku: sku || undefined,
+              barcode: barcode || undefined,
+            }
+          })
+          .filter((row) => row.productName)
+
+        const invalidQty = mappedRows.find(
+          (row) => !Number.isFinite(row.countedQuantity) || row.countedQuantity < 0
+        )
+        if (invalidQty) {
+          reject(
+            new Error(
+              `Invalid counted quantity for product '${invalidQty.productName}'. Use a number greater than or equal to 0.`
+            )
+          )
+          return
+        }
+
+        if (!mappedRows.length) {
+          reject(new Error("No valid rows found. Ensure 'Product Name' and 'Counted Quantity' columns are present."))
+          return
+        }
+
+        resolve(mappedRows)
+      } catch (error: any) {
+        reject(new Error(error?.message || "Failed to parse file."))
+      }
+    }
+
+    reader.onerror = () => reject(new Error("Failed to read selected file."))
+    reader.readAsArrayBuffer(file)
+  })
 }
 
 export default function StockTakingHistoryPage() {
@@ -218,21 +331,88 @@ export default function StockTakingHistoryPage() {
 
     setIsImporting(true)
     try {
-      // TODO: Implement stock take import API call
-      // For now, show a placeholder message
-      toast({
-        title: "Import Feature",
-        description: "Stock take import functionality will be implemented soon.",
+      if (!currentOutlet?.id) {
+        throw new Error("Please select an outlet before importing a stock take file.")
+      }
+
+      const importedRows = await parseImportRows(importFile)
+
+      const createdStockTake = await inventoryService.createStockTake({
+        outlet: String(currentOutlet.id),
+        operating_date: new Date().toISOString().split("T")[0],
+        description: `Imported from ${importFile.name}`,
+        tenant: currentBusiness?.id ? String(currentBusiness.id) : undefined,
       })
-      
-      // Simulate import delay
-      await new Promise(resolve => setTimeout(resolve, 1000))
+
+      const stockTakeId = String(createdStockTake.id)
+      const stockTakeItems = await inventoryService.getStockTakeItems(stockTakeId)
+
+      const byName = new Map<string, any[]>()
+      const bySku = new Map<string, any[]>()
+      const byBarcode = new Map<string, any[]>()
+
+      stockTakeItems.forEach((item: any) => {
+        const product = item.product || {}
+        const productName = normalizeValue(product.name || item.product_name || "")
+        const sku = normalizeValue(product.sku || "")
+        const barcode = normalizeValue(product.barcode || "")
+
+        if (productName) {
+          byName.set(productName, [...(byName.get(productName) || []), item])
+        }
+        if (sku) {
+          bySku.set(sku, [...(bySku.get(sku) || []), item])
+        }
+        if (barcode) {
+          byBarcode.set(barcode, [...(byBarcode.get(barcode) || []), item])
+        }
+      })
+
+      const matchedCounts = new Map<string, number>()
+      let unmatchedRows = 0
+
+      for (const row of importedRows) {
+        let candidates: any[] | undefined
+
+        const barcodeKey = normalizeValue(row.barcode)
+        const skuKey = normalizeValue(row.sku)
+        const nameKey = normalizeValue(row.productName)
+
+        if (barcodeKey) candidates = byBarcode.get(barcodeKey)
+        if ((!candidates || candidates.length !== 1) && skuKey) candidates = bySku.get(skuKey)
+        if ((!candidates || candidates.length !== 1) && nameKey) candidates = byName.get(nameKey)
+
+        if (!candidates || candidates.length !== 1) {
+          unmatchedRows += 1
+          continue
+        }
+
+        const item = candidates[0]
+        const itemId = String(item.id)
+        const existing = matchedCounts.get(itemId) || 0
+        matchedCounts.set(itemId, existing + row.countedQuantity)
+      }
+
+      const updates = Array.from(matchedCounts.entries()).map(([itemId, countedQuantity]) =>
+        inventoryService.updateStockTakeItem(stockTakeId, itemId, {
+          counted_quantity: countedQuantity,
+          notes: `Imported from ${importFile.name}`,
+        })
+      )
+
+      await Promise.all(updates)
       
       setShowImportModal(false)
       setImportFile(null)
-      
-      // Reload stock takes after import
-      // loadStockTakes() - will be called via useEffect
+
+      toast({
+        title: "Import completed",
+        description: `Imported ${updates.length} product(s).${
+          unmatchedRows ? ` ${unmatchedRows} row(s) were not matched.` : ""
+        }`,
+      })
+
+      router.push(`/dashboard/inventory/stock-taking/${stockTakeId}`)
     } catch (error: any) {
       console.error("Failed to import stock takes:", error)
       toast({
@@ -243,6 +423,28 @@ export default function StockTakingHistoryPage() {
     } finally {
       setIsImporting(false)
     }
+  }
+
+  const handleDownloadTemplate = () => {
+    const sampleRows = [
+      {
+        "Product Name": "Sample Product A",
+        "Counted Quantity": 24,
+        SKU: "SKU-001",
+        Barcode: "",
+      },
+      {
+        "Product Name": "Sample Product B",
+        "Counted Quantity": 10,
+        SKU: "",
+        Barcode: "1234567890123",
+      },
+    ]
+
+    const workbook = XLSX.utils.book_new()
+    const worksheet = XLSX.utils.json_to_sheet(sampleRows)
+    XLSX.utils.book_append_sheet(workbook, worksheet, "StockTakeTemplate")
+    XLSX.writeFile(workbook, "stock_take_import_template.xlsx")
   }
 
   return (
@@ -419,7 +621,7 @@ export default function StockTakingHistoryPage() {
           <DialogHeader>
             <DialogTitle>Import Stock Take</DialogTitle>
             <DialogDescription>
-              Upload an Excel or CSV file to import stock take data. The file should contain product information and counted quantities.
+              Upload an Excel or CSV file to import stock take counts. Product name is required; SKU and barcode are optional.
             </DialogDescription>
           </DialogHeader>
           
@@ -451,10 +653,16 @@ export default function StockTakingHistoryPage() {
             <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-900 dark:text-blue-200">
               <p className="font-medium mb-1">File Format Requirements:</p>
               <ul className="list-disc list-inside space-y-1 text-xs">
-                <li>Product SKU or Barcode</li>
+                <li>Product Name (required)</li>
                 <li>Counted Quantity</li>
-                <li>Optional: Notes</li>
+                <li>Optional: SKU</li>
+                <li>Optional: Barcode</li>
               </ul>
+              <div className="mt-3">
+                <Button type="button" size="sm" variant="outline" onClick={handleDownloadTemplate}>
+                  Download Template
+                </Button>
+              </div>
             </div>
           </div>
 

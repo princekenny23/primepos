@@ -343,10 +343,12 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             )
     
     def perform_create(self, serializer):
-        tenant = getattr(self.request, 'tenant', None) or self.request.user.tenant
+        tenant = self.get_tenant_for_request(self.request)
         if not tenant:
             from rest_framework.exceptions import ValidationError
-            raise ValidationError("User must have a tenant")
+            raise ValidationError(
+                "Tenant is required. Provide tenant or tenant_id in request data/query when acting as SaaS admin."
+            )
         
         # Validate outlet belongs to tenant
         outlet_id = self.request.data.get('outlet')

@@ -2,6 +2,7 @@ from rest_framework import serializers
 
 from apps.sales.models import Sale
 from .models import DeliveryOrder, Driver, Trip, Vehicle
+from .permissions import resolve_distribution_tenant
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -25,9 +26,9 @@ class DriverSerializer(serializers.ModelSerializer):
 
     def validate_license_number(self, value):
         request = self.context.get('request')
-        tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+        tenant = resolve_distribution_tenant(request)
         if not tenant:
-            raise serializers.ValidationError('Tenant is required.')
+            raise serializers.ValidationError('Tenant is required. Provide tenant_id when acting as SaaS admin.')
 
         queryset = Driver.objects.filter(tenant=tenant, license_number=value)
         if self.instance:
@@ -63,9 +64,9 @@ class DeliveryOrderSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         request = self.context.get('request')
-        tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+        tenant = resolve_distribution_tenant(request)
         if not tenant:
-            raise serializers.ValidationError('Tenant is required.')
+            raise serializers.ValidationError('Tenant is required. Provide tenant_id when acting as SaaS admin.')
 
         sales_order = attrs.get('sales_order') or getattr(self.instance, 'sales_order', None)
         if sales_order and sales_order.tenant_id != tenant.id:
@@ -126,9 +127,9 @@ class CreateDeliveryOrderFromSaleSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         request = self.context.get('request')
-        tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+        tenant = resolve_distribution_tenant(request)
         if not tenant:
-            raise serializers.ValidationError('Tenant is required.')
+            raise serializers.ValidationError('Tenant is required. Provide tenant_id when acting as SaaS admin.')
 
         try:
             sale = Sale.objects.get(id=attrs['sale_id'], tenant=tenant)
