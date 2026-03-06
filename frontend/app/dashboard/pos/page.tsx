@@ -19,6 +19,7 @@ import {
   Calculator
 } from "lucide-react"
 import { useBusinessStore } from "@/stores/businessStore"
+import { useAuthStore } from "@/stores/authStore"
 import { useShift } from "@/contexts/shift-context"
 import { useTenant } from "@/contexts/tenant-context"
 import { shiftService, type Shift } from "@/lib/services/shiftService"
@@ -44,6 +45,7 @@ interface RegisterStatus {
 export default function POSLandingPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet, setCurrentOutlet } = useBusinessStore()
+  const { user } = useAuthStore()
   const { outlets } = useTenant()
   const { setActiveShift, activeShift } = useShift()
   const [isLoading, setIsLoading] = useState(true)
@@ -54,7 +56,22 @@ export default function POSLandingPage() {
 
   useEffect(() => {
     if (!currentBusiness) {
-      router.push("/admin")
+      const hasAuthToken = typeof window !== "undefined" && !!localStorage.getItem("authToken")
+      if (!user && hasAuthToken) return
+
+      if (user?.tenant) {
+        const tenantId = typeof user.tenant === "object"
+          ? String((user.tenant as any).id || user.tenant)
+          : String(user.tenant)
+        const { setCurrentBusiness } = useBusinessStore.getState()
+        setCurrentBusiness(tenantId).catch((error: any) => {
+          console.error("Failed to restore business from user tenant:", error)
+          router.push(user?.is_saas_admin ? "/admin" : "/onboarding/setup-business")
+        })
+        return
+      }
+
+      router.push(user?.is_saas_admin ? "/admin" : "/onboarding/setup-business")
       return
     }
 
@@ -76,7 +93,7 @@ export default function POSLandingPage() {
       // For other business types, redirect to their specific POS
       router.push(getOutletPOSRoute(currentOutlet, currentBusiness))
     }
-  }, [currentBusiness, currentOutlet, outlets, activeShift, router])
+  }, [currentBusiness, currentOutlet, outlets, activeShift, router, user])
 
   const loadRegisterStatuses = useCallback(async () => {
     if (!currentBusiness || !outlets.length) {

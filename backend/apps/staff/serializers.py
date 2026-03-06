@@ -188,6 +188,12 @@ class StaffSerializer(serializers.ModelSerializer):
                         user = User.objects.get(id=user_id)
                     except User.DoesNotExist:
                         raise serializers.ValidationError(f"User with ID {user_id} does not exist")
+
+                    # Keep user tenant aligned with assigned staff tenant.
+                    # This prevents tenant users from logging in without tenant context.
+                    if not user.is_saas_admin and user.tenant_id != tenant.id:
+                        user.tenant = tenant
+                        user.save(update_fields=['tenant'])
                 else:
                     name = validated_data.pop('name', None)
                     email = validated_data.pop('email', None)

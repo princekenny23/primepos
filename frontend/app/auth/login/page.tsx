@@ -47,7 +47,7 @@ export default function LoginPage() {
       const isAdminUser = isSaaSAdmin || userRole.includes("admin")
       console.log("Is SaaS Admin:", isSaaSAdmin)
       
-      if (isSaaSAdmin || !result.user.tenant) {
+      if (isSaaSAdmin) {
         // SaaS admin - go to admin dashboard
         console.log("Redirecting to admin dashboard...")
         router.push("/admin")
@@ -104,15 +104,34 @@ export default function LoginPage() {
         }
       }
       
-      // Fallback: Check if any businesses exist (shouldn't reach here for regular users)
+      // Non-SaaS user with no tenant in login payload: attempt tenant recovery
+      try {
+        const currentTenant = await tenantService.getCurrent()
+        await setCurrentBusiness(String(currentTenant.id))
+
+        const businessType = (currentTenant.type || "") as "wholesale and retail" | "restaurant" | "bar"
+        const dashboardRoute =
+          businessType === "restaurant"
+            ? "/dashboard/restaurant/dashboard"
+            : businessType === "bar"
+              ? "/dashboard/bar/dashboard"
+              : "/dashboard"
+
+        router.push(isAdminUser ? dashboardRoute : "/dashboard/pos")
+        return
+      } catch (error) {
+        console.error("Tenant recovery failed:", error)
+      }
+
+      // Final fallback: Check if any businesses exist
       try {
         const businesses = await tenantService.list()
         if (businesses.length === 0) {
           // No businesses exist, go to onboarding
           router.push("/onboarding/setup-business")
         } else {
-          // Businesses exist, go to admin dashboard to select
-          router.push("/admin")
+          // Businesses exist, go to dashboard (business selection can happen there)
+          router.push("/dashboard")
         }
       } catch (error) {
         console.error("Failed to load businesses:", error)

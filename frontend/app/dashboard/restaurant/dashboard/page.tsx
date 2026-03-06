@@ -57,11 +57,11 @@ export default function RestaurantDashboardPage() {
         const { setCurrentBusiness } = useBusinessStore.getState()
         setCurrentBusiness(tenantId).catch((error: any) => {
           console.error("Failed to restore business:", error)
-          router.push("/admin")
+          router.push(user?.is_saas_admin ? "/admin" : "/onboarding/setup-business")
         })
         return // Wait for business to be restored
       }
-      router.push("/admin")
+      router.push(user?.is_saas_admin ? "/admin" : "/onboarding/setup-business")
       return
     }
     
