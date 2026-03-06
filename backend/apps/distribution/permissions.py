@@ -1,5 +1,6 @@
 from rest_framework import permissions
 from rest_framework.exceptions import PermissionDenied
+from apps.tenants.permissions import resolve_tenant_from_request
 
 
 def get_effective_role(user):
@@ -10,26 +11,7 @@ def get_effective_role(user):
 
 
 def resolve_distribution_tenant(request):
-    tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
-    if tenant:
-        return tenant
-
-    if getattr(request.user, 'is_saas_admin', False):
-        tenant_id = None
-        if hasattr(request, 'data'):
-            tenant_id = request.data.get('tenant') or request.data.get('tenant_id')
-        if not tenant_id:
-            tenant_id = request.query_params.get('tenant') or request.query_params.get('tenant_id')
-
-        if tenant_id:
-            from apps.tenants.models import Tenant
-
-            try:
-                return Tenant.objects.get(id=int(tenant_id))
-            except (Tenant.DoesNotExist, ValueError, TypeError):
-                return None
-
-    return None
+    return resolve_tenant_from_request(request)
 
 
 class HasDistributionFeature(permissions.BasePermission):
