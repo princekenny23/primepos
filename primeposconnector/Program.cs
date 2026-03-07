@@ -5,11 +5,17 @@ using Microsoft.Extensions.Options;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<AgentOptions>(builder.Configuration);
+
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>()
+    ?? ["http://localhost:3000", "http://127.0.0.1:3000"];
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("LocalFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://127.0.0.1:3000")
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -21,6 +27,21 @@ var options = app.Services.GetRequiredService<IOptions<AgentOptions>>().Value;
 var url = options.Server?.Url ?? "http://127.0.0.1:7310";
 app.Urls.Clear();
 app.Urls.Add(url);
+
+// Handle Chrome's Private Network Access (PNA) preflight requests.
+// When a public-origin page (e.g. https://primepos-beta.vercel.app) accesses a
+// loopback address, Chrome sends an OPTIONS preflight with the header
+// Access-Control-Request-Private-Network: true.  We must echo back
+// Access-Control-Allow-Private-Network: true for the browser to proceed.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Method == HttpMethods.Options &&
+        context.Request.Headers.ContainsKey("Access-Control-Request-Private-Network"))
+    {
+        context.Response.Headers["Access-Control-Allow-Private-Network"] = "true";
+    }
+    await next();
+});
 
 app.UseCors("LocalFrontend");
 
