@@ -151,8 +151,8 @@ export function LogoUploadModal({
               <Image
                 src={preview}
                 alt="Logo preview"
-                width={192}
-                height={192}
+                width={320}
+                height={133}
                 className="w-full h-full object-contain p-4"
               />
             ) : (

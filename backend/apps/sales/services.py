@@ -10,6 +10,7 @@ from django.core.files.base import ContentFile
 import json
 from django.utils import timezone
 from decimal import Decimal
+from typing import List
 import re
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
@@ -400,7 +401,7 @@ class ReceiptService:
 
         width = 32 if resolve_paper_width() == '58' else 48
 
-        def wrap_text(text: str, max_width: int) -> list[str]:
+        def wrap_text(text: str, max_width: int) -> List[str]:
             text = (text or '').strip()
             if not text:
                 return ['']
@@ -411,7 +412,7 @@ class ReceiptService:
             if not words:
                 return [text[:max_width]]
 
-            lines: list[str] = []
+            lines: List[str] = []
             current = ''
             for word in words:
                 if len(word) > max_width:
@@ -435,7 +436,7 @@ class ReceiptService:
                 lines.append(current)
             return lines or ['']
 
-        def align_lr(left: str, right: str, max_width: int) -> list[str]:
+        def align_lr(left: str, right: str, max_width: int) -> List[str]:
             left = (left or '').strip()
             right = (right or '').strip()
             if not right:
@@ -461,89 +462,14 @@ class ReceiptService:
         # ESC/POS init
         payload = bytearray()
         payload.extend(b"\x1b@")  # initialize
-
-        # Header: business/outlet
-        business = sale.tenant.name if sale.tenant else "Business"
-        outlet = sale.outlet.name if sale.outlet else ""
         currency = sale.tenant.currency if sale.tenant and sale.tenant.currency else "MWK"
-        for line in wrap_text(business.upper(), width):
-            payload.extend(b(line))
-        if outlet:
-            for line in wrap_text(outlet, width):
-                payload.extend(b(line))
-
-        for line in align_lr("Receipt #:", str(sale.receipt_number), width):
-            payload.extend(b(line))
-        for line in align_lr("Date:", sale.created_at.strftime('%Y-%m-%d %H:%M:%S'), width):
-            payload.extend(b(line))
-
-        # Cashier info
-        cashier_name = None
-        if sale.user:
-            if hasattr(sale.user, 'get_full_name'):
-                full_name = sale.user.get_full_name()
-                if full_name and full_name.strip():
-                    cashier_name = full_name.strip()
-
-            if not cashier_name and hasattr(sale.user, 'first_name') and hasattr(sale.user, 'last_name'):
-                first = (sale.user.first_name or '').strip()
-                last = (sale.user.last_name or '').strip()
-                if first or last:
-                    cashier_name = f"{first} {last}".strip()
-
-            if not cashier_name and hasattr(sale.user, 'email') and sale.user.email:
-                cashier_name = sale.user.email
-
-            if not cashier_name and hasattr(sale.user, 'username') and sale.user.username:
-                cashier_name = sale.user.username
-
-        if cashier_name:
-            for line in align_lr("Cashier:", cashier_name, width):
-                payload.extend(b(line))
-
-        # Customer info
-        if sale.customer:
-            for line in align_lr("Customer:", sale.customer.name or 'Walk-in', width):
-                payload.extend(b(line))
-            if sale.customer.phone:
-                for line in align_lr("Phone:", sale.customer.phone, width):
-                    payload.extend(b(line))
-            if sale.customer.email:
-                for line in align_lr("Email:", sale.customer.email, width):
-                    payload.extend(b(line))
-        else:
-            for line in align_lr("Customer:", "Walk-in", width):
-                payload.extend(b(line))
-
-        # Items
-        payload.extend(b("-" * width))
-        for item in sale.items.all():
-            name = item.product_name or (item.product.name if item.product else "Item")
-            qty = item.quantity or 0
-            total = item.total or (item.price or Decimal('0')) * Decimal(qty)
-            right = f"{currency} {total:,.2f}"
-            left = f"{name} x{qty}"
-            for line in align_lr(left, right, width):
-                payload.extend(b(line))
-
-        payload.extend(b("-" * width))
-        for line in align_lr("Subtotal:", f"{currency} {sale.subtotal:,.2f}", width):
-            payload.extend(b(line))
-        if sale.tax and sale.tax > 0:
-            for line in align_lr("Tax:", f"{currency} {sale.tax:,.2f}", width):
-                payload.extend(b(line))
-        if sale.discount and sale.discount > 0:
-            for line in align_lr("Discount:", f"-{currency} {sale.discount:,.2f}", width):
-                payload.extend(b(line))
-        for line in align_lr("Total:", f"{currency} {sale.total:,.2f}", width):
-            payload.extend(b(line))
-        for line in align_lr("Payment:", sale.get_payment_method_display(), width):
-            payload.extend(b(line))
-
-        payload.extend(b(""))
-        for line in wrap_text("Thank you for your business!", width):
-            payload.extend(b(line))
-        for line in wrap_text("Powered by PRIMEPOS +265 997575865", width):
+        for line in ReceiptService._build_escpos_receipt_lines(
+            sale=sale,
+            width=width,
+            currency=currency,
+            wrap_text=wrap_text,
+            align_lr=align_lr,
+        ):
             payload.extend(b(line))
 
         # Paper cut (may not be supported by all printers)
@@ -554,6 +480,81 @@ class ReceiptService:
 
         # Return base64-encoded bytes so they can safely be stored/transferred as text
         return base64.b64encode(bytes(payload)).decode('ascii')
+
+    @staticmethod
+    def _resolve_cashier_name(user) -> str:
+        if not user:
+            return ""
+
+        if hasattr(user, 'get_full_name'):
+            full_name = user.get_full_name()
+            if full_name and full_name.strip():
+                return full_name.strip()
+
+        if hasattr(user, 'first_name') and hasattr(user, 'last_name'):
+            first = (user.first_name or '').strip()
+            last = (user.last_name or '').strip()
+            if first or last:
+                return f"{first} {last}".strip()
+
+        if hasattr(user, 'email') and user.email:
+            return user.email
+
+        if hasattr(user, 'username') and user.username:
+            return user.username
+
+        return ""
+
+    @staticmethod
+    def _build_escpos_receipt_lines(sale: Sale, width: int, currency: str, wrap_text, align_lr) -> List[str]:
+        lines: List[str] = []
+
+        business = sale.tenant.name if sale.tenant else "Business"
+        outlet = sale.outlet.name if sale.outlet else ""
+
+        lines.extend([line.center(width) for line in wrap_text(business.upper(), width)])
+        if outlet:
+            lines.extend([line.center(width) for line in wrap_text(outlet, width)])
+
+        lines.extend(align_lr("Receipt #:", str(sale.receipt_number), width))
+        lines.extend(align_lr("Date:", sale.created_at.strftime('%Y-%m-%d %H:%M:%S'), width))
+
+        cashier_name = ReceiptService._resolve_cashier_name(sale.user)
+        if cashier_name:
+            lines.extend(align_lr("Cashier:", cashier_name, width))
+
+        if sale.customer:
+            lines.extend(align_lr("Customer:", sale.customer.name or 'Walk-in', width))
+            if sale.customer.phone:
+                lines.extend(align_lr("Phone:", sale.customer.phone, width))
+            if sale.customer.email:
+                lines.extend(align_lr("Email:", sale.customer.email, width))
+        else:
+            lines.extend(align_lr("Customer:", "Walk-in", width))
+
+        lines.append("-" * width)
+        for item in sale.items.all():
+            name = item.product_name or (item.product.name if item.product else "Item")
+            qty = item.quantity or 0
+            total = item.total or (item.price or Decimal('0')) * Decimal(qty)
+            right = f"{currency} {total:,.2f}"
+            left = f"{name} x{qty}"
+            lines.extend(align_lr(left, right, width))
+
+        lines.append("-" * width)
+        lines.extend(align_lr("Subtotal:", f"{currency} {sale.subtotal:,.2f}", width))
+        if sale.tax and sale.tax > 0:
+            lines.extend(align_lr("Tax:", f"{currency} {sale.tax:,.2f}", width))
+        if sale.discount and sale.discount > 0:
+            lines.extend(align_lr("Discount:", f"-{currency} {sale.discount:,.2f}", width))
+        lines.extend(align_lr("Total:", f"{currency} {sale.total:,.2f}", width))
+        lines.extend(align_lr("Payment:", sale.get_payment_method_display(), width))
+
+        lines.append("")
+        lines.extend(wrap_text("Thank you for your business!", width))
+        lines.extend(wrap_text("Powered by PRIMEPOS 0997575865", width))
+
+        return lines
     
     @staticmethod
     def get_receipt_by_number(receipt_number: str) -> Receipt:

@@ -220,8 +220,8 @@ export function BusinessInfoTab() {
                 <Image
                   src={logoUrl}
                   alt="Business Logo"
-                  width={96}
-                  height={96}
+                  width={320}
+                  height={133}
                   className="w-full h-full object-contain p-1"
                 />
               ) : (

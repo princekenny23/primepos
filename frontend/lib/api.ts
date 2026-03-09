@@ -33,6 +33,7 @@ export class ApiClient {
     retry = true
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`
+    const isAuthEndpoint = endpoint.startsWith('/auth/')
     
     const config: RequestInit = {
       ...options,
@@ -59,8 +60,8 @@ export class ApiClient {
       }
     }
     
-    // Add outlet ID header if available (for outlet data isolation)
-    if (typeof window !== "undefined") {
+    // Add outlet and tenant headers for business-scoped endpoints only
+    if (typeof window !== "undefined" && !isAuthEndpoint) {
       try {
         // Try to get current outlet from localStorage (set by tenant context)
         const outletId = localStorage.getItem("currentOutletId")
