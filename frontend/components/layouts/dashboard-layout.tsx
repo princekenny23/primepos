@@ -97,7 +97,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const { hasPermission, role } = useRole()
   const { activeShift } = useShift()
   const { user } = useAuthStore()
-  const { currentBusiness, currentOutlet: businessOutlet } = useBusinessStore()
+  const { currentBusiness, currentOutlet: businessOutlet, outlets: businessOutlets } = useBusinessStore()
   const { t } = useI18n()
   const { toast } = useToast()
   const restoringBusinessRef = useRef(false)
@@ -193,6 +193,9 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const isSaaSAdmin = Boolean(user?.is_saas_admin)
   const isAdminRoute = pathname?.startsWith("/admin")
   const isPosRoute = pathname?.startsWith("/pos/")
+  const displayTenantName = currentTenant?.name || currentBusiness?.name || ""
+  const displayOutlet = currentOutlet || businessOutlet
+  const displayOutlets = outlets.length > 0 ? outlets : businessOutlets
 
   const hasTenantAppAccess = (itemName: string) => {
     if (itemName === "Sales") return isTenantFeatureEnabled(user, "allow_sales")
@@ -302,16 +305,16 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-20 bg-card border-r transform transition-transform duration-300 ease-in-out lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 w-20 bg-card transform transition-transform duration-300 ease-in-out lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="p-4 border-b">
-            <div className="flex items-center justify-between">
-              <Link href="/dashboard" className="flex items-center justify-center">
-                <PrimePOSLogo variant="icon" size="md" version={1} />
+          <div className="px-2 py-3">
+            <div className="flex items-center justify-between lg:justify-start">
+              <Link href="/dashboard" className="flex items-center justify-start w-full">
+                <PrimePOSLogo variant="full" size="lg" version={1} className="w-full h-5" />
               </Link>
               <Button
                 variant="ghost"
@@ -325,7 +328,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
+          <nav className="flex-1 p-2 space-y-1 overflow-y-auto border-r">
             {navigation.map((item) => {
               const isActive = pathname === item.href || pathname?.startsWith(item.href + "/")
               return (
@@ -368,24 +371,24 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
             </Button>
 
             {/* Tenant and Outlet Info */}
-            {!isAdminRoute && !isLoading && currentTenant && (
+            {!isAdminRoute && !isLoading && displayTenantName && (
               <div className="flex items-center gap-4 mr-4">
                 <div className="text-sm">
-                  <span className="font-medium">{currentTenant.name}</span>
+                  <span className="font-medium">{displayTenantName}</span>
                 </div>
-                {currentOutlet ? (
-                  outlets.length > 1 ? (
+                {displayOutlet ? (
+                  displayOutlets.length > 1 ? (
                     <div className="flex items-center gap-2 text-sm">
                       <Store className="h-4 w-4 text-muted-foreground" />
                       <Select
-                        value={String(currentOutlet.id)}
+                        value={String(displayOutlet.id)}
                         onValueChange={requestOutletSwitch}
                       >
                         <SelectTrigger className="h-9 w-[220px]">
                           <SelectValue placeholder="Select outlet" />
                         </SelectTrigger>
                         <SelectContent>
-                          {outlets.map((outlet) => (
+                          {displayOutlets.map((outlet) => (
                             <SelectItem key={String(outlet.id)} value={String(outlet.id)}>
                               {outlet.name}
                             </SelectItem>
@@ -396,7 +399,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                   ) : (
                     <div className="flex items-center gap-2 text-sm select-none">
                       <Store className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{currentOutlet.name}</span>
+                      <span className="font-medium">{displayOutlet.name}</span>
                     </div>
                   )
                 ) : (

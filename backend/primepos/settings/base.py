@@ -230,6 +230,7 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
     'x-outlet-id',  # Custom header for outlet data isolation
+    'x-tenant-id',  # Custom header for tenant context
 ]
 
 # QZ Tray signing configuration

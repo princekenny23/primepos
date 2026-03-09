@@ -25,11 +25,13 @@ export function PrimePOSLogo({
   const sizeClasses = sizeMap[size][variant]
 
   return (
-    <div className={cn(sizeClasses, variant === "full" && "scale-150 origin-left", className)}>
+    <div className={cn(sizeClasses, "shrink-0", className)}>
       <img
         src="/logo.png"
         alt="PrimePOS"
-        className={cn("h-full", variant === "icon" ? "w-full object-contain" : "w-auto object-contain")}
+        width={320}
+        height={133}
+        className="w-full h-full object-contain"
       />
     </div>
   )

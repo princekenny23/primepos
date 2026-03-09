@@ -9,8 +9,7 @@ import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/stores/authStore"
 import { useBusinessStore } from "@/stores/businessStore"
 import { tenantService } from "@/lib/services/tenantService"
-import { PrimePOSLogo } from "@/components/brand/primepos-logo"
-import { Shield, User, Lock } from "lucide-react"
+import { User, Lock } from "lucide-react"
 import { Card } from "@/components/ui/card"
 
 export default function LoginPage() {
@@ -154,14 +153,7 @@ export default function LoginPage() {
               {/* Title */}
               <div className="text-center mb-8">
                 <h1 className="text-3xl font-bold text-gray-900 mb-2">Login</h1>
-                <p className="text-gray-600">Access, Engage, Empower</p>
-              </div>
-
-              {/* Shield Icon */}
-              <div className="flex justify-center mb-6">
-                <div className="h-16 w-16 rounded-full bg-blue-900/10 flex items-center justify-center border-2 border-blue-900/30">
-                  <Shield className="h-8 w-8 text-blue-900" />
-                </div>
+                <p className="text-gray-600">Powering Smart Business</p>
               </div>
 
               <form onSubmit={handleLogin} className="space-y-5">
@@ -224,7 +216,13 @@ export default function LoginPage() {
             <div className="max-w-md space-y-6 text-white">
               {/* Logo */}
               <div className="flex justify-center">
-                <PrimePOSLogo variant="full" size="lg" version={1} />
+                <img
+                  src="/logo2.png"
+                  alt="PrimePOS"
+                  width={400}
+                  height={166}
+                  className="w-[28rem] h-32 object-contain"
+                />
               </div>
               
               {/* Description */}
