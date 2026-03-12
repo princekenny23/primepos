@@ -73,6 +73,14 @@ export interface VoidSaleData {
 
 // Transform backend sale to frontend format
 function transformSale(backendSale: any): Sale {
+  const paymentMethod = (backendSale.payment_method || backendSale.paymentMethod || "cash") as string
+  const normalizedPaymentMethod = String(paymentMethod).toLowerCase()
+  const derivedStatus = backendSale.status || (
+    normalizedPaymentMethod === "tab" || normalizedPaymentMethod === "credit"
+      ? "pending"
+      : "completed"
+  )
+
   return {
     id: String(backendSale.id),
     businessId: String(backendSale.tenant || backendSale.tenant_id || ""),
@@ -94,8 +102,8 @@ function transformSale(backendSale: any): Sale {
     discount: backendSale.discount ? parseFloat(backendSale.discount) : 0,
     discountType: backendSale.discount_type || backendSale.discountType,
     discountReason: backendSale.discount_reason || backendSale.discount_reason,
-    paymentMethod: backendSale.payment_method || backendSale.paymentMethod || "cash",
-    status: backendSale.status || "completed",
+    paymentMethod,
+    status: derivedStatus,
     createdAt: backendSale.created_at || backendSale.createdAt || new Date().toISOString(),
     // Include raw backend data with nested detail fields (outlet_detail, user_detail, shift_detail, customer_detail)
     // These are optimized fields from the backend that eliminate N+1 queries
