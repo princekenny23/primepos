@@ -406,7 +406,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             sale.due_date = timezone.now() + timedelta(days=sale.customer.payment_terms_days)
             sale.amount_paid = Decimal('0')
             sale.payment_status = 'unpaid'
-            sale.status = 'completed'  # Credit sales are completed but unpaid
+            sale.status = 'pending'  # Credit starts on-account until payment is collected
         elif not sale.status:
             sale.status = 'completed'
             sale.payment_status = 'paid'
