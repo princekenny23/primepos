@@ -411,19 +411,29 @@ export default function TransactionsPage() {
                       </TableCell>
                       <TableCell>
                         {(() => {
-                          const saleStatus = String(
-                            sale.status || sale._raw?.status || (
-                              ["tab","credit"].includes(String(sale._raw?.payment_method || sale.payment_method || sale.paymentMethod || "").toLowerCase())
-                                ? "pending"
-                                : "completed"
-                            )
-                          ).toLowerCase()
-                          const isPending = saleStatus === "pending"
-                          return (
-                            <Badge variant={isPending ? "outline" : "default"} className={isPending ? "border-yellow-500 text-yellow-700 bg-yellow-50" : ""}>
-                              {isPending ? "Pending" : "Completed"}
-                            </Badge>
-                          )
+                          const pm = String(sale._raw?.payment_method || sale.payment_method || sale.paymentMethod || "").toLowerCase()
+                          const isTabCredit = pm === "tab" || pm === "credit"
+                          const paymentStatus = String(sale._raw?.payment_status || "").toLowerCase()
+
+                          if (isTabCredit) {
+                            if (paymentStatus === "paid") {
+                              return <Badge variant="default" className="bg-green-600 text-white">Paid</Badge>
+                            }
+                            if (paymentStatus === "partially_paid") {
+                              const amountPaid = parseFloat(sale._raw?.amount_paid || "0")
+                              const total = sale.total || 0
+                              return (
+                                <Badge variant="outline" className="border-blue-500 text-blue-700 bg-blue-50">
+                                  Partial ({currentBusiness?.currencySymbol || "MWK"} {amountPaid.toFixed(2)} / {total.toFixed(2)})
+                                </Badge>
+                              )
+                            }
+                            if (paymentStatus === "overdue") {
+                              return <Badge variant="outline" className="border-red-500 text-red-700 bg-red-50">Overdue</Badge>
+                            }
+                            return <Badge variant="outline" className="border-yellow-500 text-yellow-700 bg-yellow-50">Pending</Badge>
+                          }
+                          return <Badge variant="default">Completed</Badge>
                         })()}
                       </TableCell>
                       <TableCell className="text-right">
@@ -489,11 +499,17 @@ export default function TransactionsPage() {
             discount: selectedSale.discount || 0,
             total: selectedSale.total || 0,
             paymentMethod: selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "cash",
-            status: selectedSale.status || (
-              ["tab", "credit"].includes(String(selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "").toLowerCase())
-                ? "pending"
-                : "completed"
-            ),
+            status: (() => {
+              const pm = String(selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "").toLowerCase()
+              const isTabCredit = pm === "tab" || pm === "credit"
+              if (!isTabCredit) return "completed"
+              const ps = String(selectedSale._raw?.payment_status || "").toLowerCase()
+              if (ps === "paid") return "completed"
+              if (ps === "partially_paid") return "partially_paid"
+              if (ps === "overdue") return "overdue"
+              return "pending"
+            })(),
+            amountPaid: parseFloat(selectedSale._raw?.amount_paid || "0"),
           }}
         />
       )}
