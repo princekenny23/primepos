@@ -32,11 +32,27 @@ async function proxyToAgent(request: NextRequest, pathParts: string[]): Promise<
   const bodyBuffer = hasBody ? await request.arrayBuffer() : undefined
   const body = bodyBuffer && bodyBuffer.byteLength > 0 ? bodyBuffer : undefined
 
-  const response = await fetch(targetUrl, {
-    method,
-    headers,
-    body,
-  })
+  let response: Response
+  try {
+    response = await fetch(targetUrl, {
+      method,
+      headers,
+      body,
+    })
+  } catch (error: any) {
+    const reason = error?.cause?.code || error?.code || "FETCH_FAILED"
+    return new Response(
+      JSON.stringify({
+        detail: "Local Print Agent is unreachable",
+        target: targetUrl,
+        reason,
+      }),
+      {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }
+    )
+  }
 
   const responseHeaders = new Headers(response.headers)
   responseHeaders.delete("content-encoding")
