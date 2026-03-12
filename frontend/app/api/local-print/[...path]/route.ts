@@ -16,7 +16,30 @@ function buildTargetUrl(pathParts: string[], search: string): string {
   return `${base}/${path}${search || ""}`
 }
 
+function isLocalhostHost(hostname: string): boolean {
+  const host = String(hostname || "").toLowerCase()
+  return host === "localhost" || host === "127.0.0.1" || host === "::1"
+}
+
 async function proxyToAgent(request: NextRequest, pathParts: string[]): Promise<Response> {
+  const requestedPath = (pathParts || []).join("/").toLowerCase()
+  const hostName = request.nextUrl.hostname
+
+  // Cloud-safe fallback: do not treat /health as an error on non-localhost deployments.
+  if (requestedPath === "health" && !isLocalhostHost(hostName)) {
+    return new Response(
+      JSON.stringify({
+        status: "cloud",
+        connected: false,
+        detail: "Local Print Agent is only reachable from localhost.",
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    )
+  }
+
   const targetUrl = buildTargetUrl(pathParts, request.nextUrl.search)
 
   const headers = new Headers(request.headers)
