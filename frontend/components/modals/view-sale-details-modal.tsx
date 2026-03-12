@@ -48,6 +48,7 @@ interface SaleDetails {
   total: number
   paymentMethod: string
   status: string
+  amountPaid?: number
 }
 
 interface ViewSaleDetailsModalProps {
@@ -205,14 +206,38 @@ export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetai
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Status</p>
-              <Badge 
-                variant={sale.status === "completed" ? "default" : "secondary"}
-                className="mt-1"
-              >
-                {sale.status}
-              </Badge>
+              {(() => {
+                const s = (sale.status || "").toLowerCase()
+                if (s === "completed") return <Badge variant="default" className="mt-1">Completed</Badge>
+                if (s === "partially_paid") return <Badge variant="outline" className="mt-1 border-blue-500 text-blue-700 bg-blue-50">Partially Paid</Badge>
+                if (s === "overdue") return <Badge variant="outline" className="mt-1 border-red-500 text-red-700 bg-red-50">Overdue</Badge>
+                return <Badge variant="outline" className="mt-1 border-yellow-500 text-yellow-700 bg-yellow-50">Pending</Badge>
+              })()}
             </div>
           </div>
+
+          {/* Tab/Credit payment progress */}
+          {(sale.paymentMethod === "tab" || sale.paymentMethod === "credit") && (
+            <div className="rounded-md border border-gray-200 bg-gray-50 p-4 space-y-2">
+              <p className="text-sm font-semibold text-gray-700">Payment Progress</p>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Amount Paid</span>
+                <span className="font-medium text-green-700">{formatCurrency(sale.amountPaid || 0, currentBusiness)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Balance Remaining</span>
+                <span className="font-medium text-red-600">{formatCurrency(Math.max(0, sale.total - (sale.amountPaid || 0)), currentBusiness)}</span>
+              </div>
+              {sale.total > 0 && (
+                <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                  <div
+                    className="bg-green-500 h-2 rounded-full transition-all"
+                    style={{ width: `${Math.min(100, ((sale.amountPaid || 0) / sale.total) * 100)}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Items Table */}
           <div>
