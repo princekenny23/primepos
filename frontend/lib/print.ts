@@ -18,6 +18,7 @@ type ReceiptPayload = {
 
 const LOCAL_PRINT_AGENT_URL =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 
@@ -30,7 +31,7 @@ function buildAgentHeaders(): Record<string, string> {
 }
 
 async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
-  const url = `${LOCAL_PRINT_AGENT_URL}${path}`
+  const url = `${LOCAL_PRINT_PROXY_BASE}${path}`
   const headers = { ...buildAgentHeaders(), ...(init?.headers || {}) }
   const response = await fetch(url, { ...init, headers })
   if (!response.ok) {

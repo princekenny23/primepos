@@ -67,8 +67,7 @@ import { useTenant } from "@/contexts/tenant-context"
 import { SelectProductModal } from "@/components/modals/select-product-modal"
 import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 
-const LOCAL_PRINT_AGENT_URL =
-  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 
@@ -93,7 +92,7 @@ async function printTextViaAgent(text: string, printer?: string): Promise<void> 
     headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
   }
   const contentBase64 = encodeTextToBase64(text)
-  const response = await fetch(`${LOCAL_PRINT_AGENT_URL}/print`, {
+  const response = await fetch(`${LOCAL_PRINT_PROXY_BASE}/print`, {
     method: "POST",
     headers,
     body: JSON.stringify({
