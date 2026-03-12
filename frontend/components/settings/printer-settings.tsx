@@ -16,7 +16,7 @@ const LOCAL_PRINT_AGENT_URL =
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
-type PrintChannel = "auto" | "agent" | "rawbt"
+type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
 function encodeTextToBase64(text: string): string {
   const bytes = new TextEncoder().encode(text)
@@ -65,7 +65,7 @@ export function PrinterSettings() {
   useEffect(() => {
     try {
       const saved = String(localStorage.getItem(PRINT_CHANNEL_STORAGE_KEY) || "auto").toLowerCase()
-      if (saved === "agent" || saved === "rawbt" || saved === "auto") {
+      if (saved === "agent" || saved === "bluetooth_usb_thermal_printer_plus" || saved === "auto") {
         setPrintChannel(saved)
       }
     } catch {
@@ -83,11 +83,11 @@ export function PrinterSettings() {
     toast({
       title: "Print mode updated",
       description:
-        next === "rawbt"
-          ? "Receipts will open in RawBT (best for Android mobile)."
+        next === "bluetooth_usb_thermal_printer_plus"
+          ? "Receipts will open Android share for Bluetooth-USB Thermal Printer+."
           : next === "agent"
             ? "Receipts will always use the Local Print Agent."
-            : "Auto mode enabled: Android uses RawBT, desktop uses Local Print Agent.",
+            : "Auto mode enabled: Android uses Bluetooth-USB Thermal Printer+, desktop uses Local Print Agent.",
     })
   }
 
@@ -167,17 +167,30 @@ export function PrinterSettings() {
     }
   }
 
-  const testRawBT = () => {
+  const testBluetoothUsbThermalPrinterPlus = async () => {
     try {
-      const text = `PRIMEPOS RAWBT TEST\n${new Date().toLocaleString()}\n\n`
-      const contentBase64 = encodeTextToBase64(text)
-      const rawbtUrl = `rawbt:base64,${encodeURIComponent(contentBase64)}`
-      window.location.href = rawbtUrl
-      toast({ title: "RawBT test started", description: "Opening RawBT with a test receipt." })
+      const text = `PRIMEPOS BLUETOOTH-USB THERMAL PRINTER+ TEST\n${new Date().toLocaleString()}\n\n`
+      const navAny = navigator as Navigator & { share?: (data: ShareData) => Promise<void> }
+      if (typeof navAny.share === "function") {
+        await navAny.share({
+          title: "PrimePOS Receipt Test",
+          text,
+        })
+        toast({ title: "Bluetooth-USB Thermal Printer+ test started", description: "Choose Bluetooth-USB Thermal Printer+ in the Android share sheet." })
+        return
+      }
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        toast({ title: "Copied to clipboard", description: "Open Bluetooth-USB Thermal Printer+ and paste to print." })
+        return
+      }
+
+      throw new Error("Share is not available on this device/browser.")
     } catch (err: any) {
       toast({
-        title: "RawBT test failed",
-        description: err?.message || "Could not open RawBT. Make sure RawBT is installed.",
+        title: "Bluetooth-USB Thermal Printer+ test failed",
+        description: err?.message || "Could not open share. Make sure Bluetooth-USB Thermal Printer+ is installed.",
         variant: "destructive",
       })
     }
@@ -300,15 +313,15 @@ export function PrinterSettings() {
         <div className="rounded border p-3 text-sm space-y-3">
           <div className="font-medium">Print Mode</div>
           <p className="text-xs text-muted-foreground">
-            Auto mode uses RawBT on Android mobile and Local Print Agent on desktop.
+            Auto mode uses Bluetooth-USB Thermal Printer+ on Android mobile and Local Print Agent on desktop.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button variant={printChannel === "auto" ? "default" : "outline"} onClick={() => savePrintChannel("auto")}>Auto</Button>
             <Button variant={printChannel === "agent" ? "default" : "outline"} onClick={() => savePrintChannel("agent")}>Agent Only</Button>
-            <Button variant={printChannel === "rawbt" ? "default" : "outline"} onClick={() => savePrintChannel("rawbt")}>RawBT</Button>
+            <Button variant={printChannel === "bluetooth_usb_thermal_printer_plus" ? "default" : "outline"} onClick={() => savePrintChannel("bluetooth_usb_thermal_printer_plus")}>Bluetooth-USB Thermal Printer+</Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            For RawBT mode, install RawBT on Android and set it as the default handler.
+            For mobile mode, install Bluetooth-USB Thermal Printer+ on Android and use it from the share sheet.
           </p>
         </div>
 
@@ -369,7 +382,7 @@ export function PrinterSettings() {
 
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={testPrint} disabled={!selectedPrinter || !connected}>Test Agent Print</Button>
-          <Button variant="outline" onClick={testRawBT}>Test RawBT</Button>
+          <Button variant="outline" onClick={testBluetoothUsbThermalPrinterPlus}>Test Bluetooth-USB Thermal Printer+</Button>
           <Button onClick={saveSelection}>Save Default Printer</Button>
         </div>
       </CardContent>
