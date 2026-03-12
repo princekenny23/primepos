@@ -84,10 +84,10 @@ export function PaymentPopup({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl border border-gray-200 bg-white p-0 shadow-lg max-h-[80vh]">
-        <div className="flex h-full max-h-[80vh]">
+      <DialogContent className="w-[calc(100vw-1rem)] max-w-2xl border border-gray-200 bg-white p-0 shadow-lg max-h-[90vh] overflow-hidden">
+        <div className="flex h-full max-h-[90vh] flex-col md:max-h-[80vh] md:flex-row">
           {/* Left Column - Transaction Details */}
-          <div className="flex-1 border-r border-gray-200 bg-gray-50 p-4 overflow-y-auto">
+          <div className="flex-1 border-b border-gray-200 bg-gray-50 p-4 overflow-y-auto md:border-b-0 md:border-r">
             {/* Header */}
             <div className="mb-4 sticky top-0 bg-gray-50 pb-2">
               <h2 className="text-lg font-bold text-gray-900">Payment</h2>
@@ -147,7 +147,7 @@ export function PaymentPopup({
           </div>
 
           {/* Right Column - Payment Method & Keyboard */}
-          <div className="flex-1 p-4 flex flex-col">
+          <div className="flex-1 p-4 flex flex-col overflow-y-auto">
             {/* Payment Method */}
             <div className="mb-4">
               <label className="mb-2 block text-xs font-semibold text-gray-700">Payment Method</label>

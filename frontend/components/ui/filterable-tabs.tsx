@@ -3,6 +3,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
 import { Search, LucideIcon } from "lucide-react"
 import { ReactNode } from "react"
 
@@ -55,15 +56,21 @@ export function FilterableTabs({
   return (
     <Tabs value={activeTab} onValueChange={onTabChange} className={className}>
       <div className="space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <TabsList className={`${tabsListClassName} ${gridCols}`}>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-4">
+          <TabsList
+            className={cn(
+              "w-full h-auto p-1 flex flex-nowrap overflow-x-auto justify-start md:grid md:overflow-visible",
+              tabsListClassName,
+              gridCols
+            )}
+          >
             {tabs.map((tab) => {
               const Icon = tab.icon
               return (
                 <TabsTrigger 
                   key={tab.value} 
                   value={tab.value} 
-                  className="flex items-center gap-2 data-[state=active]:bg-blue-900 data-[state=active]:text-white"
+                  className="shrink-0 md:shrink flex items-center gap-2 whitespace-nowrap data-[state=active]:bg-blue-900 data-[state=active]:text-white"
                 >
                   {Icon && <Icon className="h-4 w-4" />}
                   {tab.label}
@@ -80,7 +87,7 @@ export function FilterableTabs({
             })}
           </TabsList>
           {actionButton && actionButtonPlacement === "right" && (
-            <div className="flex-shrink-0">
+            <div className="w-full md:w-auto md:flex-shrink-0">
               {actionButton}
             </div>
           )}
@@ -91,7 +98,7 @@ export function FilterableTabs({
           </div>
         )}
         {searchValue !== undefined && onSearchChange && (
-          <div className="relative max-w-sm">
+          <div className="relative w-full md:max-w-sm">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder={searchPlaceholder}

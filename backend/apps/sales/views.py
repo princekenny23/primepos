@@ -138,6 +138,38 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             )
         
         return super().destroy(request, *args, **kwargs)
+
+    @staticmethod
+    def _run_post_sale_commit_tasks(sale_id: int, user_id: int = None):
+        """Run non-critical side effects after the sale transaction commits."""
+        logger = logging.getLogger(__name__)
+
+        try:
+            sale = Sale.objects.get(id=sale_id)
+        except Sale.DoesNotExist:
+            logger.warning(f"Post-commit tasks skipped: sale {sale_id} not found")
+            return
+
+        user = None
+        if user_id:
+            try:
+                from apps.accounts.models import User
+                user = User.objects.get(id=user_id)
+            except Exception:
+                user = None
+
+        if sale.status == 'completed':
+            try:
+                from .services import ReceiptService
+                ReceiptService.generate_receipt(sale, format='pdf', user=user)
+            except Exception as e:
+                logger.error(f"Failed to auto-generate receipt for sale {sale.id}: {str(e)}")
+
+        try:
+            from apps.notifications.services import NotificationService
+            NotificationService.notify_sale_completed(sale)
+        except Exception as e:
+            logger.error(f"Failed to create sale notification: {str(e)}")
     
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -392,12 +424,9 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         sale.save()
         logger.info(f"Sale saved: ID={sale.id}, Receipt={sale.receipt_number}, Status={sale.status}, Total={sale.total}, Payment={sale.payment_method}")
 
-        if sale.status == 'completed':
-            try:
-                from .services import ReceiptService
-                ReceiptService.generate_receipt(sale, format='pdf', user=request.user)
-            except Exception as e:
-                logger.error(f"Failed to auto-generate receipt for sale {sale.id}: {str(e)}")
+        transaction.on_commit(
+            lambda sale_id=sale.id, user_id=request.user.id: self._run_post_sale_commit_tasks(sale_id, user_id)
+        )
         
         # Create Kitchen Order Ticket (KOT) if this is a restaurant order with a table
         if table and sale.status == 'pending':
@@ -436,15 +465,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             sale.customer.total_spent += sale.total
             sale.customer.last_visit = timezone.now()
             sale.customer.save()
-        
-        # Create notification for completed sale (Square POS-like)
-        try:
-            from apps.notifications.services import NotificationService
-            NotificationService.notify_sale_completed(sale)
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to create sale notification: {str(e)}")
         
         response_serializer = SaleSerializer(sale)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
