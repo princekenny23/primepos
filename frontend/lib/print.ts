@@ -23,7 +23,7 @@ const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
 
-type PrintChannel = "auto" | "agent" | "rawbt"
+type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
 function buildAgentHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" }
@@ -43,7 +43,7 @@ function getPrintChannelPreference(): PrintChannel {
   if (typeof window === "undefined") return "auto"
   try {
     const saved = String(localStorage.getItem(PRINT_CHANNEL_STORAGE_KEY) || "auto").toLowerCase()
-    if (saved === "agent" || saved === "rawbt" || saved === "auto") {
+    if (saved === "agent" || saved === "bluetooth_usb_thermal_printer_plus" || saved === "auto") {
       return saved
     }
   } catch {
@@ -52,21 +52,34 @@ function getPrintChannelPreference(): PrintChannel {
   return "auto"
 }
 
-function shouldUseRawBT(channel: PrintChannel): boolean {
-  if (channel === "rawbt") return true
+function shouldUseBluetoothUsbThermalPrinterPlus(channel: PrintChannel): boolean {
+  if (channel === "bluetooth_usb_thermal_printer_plus") return true
   if (channel === "agent") return false
   return isAndroidMobileDevice()
 }
 
-function printViaRawBT(contentBase64: string): void {
+async function printViaBluetoothUsbThermalPrinterPlus(plainTextReceipt: string): Promise<void> {
   if (typeof window === "undefined") {
-    throw new Error("RawBT printing must be initiated from the browser")
+    throw new Error("Bluetooth-USB Thermal Printer+ printing must be initiated from the browser")
   }
 
-  const payload = encodeURIComponent(contentBase64)
-  // RawBT custom URL scheme for raw ESC/POS payloads in base64.
-  const rawbtUrl = `rawbt:base64,${payload}`
-  window.location.href = rawbtUrl
+  // Bluetooth-USB Thermal Printer+ works reliably from the Android share sheet.
+  const navAny = navigator as Navigator & { share?: (data: ShareData) => Promise<void> }
+  if (typeof navAny.share === "function") {
+    await navAny.share({
+      title: "PrimePOS Receipt",
+      text: plainTextReceipt,
+    })
+    return
+  }
+
+  // Fallback: copy to clipboard so user can paste into Bluetooth-USB Thermal Printer+.
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(plainTextReceipt)
+    throw new Error("Receipt copied to clipboard. Open Bluetooth-USB Thermal Printer+ and paste to print.")
+  }
+
+  throw new Error("Share is not available on this device/browser.")
 }
 
 async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -243,7 +256,7 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
   }
 
   let printerName: string | null = null
-  if (!shouldUseRawBT(channel)) {
+  if (!shouldUseBluetoothUsbThermalPrinterPlus(channel)) {
     printerName = resolvedOutletId
       ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
       : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
@@ -294,14 +307,15 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
   }
 
   const job: EscposPrintJob = {
-    printerName: printerName || "RAWBT",
+    printerName: printerName || "MOBILE_APP",
     contentBase64: contentBase64,
     jobName: receiptNumber ? `PrimePOS Receipt ${receiptNumber}` : "PrimePOS Receipt",
   }
 
-  if (shouldUseRawBT(channel)) {
-    console.log("[Print] Sending receipt to RawBT:", { channel })
-    printViaRawBT(job.contentBase64)
+  if (shouldUseBluetoothUsbThermalPrinterPlus(channel)) {
+    console.log("[Print] Sending receipt to Bluetooth-USB Thermal Printer+:", { channel })
+    const plainTextReceipt = buildPlainTextReceipt(payload)
+    await printViaBluetoothUsbThermalPrinterPlus(plainTextReceipt)
     return
   }
 
