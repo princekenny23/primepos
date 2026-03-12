@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from decimal import Decimal, InvalidOperation
-from .models import Sale, SaleItem, Receipt
+from .models import Sale, SaleItem, Receipt, PrintJob
 from .models import ReceiptTemplate
 from apps.products.serializers import ProductSerializer
 from apps.tenants.permissions import resolve_tenant_from_request
@@ -293,6 +293,21 @@ class SaleSerializer(serializers.ModelSerializer):
             instance.table_id = table_id
 
         return super().update(instance, validated_data)
+
+
+class PrintJobSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PrintJob
+        fields = (
+            'id', 'tenant', 'outlet', 'sale', 'requested_by',
+            'channel', 'status', 'device_id', 'printer_identifier',
+            'payload', 'error_message', 'claimed_at', 'completed_at',
+            'created_at', 'updated_at'
+        )
+        read_only_fields = (
+            'id', 'tenant', 'requested_by', 'status', 'claimed_at',
+            'completed_at', 'created_at', 'updated_at'
+        )
 
 
 class ReceiptSerializer(serializers.ModelSerializer):

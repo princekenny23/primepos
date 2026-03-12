@@ -21,6 +21,7 @@ const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
+const PRINT_DEVICE_ID_STORAGE_KEY = "printDeviceId"
 
 type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
@@ -55,6 +56,21 @@ function shouldUseBluetoothUsbThermalPrinterPlus(channel: PrintChannel): boolean
   if (channel === "bluetooth_usb_thermal_printer_plus") return true
   if (channel === "agent") return false
   return isAndroidMobileDevice()
+}
+
+function isLocalhostBrowser(): boolean {
+  if (typeof window === "undefined") return false
+  const host = String(window.location.hostname || "").toLowerCase()
+  return host === "localhost" || host === "127.0.0.1" || host === "::1"
+}
+
+function getPrintDeviceId(): string {
+  if (typeof window === "undefined") return ""
+  try {
+    return String(localStorage.getItem(PRINT_DEVICE_ID_STORAGE_KEY) || "").trim()
+  } catch {
+    return ""
+  }
 }
 
 function escposBase64ToPrintableText(contentBase64: string): string {
@@ -230,6 +246,8 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
 export async function printReceipt(payload: ReceiptPayload, outletId?: number | string): Promise<void> {
   if (typeof window === "undefined") throw new Error("Printing must be initiated from the browser")
   const channel = getPrintChannelPreference()
+  const useMobileFlow = shouldUseBluetoothUsbThermalPrinterPlus(channel)
+  const shouldQueueForLocalAgent = !useMobileFlow && !isLocalhostBrowser()
 
   const resolvedOutletId =
     outletId ??
@@ -245,8 +263,36 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     }
   }
 
+  const saleId = String(payload?.sale?.id || "").trim()
+
+  // Cloud-safe path: enqueue job in backend so a local print agent can claim it.
+  if (shouldQueueForLocalAgent) {
+    if (!saleId) {
+      throw new Error("Cannot queue print job: missing sale ID")
+    }
+
+    const printerName = resolvedOutletId
+      ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
+      : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
+
+    const queued: any = await api.post(`/sales/${saleId}/enqueue-print/`, {
+      channel: "agent",
+      printer_name: printerName || "",
+      device_id: getPrintDeviceId(),
+      paper_width: "auto",
+    })
+
+    console.log("[Print] Enqueued print job:", {
+      saleId,
+      printJobId: queued?.print_job_id,
+      status: queued?.status,
+      receiptNumber: queued?.receipt_number,
+    })
+    return
+  }
+
   let printerName: string | null = null
-  if (!shouldUseBluetoothUsbThermalPrinterPlus(channel)) {
+  if (!useMobileFlow) {
     printerName = resolvedOutletId
       ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
       : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
@@ -265,7 +311,6 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     }
   }
 
-  const saleId = String(payload?.sale?.id || "").trim()
   let receiptNumber = String(payload?.sale?.receipt_number || payload?.sale?.id || "")
   let contentBase64 = ""
 
@@ -295,7 +340,7 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     jobName: receiptNumber ? `PrimePOS Receipt ${receiptNumber}` : "PrimePOS Receipt",
   }
 
-  if (shouldUseBluetoothUsbThermalPrinterPlus(channel)) {
+  if (useMobileFlow) {
     console.log("[Print] Sending receipt to Bluetooth-USB Thermal Printer+:", { channel })
     const printableText = escposBase64ToPrintableText(contentBase64) || buildPlainTextReceipt(payload)
     await printViaBluetoothUsbThermalPrinterPlus(printableText)
