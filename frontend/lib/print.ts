@@ -5,7 +5,6 @@
 // - Prefer backend-generated ESC/POS payloads (base64) and print them raw
 
 import { api, apiEndpoints } from "./api"
-import { receiptService } from "./services/receiptService"
 
 type ReceiptPayload = {
   cart: Array<{ name: string; price: number; quantity: number; total: number; sku?: string }>
@@ -184,55 +183,12 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
   return lines.join("\n")
 }
 
-async function getEscposPayload(
-  saleIdOrReceipt: string,
-  printerName?: string | null
-): Promise<{ contentBase64: string; receiptNumber: string } | null> {
-  try {
-    const saleId = String(saleIdOrReceipt || "").trim()
-
-    if (saleId) {
-      try {
-        const params = new URLSearchParams()
-        params.set("paper_width", "auto")
-        if (printerName) params.set("printer_name", printerName)
-
-        const response: any = await api.get(`/sales/${saleId}/escpos-receipt/?${params.toString()}`)
-        if (response?.content) {
-          return {
-            contentBase64: response.content,
-            receiptNumber: String(response.receipt_number || saleId),
-          }
-        }
-      } catch (err) {
-        console.warn("[Print] Dynamic ESC/POS endpoint failed, trying stored receipt APIs:", err)
-      }
-    }
-
-    let receipt
-    try {
-      receipt = await receiptService.getBySale(saleIdOrReceipt)
-    } catch {
-      receipt = await receiptService.getByNumber(saleIdOrReceipt)
-    }
-
-    if (receipt.format !== "escpos") {
-      receipt = await receiptService.regenerate(receipt.id, "escpos")
-    }
-    if (!receipt.content) return null
-    return { contentBase64: receipt.content, receiptNumber: receipt.receipt_number }
-  } catch (err) {
-    return null
-  }
-}
-
 /**
  * Print a receipt using the Local Print Agent.
  *
  * Behavior:
- *  - Always try the backend ESC/POS endpoint first (/escpos-receipt/).
- *  - If backend returns an ESC/POS base64 payload, print it raw via the Local Print Agent.
- *  - If backend call fails or returns no escpos payload, fall back to a minimal client-side receipt.
+ *  - Build one shared receipt content payload for all channels.
+ *  - Mobile and Local Print Agent both reuse the same receipt content.
  *
  * Safety:
  *  - Preserves printer resolution logic; local agent handles physical printing.
@@ -275,36 +231,16 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     }
   }
 
-  const saleId = String(payload?.sale?.id || "").trim()
-  let contentBase64: string | null = null
-  let receiptNumber = ""
-
-  if (saleId) {
-    try {
-      const escpos = await getEscposPayload(saleId, printerName)
-      if (escpos) {
-        contentBase64 = escpos.contentBase64
-        receiptNumber = escpos.receiptNumber
-        console.log("[Print] Using backend ESC/POS payload for sale:", saleId)
-      } else {
-        console.warn("[Print] No ESC/POS payload found, falling back to plain text")
-      }
-    } catch (err) {
-      console.warn("[Print] ESC/POS fetch failed, falling back to plain text:", err)
-    }
+  const receiptNumber = String(payload?.sale?.receipt_number || payload?.sale?.id || "")
+  const plainTextReceipt = buildPlainTextReceipt(payload)
+  // Proper UTF-8 to base64 encoding (avoids deprecated unescape)
+  const encoder = new TextEncoder()
+  const data = encoder.encode(plainTextReceipt)
+  let binary = ""
+  for (let i = 0; i < data.length; i++) {
+    binary += String.fromCharCode(data[i])
   }
-
-  if (!contentBase64) {
-    const plainText = buildPlainTextReceipt(payload)
-    // Proper UTF-8 to base64 encoding (avoids deprecated unescape)
-    const encoder = new TextEncoder()
-    const data = encoder.encode(plainText)
-    let binary = ""
-    for (let i = 0; i < data.length; i++) {
-      binary += String.fromCharCode(data[i])
-    }
-    contentBase64 = btoa(binary)
-  }
+  const contentBase64 = btoa(binary)
 
   const job: EscposPrintJob = {
     printerName: printerName || "MOBILE_APP",
@@ -314,7 +250,6 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
 
   if (shouldUseBluetoothUsbThermalPrinterPlus(channel)) {
     console.log("[Print] Sending receipt to Bluetooth-USB Thermal Printer+:", { channel })
-    const plainTextReceipt = buildPlainTextReceipt(payload)
     await printViaBluetoothUsbThermalPrinterPlus(plainTextReceipt)
     return
   }
