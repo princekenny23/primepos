@@ -21,6 +21,9 @@ const LOCAL_PRINT_AGENT_URL =
 const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
+const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
+
+type PrintChannel = "auto" | "agent" | "rawbt"
 
 function buildAgentHeaders(): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" }
@@ -28,6 +31,42 @@ function buildAgentHeaders(): Record<string, string> {
     headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
   }
   return headers
+}
+
+function isAndroidMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false
+  const ua = navigator.userAgent || ""
+  return /android/i.test(ua)
+}
+
+function getPrintChannelPreference(): PrintChannel {
+  if (typeof window === "undefined") return "auto"
+  try {
+    const saved = String(localStorage.getItem(PRINT_CHANNEL_STORAGE_KEY) || "auto").toLowerCase()
+    if (saved === "agent" || saved === "rawbt" || saved === "auto") {
+      return saved
+    }
+  } catch {
+    // ignore localStorage failures
+  }
+  return "auto"
+}
+
+function shouldUseRawBT(channel: PrintChannel): boolean {
+  if (channel === "rawbt") return true
+  if (channel === "agent") return false
+  return isAndroidMobileDevice()
+}
+
+function printViaRawBT(contentBase64: string): void {
+  if (typeof window === "undefined") {
+    throw new Error("RawBT printing must be initiated from the browser")
+  }
+
+  const payload = encodeURIComponent(contentBase64)
+  // RawBT custom URL scheme for raw ESC/POS payloads in base64.
+  const rawbtUrl = `rawbt:base64,${payload}`
+  window.location.href = rawbtUrl
 }
 
 async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -187,6 +226,7 @@ async function getEscposPayload(
  */
 export async function printReceipt(payload: ReceiptPayload, outletId?: number | string): Promise<void> {
   if (typeof window === "undefined") throw new Error("Printing must be initiated from the browser")
+  const channel = getPrintChannelPreference()
 
   const resolvedOutletId =
     outletId ??
@@ -202,20 +242,25 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     }
   }
 
-  let printerName = resolvedOutletId
-    ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
-    : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
+  let printerName: string | null = null
+  if (!shouldUseRawBT(channel)) {
+    printerName = resolvedOutletId
+      ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
+      : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
 
-  // If no printer configured, attempt a scan and persist the first found printer locally
-  if (!printerName) {
-    // Scan printers and automatically persist the first found as a default.
-    const found = await scanPrinters(true)
-    if (found && found.length > 0) {
-      printerName = found[0]
+    // If no printer configured, attempt a scan and persist the first found printer locally
+    if (!printerName) {
+      // Scan printers and automatically persist the first found as a default.
+      const found = await scanPrinters(true)
+      if (found && found.length > 0) {
+        printerName = found[0]
+      }
+    }
+
+    if (!printerName) {
+      throw new Error("[Print] ❌ No printer found. Check printer settings or ensure Local Print Agent (/printers endpoint) is reachable at " + LOCAL_PRINT_AGENT_URL)
     }
   }
-
-  if (!printerName) throw new Error("[Print] ❌ No printer found. Check printer settings or ensure Local Print Agent (/printers endpoint) is reachable at " + LOCAL_PRINT_AGENT_URL)
 
   const saleId = String(payload?.sale?.id || "").trim()
   let contentBase64: string | null = null
@@ -249,9 +294,15 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
   }
 
   const job: EscposPrintJob = {
-    printerName: printerName,
+    printerName: printerName || "RAWBT",
     contentBase64: contentBase64,
     jobName: receiptNumber ? `PrimePOS Receipt ${receiptNumber}` : "PrimePOS Receipt",
+  }
+
+  if (shouldUseRawBT(channel)) {
+    console.log("[Print] Sending receipt to RawBT:", { channel })
+    printViaRawBT(job.contentBase64)
+    return
   }
 
   console.log("[Print] Sending print job to agent:", {

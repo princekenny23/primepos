@@ -11,8 +11,12 @@ import { useToast } from "@/components/ui/use-toast"
 
 
 const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
+const LOCAL_PRINT_AGENT_URL =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
+const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
+type PrintChannel = "auto" | "agent" | "rawbt"
 
 function encodeTextToBase64(text: string): string {
   const bytes = new TextEncoder().encode(text)
@@ -44,6 +48,7 @@ async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
 
 export function PrinterSettings() {
   const { toast } = useToast()
+  const [printChannel, setPrintChannel] = useState<PrintChannel>("auto")
   const [connected, setConnected] = useState(false)
   const [printers, setPrinters] = useState<string[]>([])
   const [selectedPrinter, setSelectedPrinter] = useState<string>("")
@@ -56,6 +61,35 @@ export function PrinterSettings() {
     () => Array.from(new Set([...(printers || []), ...extraPrinters])),
     [printers, extraPrinters]
   )
+
+  useEffect(() => {
+    try {
+      const saved = String(localStorage.getItem(PRINT_CHANNEL_STORAGE_KEY) || "auto").toLowerCase()
+      if (saved === "agent" || saved === "rawbt" || saved === "auto") {
+        setPrintChannel(saved)
+      }
+    } catch {
+      // ignore localStorage failures
+    }
+  }, [])
+
+  const savePrintChannel = (next: PrintChannel) => {
+    setPrintChannel(next)
+    try {
+      localStorage.setItem(PRINT_CHANNEL_STORAGE_KEY, next)
+    } catch {
+      // ignore localStorage failures
+    }
+    toast({
+      title: "Print mode updated",
+      description:
+        next === "rawbt"
+          ? "Receipts will open in RawBT (best for Android mobile)."
+          : next === "agent"
+            ? "Receipts will always use the Local Print Agent."
+            : "Auto mode enabled: Android uses RawBT, desktop uses Local Print Agent.",
+    })
+  }
 
   useEffect(() => {
     const ping = async () => {
@@ -244,6 +278,21 @@ export function PrinterSettings() {
           </div>
           <p className="text-xs text-muted-foreground">
             Set NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL and NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN in your frontend environment.
+          </p>
+        </div>
+
+        <div className="rounded border p-3 text-sm space-y-3">
+          <div className="font-medium">Print Mode</div>
+          <p className="text-xs text-muted-foreground">
+            Auto mode uses RawBT on Android mobile and Local Print Agent on desktop.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant={printChannel === "auto" ? "default" : "outline"} onClick={() => savePrintChannel("auto")}>Auto</Button>
+            <Button variant={printChannel === "agent" ? "default" : "outline"} onClick={() => savePrintChannel("agent")}>Agent Only</Button>
+            <Button variant={printChannel === "rawbt" ? "default" : "outline"} onClick={() => savePrintChannel("rawbt")}>RawBT</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            For RawBT mode, install RawBT on Android and set it as the default handler.
           </p>
         </div>
 
