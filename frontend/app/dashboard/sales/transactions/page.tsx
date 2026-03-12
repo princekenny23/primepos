@@ -475,7 +475,11 @@ export default function TransactionsPage() {
             discount: selectedSale.discount || 0,
             total: selectedSale.total || 0,
             paymentMethod: selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "cash",
-            status: selectedSale.status || "completed",
+            status: selectedSale.status || (
+              ["tab", "credit"].includes(String(selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "").toLowerCase())
+                ? "pending"
+                : "completed"
+            ),
           }}
         />
       )}

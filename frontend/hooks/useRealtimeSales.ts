@@ -88,6 +88,14 @@ export function useRealtimeSales() {
           const data: WebSocketMessage = JSON.parse(event.data)
 
           if (data.type === "sale_update" && data.sale) {
+            const paymentMethod = data.sale.payment_method || "cash"
+            const normalizedPaymentMethod = String(paymentMethod).toLowerCase()
+            const derivedStatus = data.sale.status || (
+              normalizedPaymentMethod === "tab" || normalizedPaymentMethod === "credit"
+                ? "pending"
+                : "completed"
+            )
+
             // Transform backend sale to frontend format
             const sale: Sale = {
               id: String(data.sale.id),
@@ -106,8 +114,8 @@ export function useRealtimeSales() {
               subtotal: parseFloat(data.sale.subtotal) || 0,
               tax: parseFloat(data.sale.tax) || 0,
               total: parseFloat(data.sale.total) || 0,
-              paymentMethod: data.sale.payment_method || "cash",
-              status: data.sale.status || "completed",
+              paymentMethod,
+              status: derivedStatus,
               createdAt: data.sale.created_at || new Date().toISOString(),
               _raw: data.sale,
             } as any
