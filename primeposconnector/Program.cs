@@ -9,7 +9,11 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("LocalFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://127.0.0.1:3000")
+        // Allow any origin because this agent runs locally on the user's machine
+        // and must accept requests from any deployment of the PrimePOS frontend
+        // (localhost in development, production web app, Electron, etc.).
+        // Token-based authentication (X-Primepos-Token) provides access control.
+        policy.AllowAnyOrigin()
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
