@@ -11,8 +11,8 @@ from django.template import engines
 import logging
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
-from .models import Sale, SaleItem, Receipt, ReceiptTemplate
-from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer
+from .models import Sale, SaleItem, Receipt, ReceiptTemplate, PrintJob
+from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer, PrintJobSerializer
 from .services import ReceiptService
 from apps.products.models import Product, ProductUnit
 from apps.inventory.models import StockMovement, LocationStock, Batch
@@ -1149,6 +1149,68 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             logger.error(f"Failed to generate escpos receipt for sale {sale.id}: {str(e)}", exc_info=True)
             return Response({"detail": "Failed to generate escpos receipt"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=['post'], url_path='enqueue-print')
+    def enqueue_print(self, request, pk=None):
+        """Queue a print job for local agent processing.
+
+        This endpoint is cloud-safe: it stores print payload in DB so a local
+        print agent can pull and print later.
+        """
+        sale = self.get_object()
+        tenant = getattr(request, 'tenant', None) or request.user.tenant
+
+        from apps.tenants.permissions import is_admin_user
+        if not is_admin_user(request.user) and tenant and sale.tenant != tenant:
+            return Response({"detail": "You do not have permission to print this sale."}, status=status.HTTP_403_FORBIDDEN)
+
+        channel = str(request.data.get('channel', 'agent') or 'agent').strip().lower()
+        if channel not in ['agent', 'mobile']:
+            channel = 'agent'
+
+        printer_name = str(request.data.get('printer_name', '') or '').strip()
+        device_id = str(request.data.get('device_id', '') or '').strip()
+        requested_width = str(request.data.get('paper_width', 'auto') or 'auto').strip().lower()
+        normalized_width = 'auto'
+        if requested_width in ('58', '58mm'):
+            normalized_width = '58'
+        elif requested_width in ('80', '80mm'):
+            normalized_width = '80'
+
+        try:
+            content_base64 = ReceiptService._generate_escpos_receipt(
+                sale,
+                paper_width=normalized_width,
+                printer_name=printer_name,
+            )
+
+            job = PrintJob.objects.create(
+                tenant=sale.tenant,
+                outlet=sale.outlet,
+                sale=sale,
+                requested_by=request.user,
+                channel=channel,
+                device_id=device_id,
+                printer_identifier=printer_name,
+                payload={
+                    'format': 'escpos',
+                    'content_base64': content_base64,
+                    'receipt_number': sale.receipt_number,
+                    'paper_width': normalized_width,
+                    'sale_id': sale.id,
+                },
+            )
+
+            return Response({
+                'queued': True,
+                'print_job_id': job.id,
+                'status': job.status,
+                'receipt_number': sale.receipt_number,
+            }, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to enqueue print job for sale {sale.id}: {str(e)}", exc_info=True)
+            return Response({"detail": "Failed to enqueue print job"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @action(detail=False, methods=['get'])
     def stats(self, request):
         """Get sales statistics - optimized with database aggregation"""
@@ -1345,6 +1407,103 @@ class ReceiptViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             queryset = queryset.filter(generated_at__lte=end_date)
         
         return queryset
+
+
+class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
+    """Read/claim/complete print jobs for local print agents."""
+
+    queryset = PrintJob.objects.select_related('tenant', 'outlet', 'sale', 'requested_by').all()
+    serializer_class = PrintJobSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['tenant', 'outlet', 'status', 'channel', 'device_id']
+    search_fields = ['printer_identifier', 'device_id', 'sale__receipt_number']
+    ordering_fields = ['created_at', 'updated_at', 'claimed_at', 'completed_at']
+    ordering = ['created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not hasattr(user, '_tenant_loaded'):
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            try:
+                user = User.objects.select_related('tenant').get(pk=user.pk)
+                self.request.user = user
+                user._tenant_loaded = True
+            except User.DoesNotExist:
+                pass
+
+        is_saas_admin = getattr(user, 'is_saas_admin', False)
+        request_tenant = getattr(self.request, 'tenant', None)
+        user_tenant = getattr(user, 'tenant', None)
+        tenant = request_tenant or user_tenant
+
+        queryset = PrintJob.objects.select_related('tenant', 'outlet', 'sale', 'requested_by').all()
+        if not is_saas_admin:
+            if tenant:
+                queryset = queryset.filter(tenant=tenant)
+            else:
+                return queryset.none()
+
+        status_filter = self.request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        return queryset
+
+    @action(detail=False, methods=['post'], url_path='claim-next')
+    def claim_next(self, request):
+        """Atomically claim next pending print job for a device."""
+        user = request.user
+        tenant = getattr(request, 'tenant', None) or user.tenant
+        outlet = self.get_outlet_for_request(request)
+        channel = str(request.data.get('channel', 'agent') or 'agent').strip().lower()
+        if channel not in ['agent', 'mobile']:
+            channel = 'agent'
+
+        device_id = str(request.data.get('device_id', '') or '').strip()
+
+        with transaction.atomic():
+            qs = PrintJob.objects.select_for_update().filter(status='pending', channel=channel)
+            if tenant:
+                qs = qs.filter(tenant=tenant)
+            if outlet:
+                qs = qs.filter(outlet=outlet)
+            if device_id:
+                qs = qs.filter(models.Q(device_id='') | models.Q(device_id=device_id))
+
+            job = qs.order_by('created_at').first()
+            if not job:
+                return Response({'detail': 'No pending jobs'}, status=status.HTTP_204_NO_CONTENT)
+
+            job.status = 'claimed'
+            job.claimed_at = timezone.now()
+            if device_id:
+                job.device_id = device_id
+            job.save(update_fields=['status', 'claimed_at', 'device_id', 'updated_at'])
+
+        return Response(PrintJobSerializer(job).data)
+
+    @action(detail=True, methods=['post'], url_path='complete')
+    def complete(self, request, pk=None):
+        """Mark claimed job as completed/failed."""
+        job = self.get_object()
+        result = str(request.data.get('result', 'completed') or 'completed').strip().lower()
+        error_message = str(request.data.get('error_message', '') or '').strip()
+
+        if result not in ['completed', 'failed', 'cancelled']:
+            result = 'completed'
+
+        job.status = result
+        if result == 'completed':
+            job.completed_at = timezone.now()
+            job.error_message = ''
+            job.save(update_fields=['status', 'completed_at', 'error_message', 'updated_at'])
+        else:
+            job.error_message = error_message
+            job.save(update_fields=['status', 'error_message', 'updated_at'])
+
+        return Response(PrintJobSerializer(job).data)
     
     @action(detail=False, methods=['get'], url_path='by-number/(?P<receipt_number>[^/.]+)')
     def by_number(self, request, receipt_number=None):

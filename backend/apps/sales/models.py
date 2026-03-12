@@ -427,3 +427,52 @@ class ReceiptTemplate(models.Model):
                 ReceiptTemplate.objects.filter(tenant=self.tenant).update(is_default=False)
         super().save(*args, **kwargs)
 
+
+class PrintJob(models.Model):
+    """Queued print job used by cloud-hosted apps and local print agents."""
+
+    CHANNEL_CHOICES = [
+        ('agent', 'Local Print Agent'),
+        ('mobile', 'Mobile Share'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('claimed', 'Claimed'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='print_jobs')
+    outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, null=True, blank=True, related_name='print_jobs')
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, null=True, blank=True, related_name='print_jobs')
+    requested_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='requested_print_jobs')
+
+    channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default='agent')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    device_id = models.CharField(max_length=100, blank=True, default='')
+    printer_identifier = models.CharField(max_length=255, blank=True, default='')
+    payload = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True, default='')
+
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_printjob'
+        verbose_name = 'Print Job'
+        verbose_name_plural = 'Print Jobs'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tenant', 'status']),
+            models.Index(fields=['tenant', 'device_id', 'status']),
+            models.Index(fields=['outlet', 'status']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"PrintJob #{self.pk} ({self.status})"
+
