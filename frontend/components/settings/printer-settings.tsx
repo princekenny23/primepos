@@ -10,8 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useToast } from "@/components/ui/use-toast"
 
 
-const LOCAL_PRINT_AGENT_URL =
-  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 
@@ -29,7 +28,7 @@ async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
   if (LOCAL_PRINT_AGENT_TOKEN) {
     headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
   }
-  const url = `${LOCAL_PRINT_AGENT_URL}${path}`
+  const url = `${LOCAL_PRINT_PROXY_BASE}${path}`
   console.log("[Printer Settings] Calling agent:", { url, method: init?.method || "GET" })
   const response = await fetch(url, {
     ...init,

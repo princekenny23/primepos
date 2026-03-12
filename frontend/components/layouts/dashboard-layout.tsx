@@ -61,8 +61,7 @@ const navTranslationKeys: Record<string, string> = {
   "Bar": "common.navigation.bar",
 }
 
-const LOCAL_PRINT_AGENT_URL =
-  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 const AGENT_PING_INTERVAL_MS = 15000
@@ -160,7 +159,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
 
     const pingAgent = async () => {
       try {
-        const response = await fetch(`${LOCAL_PRINT_AGENT_URL}/health`, {
+        const response = await fetch(`${LOCAL_PRINT_PROXY_BASE}/health`, {
           method: "GET",
           headers: buildAgentHeaders(),
         })
