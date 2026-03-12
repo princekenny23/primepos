@@ -167,6 +167,22 @@ export function PrinterSettings() {
     }
   }
 
+  const testRawBT = () => {
+    try {
+      const text = `PRIMEPOS RAWBT TEST\n${new Date().toLocaleString()}\n\n`
+      const contentBase64 = encodeTextToBase64(text)
+      const rawbtUrl = `rawbt:base64,${encodeURIComponent(contentBase64)}`
+      window.location.href = rawbtUrl
+      toast({ title: "RawBT test started", description: "Opening RawBT with a test receipt." })
+    } catch (err: any) {
+      toast({
+        title: "RawBT test failed",
+        description: err?.message || "Could not open RawBT. Make sure RawBT is installed.",
+        variant: "destructive",
+      })
+    }
+  }
+
   const addManualPrinter = () => {
     if (!manualPrinter) return
     const normalized = manualPrinter.trim()
@@ -352,7 +368,8 @@ export function PrinterSettings() {
         </div>
 
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={testPrint} disabled={!selectedPrinter || !connected}>Test Print</Button>
+          <Button variant="outline" onClick={testPrint} disabled={!selectedPrinter || !connected}>Test Agent Print</Button>
+          <Button variant="outline" onClick={testRawBT}>Test RawBT</Button>
           <Button onClick={saveSelection}>Save Default Printer</Button>
         </div>
       </CardContent>
