@@ -92,6 +92,14 @@ export function PrinterSettings() {
   }
 
   useEffect(() => {
+    const hostname = typeof window !== "undefined" ? window.location.hostname : ""
+    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+
+    if (!isLocalHost) {
+      setConnected(false)
+      return
+    }
+
     const ping = async () => {
       try {
         await agentFetch("/health", { method: "GET" })
