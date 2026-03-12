@@ -157,6 +157,14 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
     let cancelled = false
     let intervalId: ReturnType<typeof setInterval> | undefined
 
+    const hostname = typeof window !== "undefined" ? window.location.hostname : ""
+    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+
+    if (!isLocalHost) {
+      setAgentStatus("disconnected")
+      return
+    }
+
     const pingAgent = async () => {
       try {
         const response = await fetch(`${LOCAL_PRINT_PROXY_BASE}/health`, {
