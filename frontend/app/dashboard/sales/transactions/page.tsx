@@ -410,7 +410,21 @@ export default function TransactionsPage() {
                         {currentBusiness?.currencySymbol || "MWK"} {sale.total.toFixed(2)}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="default">Completed</Badge>
+                        {(() => {
+                          const saleStatus = String(
+                            sale.status || sale._raw?.status || (
+                              ["tab","credit"].includes(String(sale._raw?.payment_method || sale.payment_method || sale.paymentMethod || "").toLowerCase())
+                                ? "pending"
+                                : "completed"
+                            )
+                          ).toLowerCase()
+                          const isPending = saleStatus === "pending"
+                          return (
+                            <Badge variant={isPending ? "outline" : "default"} className={isPending ? "border-yellow-500 text-yellow-700 bg-yellow-50" : ""}>
+                              {isPending ? "Pending" : "Completed"}
+                            </Badge>
+                          )
+                        })()}
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>
