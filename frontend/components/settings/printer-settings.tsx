@@ -48,6 +48,9 @@ async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
 
 export function PrinterSettings() {
   const { toast } = useToast()
+  const isLocalHost = typeof window !== "undefined"
+    ? ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
+    : false
   const [printChannel, setPrintChannel] = useState<PrintChannel>("auto")
   const [connected, setConnected] = useState(false)
   const [printers, setPrinters] = useState<string[]>([])
@@ -92,9 +95,6 @@ export function PrinterSettings() {
   }
 
   useEffect(() => {
-    const hostname = typeof window !== "undefined" ? window.location.hostname : ""
-    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
-
     if (!isLocalHost) {
       setConnected(false)
       return
@@ -112,6 +112,15 @@ export function PrinterSettings() {
   }, [])
 
   const connectAgent = async () => {
+    if (!isLocalHost) {
+      setConnected(false)
+      toast({
+        title: "Local agent unavailable on cloud",
+        description: "Use the PrimePOS connector on your local machine for cloud auto-printing.",
+      })
+      return
+    }
+
     try {
       await agentFetch("/health", { method: "GET" })
       setConnected(true)
@@ -128,6 +137,14 @@ export function PrinterSettings() {
   }
 
   const scanPrinters = async () => {
+    if (!isLocalHost) {
+      toast({
+        title: "Printer scan unavailable on cloud",
+        description: "Run this screen on localhost to scan local printers.",
+      })
+      return
+    }
+
     setIsScanning(true)
     try {
       const response = await agentFetch("/printers", { method: "GET" })
@@ -153,6 +170,14 @@ export function PrinterSettings() {
   }
 
   const testPrint = async () => {
+    if (!isLocalHost) {
+      toast({
+        title: "Local test print unavailable on cloud",
+        description: "Cloud mode prints through connector queue, not /api/local-print.",
+      })
+      return
+    }
+
     if (!selectedPrinter) {
       toast({ title: "No printer selected", description: "Select a printer to test-print." })
       return
@@ -334,9 +359,9 @@ export function PrinterSettings() {
         </div>
 
         <div className="flex gap-2">
-          <Button onClick={connectAgent} disabled={connected}>Connect Agent</Button>
-          <Button variant="outline" onClick={disconnectAgent} disabled={!connected}>Disconnect</Button>
-          <Button variant="ghost" onClick={scanPrinters} disabled={!connected || isScanning}>{isScanning ? "Scanning..." : "Scan Printers"}</Button>
+          <Button onClick={connectAgent} disabled={connected || !isLocalHost}>Connect Agent</Button>
+          <Button variant="outline" onClick={disconnectAgent} disabled={!connected || !isLocalHost}>Disconnect</Button>
+          <Button variant="ghost" onClick={scanPrinters} disabled={!connected || isScanning || !isLocalHost}>{isScanning ? "Scanning..." : "Scan Printers"}</Button>
         </div>
 
         <div className="space-y-2">
