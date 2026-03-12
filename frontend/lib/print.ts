@@ -57,6 +57,39 @@ function shouldUseBluetoothUsbThermalPrinterPlus(channel: PrintChannel): boolean
   return isAndroidMobileDevice()
 }
 
+function escposBase64ToPrintableText(contentBase64: string): string {
+  try {
+    const binary = atob(contentBase64)
+    // Strip common ESC/POS control bytes and preserve printable content/newlines.
+    const stripped = binary
+      .replace(/\x1b@/g, "")
+      .replace(/\x1dV\x00/g, "")
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    return stripped
+  } catch {
+    return ""
+  }
+}
+
+async function getBackendEscposPayload(
+  saleId: string,
+  printerName?: string | null
+): Promise<{ contentBase64: string; receiptNumber: string } | null> {
+  try {
+    const params = new URLSearchParams()
+    params.set("paper_width", "auto")
+    if (printerName) params.set("printer_name", printerName)
+    const response: any = await api.get(`/sales/${saleId}/escpos-receipt/?${params.toString()}`)
+    if (!response?.content) return null
+    return {
+      contentBase64: String(response.content),
+      receiptNumber: String(response.receipt_number || saleId),
+    }
+  } catch {
+    return null
+  }
+}
+
 async function printViaBluetoothUsbThermalPrinterPlus(plainTextReceipt: string): Promise<void> {
   if (typeof window === "undefined") {
     throw new Error("Bluetooth-USB Thermal Printer+ printing must be initiated from the browser")
@@ -187,8 +220,9 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
  * Print a receipt using the Local Print Agent.
  *
  * Behavior:
- *  - Build one shared receipt content payload for all channels.
- *  - Mobile and Local Print Agent both reuse the same receipt content.
+ *  - Prefer backend-generated ESC/POS receipt payload as the single source of truth.
+ *  - Mobile and Local Print Agent both reuse that same backend payload.
+ *  - If backend payload is unavailable, fall back to client plain-text receipt.
  *
  * Safety:
  *  - Preserves printer resolution logic; local agent handles physical printing.
@@ -231,16 +265,29 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     }
   }
 
-  const receiptNumber = String(payload?.sale?.receipt_number || payload?.sale?.id || "")
-  const plainTextReceipt = buildPlainTextReceipt(payload)
-  // Proper UTF-8 to base64 encoding (avoids deprecated unescape)
-  const encoder = new TextEncoder()
-  const data = encoder.encode(plainTextReceipt)
-  let binary = ""
-  for (let i = 0; i < data.length; i++) {
-    binary += String.fromCharCode(data[i])
+  const saleId = String(payload?.sale?.id || "").trim()
+  let receiptNumber = String(payload?.sale?.receipt_number || payload?.sale?.id || "")
+  let contentBase64 = ""
+
+  if (saleId) {
+    const backendEscpos = await getBackendEscposPayload(saleId, printerName)
+    if (backendEscpos?.contentBase64) {
+      contentBase64 = backendEscpos.contentBase64
+      receiptNumber = backendEscpos.receiptNumber
+    }
   }
-  const contentBase64 = btoa(binary)
+
+  if (!contentBase64) {
+    const plainTextReceipt = buildPlainTextReceipt(payload)
+    // Proper UTF-8 to base64 encoding (avoids deprecated unescape)
+    const encoder = new TextEncoder()
+    const data = encoder.encode(plainTextReceipt)
+    let binary = ""
+    for (let i = 0; i < data.length; i++) {
+      binary += String.fromCharCode(data[i])
+    }
+    contentBase64 = btoa(binary)
+  }
 
   const job: EscposPrintJob = {
     printerName: printerName || "MOBILE_APP",
@@ -250,7 +297,8 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
 
   if (shouldUseBluetoothUsbThermalPrinterPlus(channel)) {
     console.log("[Print] Sending receipt to Bluetooth-USB Thermal Printer+:", { channel })
-    await printViaBluetoothUsbThermalPrinterPlus(plainTextReceipt)
+    const printableText = escposBase64ToPrintableText(contentBase64) || buildPlainTextReceipt(payload)
+    await printViaBluetoothUsbThermalPrinterPlus(printableText)
     return
   }
 
