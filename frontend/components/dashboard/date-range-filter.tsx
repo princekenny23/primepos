@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select"
 import { Calendar } from "lucide-react"
 import { DatePicker } from "@/components/ui/date-picker"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { format } from "date-fns"
 
@@ -31,8 +31,19 @@ const presetRanges = [
 
 export function DateRangeFilter({ onRangeChange }: DateRangeFilterProps) {
   const [selectedPreset, setSelectedPreset] = useState<string>("last7")
-  const [startDate, setStartDate] = useState<Date | undefined>()
-  const [endDate, setEndDate] = useState<Date | undefined>()
+  const [startDate, setStartDate] = useState<Date | undefined>(() => {
+    const today = new Date()
+    const start = new Date(today)
+    start.setDate(start.getDate() - 6)
+    return start
+  })
+  const [endDate, setEndDate] = useState<Date | undefined>(() => new Date())
+
+  useEffect(() => {
+    onRangeChange?.({ start: startDate, end: endDate })
+    // Trigger once on mount so consumers don't silently default to unrelated ranges.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handlePresetChange = (value: string) => {
     setSelectedPreset(value)
@@ -57,11 +68,11 @@ export function DateRangeFilter({ onRangeChange }: DateRangeFilterProps) {
         break
       case "last7":
         start = new Date(today)
-        start.setDate(start.getDate() - 7)
+        start.setDate(start.getDate() - 6)
         break
       case "last30":
         start = new Date(today)
-        start.setDate(start.getDate() - 30)
+        start.setDate(start.getDate() - 29)
         break
       case "thisMonth":
         start = new Date(today.getFullYear(), today.getMonth(), 1)

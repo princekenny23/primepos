@@ -116,6 +116,17 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
     return "piece"
   }
 
+  const getUnitsSummary = (product: Product) => {
+    const baseUnit = (product.unit || "piece").trim()
+    const unitNames = (product.selling_units || [])
+      .filter((u) => u.is_active !== false)
+      .map((u) => (u.unit_name || "").trim())
+      .filter(Boolean)
+
+    const allUnits = Array.from(new Set([baseUnit, ...unitNames]))
+    return allUnits.join(" | ")
+  }
+
   return (
     <>
       <ScrollArea className="flex-1">
@@ -128,15 +139,25 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
             return (
               <Card
                 key={product.id}
-                className="cursor-pointer hover:shadow-md transition-shadow border border-muted"
+                className="h-36 cursor-pointer hover:shadow-md transition-shadow border border-muted"
                 onClick={() => handleProductClick(product)}
               >
-                <CardContent className="p-3">
-                  <div className="flex flex-col gap-2">
-                    <div className="text-sm leading-tight whitespace-normal break-normal">
+                <CardContent className="h-full p-3">
+                  <div className="flex h-full flex-col gap-1.5">
+                    <div className="min-h-[2.5rem] text-sm font-medium leading-tight overflow-hidden">
                       {product.name}
                     </div>
 
+                    <div
+                      className="truncate text-[11px] text-muted-foreground"
+                      title={getUnitsSummary(product)}
+                    >
+                      Units: {getUnitsSummary(product)}
+                    </div>
+
+                    <div className={`mt-auto text-xs ${stockColor}`}>
+                      Stock: {product.stock || 0}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -187,7 +208,6 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
 
             {/* Quantity input */}
             <div className="space-y-2">
-              <Label htmlFor="qty">Quantity ({getUnitLabel()})</Label>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -215,9 +235,6 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
                   +
                 </Button>
               </div>
-              <p className="text-xs text-gray-500">
-                Available: {getAvailableQuantity()} {getUnitLabel()}
-              </p>
             </div>
 
             {/* Price info */}

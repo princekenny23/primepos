@@ -19,6 +19,13 @@ import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 
+function formatDate(date?: Date) {
+  if (!date) return undefined
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString().split("T")[0]
+}
+
 export default function BarDashboardPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet: businessOutlet } = useBusinessStore()
@@ -28,6 +35,12 @@ export default function BarDashboardPage() {
   const [chartData, setChartData] = useState<any[]>([])
   const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
+  const [selectedRange, setSelectedRange] = useState<{ start?: Date; end?: Date }>(() => {
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - 6)
+    return { start, end }
+  })
   const [isLoadingData, setIsLoadingData] = useState(true)
   const [refreshTick, setRefreshTick] = useState(0)
   
@@ -80,12 +93,15 @@ export default function BarDashboardPage() {
       try {
         const today = new Date()
         today.setHours(0, 0, 0, 0)
-        const todayStr = today.toISOString().split("T")[0]
+        const startDate = selectedRange.start || today
+        const endDate = selectedRange.end || today
+        const startDateStr = formatDate(startDate)
+        const endDateStr = formatDate(endDate)
 
         const [kpi, chart, recentSales, lowStockData] = await Promise.all([
-          generateKPIData(currentBusiness.id, currentBusiness, outletId),
-          generateChartData(currentBusiness.id, outletId),
-          saleService.list({ outlet: outletId, status: "completed", start_date: todayStr, limit: 10 }).catch(() => ({ results: [] })),
+          generateKPIData(currentBusiness.id, currentBusiness, outletId, selectedRange),
+          generateChartData(currentBusiness.id, outletId, selectedRange),
+          saleService.list({ outlet: outletId, status: "completed", start_date: startDateStr, end_date: endDateStr, limit: 10 }).catch(() => ({ results: [] })),
           productService.getLowStock(outletId).catch(() => []),
         ])
         
@@ -132,7 +148,7 @@ export default function BarDashboardPage() {
     if (currentBusiness) {
       loadDashboardData()
     }
-  }, [currentBusiness, outletId, refreshTick])
+  }, [currentBusiness, outletId, refreshTick, selectedRange])
 
   useEffect(() => {
     const handleDashboardRefresh = () => {
@@ -162,8 +178,6 @@ export default function BarDashboardPage() {
     products: { value: 0, change: 0 },
     expenses: { value: 0, change: 0 },
     profit: { value: 0, change: 0 },
-    transactions: { value: 0, change: 0 },
-    avgOrderValue: { value: 0, change: 0 },
     lowStockItems: { value: 0, change: 0 },
     outstandingCredit: { value: 0, change: 0 },
     returns: { value: 0, change: 0 },
@@ -188,7 +202,7 @@ export default function BarDashboardPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <PageRefreshButton />
-            <DateRangeFilter />
+            <DateRangeFilter onRangeChange={setSelectedRange} />
           </div>
         </div>
 
@@ -200,7 +214,7 @@ export default function BarDashboardPage() {
           <Card className="h-full">
             <CardHeader>
               <CardTitle>Sales Overview</CardTitle>
-              <CardDescription>Sales and profit trends over the last 7 days.</CardDescription>
+              <CardDescription>Sales and profit trends for the selected period.</CardDescription>
             </CardHeader>
             <CardContent>
               <SalesChart data={chartData} type="area" />

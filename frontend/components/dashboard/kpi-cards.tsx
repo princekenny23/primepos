@@ -1,7 +1,7 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRight, ShoppingCart, CreditCard } from "lucide-react"
+import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRight, CreditCard } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Business } from "@/lib/types"
@@ -68,8 +68,6 @@ interface KPICardsProps {
     products: { value: number; change: number }
     expenses: { value: number; change: number }
     profit: { value: number; change: number }
-    transactions: { value: number; change: number }
-    avgOrderValue: { value: number; change: number }
     lowStockItems: { value: number; change: number }
     outstandingCredit: { value: number; change: number }
     returns: { value: number; change: number }
@@ -83,30 +81,20 @@ export function KPICards({ data, business }: KPICardsProps) {
       {/* Group 1: Sales Metrics */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <KPICard
-          title="Today's Sales"
+          title="Sales"
           value={formatCurrency(data.sales.value, business)}
           change={data.sales.change}
-          changeLabel="from yesterday"
+          changeLabel="vs previous period"
           icon={<DollarSign className="h-6 w-6" />}
           trend={data.sales.change >= 0 ? "up" : "down"}
           business={business}
           colorVariant="blue"
         />
         <KPICard
-          title="Transactions"
-          value={data.transactions.value.toLocaleString('en-US')}
-          change={data.transactions.change}
-          changeLabel="from yesterday"
-          icon={<ShoppingCart className="h-6 w-6" />}
-          trend={data.transactions.change >= 0 ? "up" : "down"}
-          business={business}
-          colorVariant="emerald"
-        />
-        <KPICard
           title="Expenses"
           value={formatCurrency(data.expenses.value, business)}
           change={data.expenses.change}
-          changeLabel="this month"
+          changeLabel="vs previous period"
           icon={<ArrowDownRight className="h-6 w-6" />}
           trend={data.expenses.change >= 0 ? "down" : "up"}
           business={business}
@@ -116,7 +104,7 @@ export function KPICards({ data, business }: KPICardsProps) {
           title="Profit"
           value={formatCurrency(data.profit.value, business)}
           change={data.profit.change}
-          changeLabel="today"
+          changeLabel="vs previous period"
           icon={<ArrowUpRight className="h-6 w-6" />}
           trend={data.profit.change >= 0 ? "up" : "down"}
           business={business}
@@ -125,7 +113,7 @@ export function KPICards({ data, business }: KPICardsProps) {
       </div>
 
       {/* Group 2: Business Metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <KPICard
           title="Customers"
           value={data.customers.value.toLocaleString('en-US')}
@@ -153,16 +141,6 @@ export function KPICards({ data, business }: KPICardsProps) {
           icon={<Users className="h-6 w-6" />}
           business={business}
           colorVariant="slate"
-        />
-        <KPICard
-          title="Purchases (Avg Order Value)"
-          value={formatCurrency(data.avgOrderValue.value, business)}
-          change={data.avgOrderValue.change}
-          changeLabel="this period"
-          icon={<ShoppingCart className="h-6 w-6" />}
-          trend={data.avgOrderValue.change >= 0 ? "up" : "down"}
-          business={business}
-          colorVariant="blue"
         />
       </div>
     </div>

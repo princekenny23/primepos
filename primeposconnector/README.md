@@ -24,6 +24,8 @@ The exe will be in `bin/Release/net8.0-windows/win-x64/publish/primeposconnector
 Edit `appsettings.json`:
 
 - `Server:Url` defaults to `http://127.0.0.1:7310`
+- `Cors:AllowedOrigins` lists frontend origins allowed to call the connector directly from browser.
+- `Cors:AllowVercelSubdomains` allows `https://*.vercel.app` origins.
 - `Security:Token` can be set to a shared secret. If set, clients must send `X-Primepos-Token`.
 - `Cloud:Enabled` set to `true` to enable auto-print polling from backend.
 - `Cloud:ApiBaseUrl` set to your API base, e.g. `https://your-backend-domain/api/v1`
