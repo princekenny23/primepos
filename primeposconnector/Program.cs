@@ -6,12 +6,14 @@ using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var corsOptions = builder.Configuration.GetSection("Cors").Get<ConnectorCorsOptions>() ?? new ConnectorCorsOptions();
+
 builder.Services.Configure<AgentOptions>(builder.Configuration);
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("LocalFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://127.0.0.1:3000")
+        policy.SetIsOriginAllowed(origin => ConnectorCorsOptions.IsAllowedOrigin(origin, corsOptions))
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -111,6 +113,38 @@ sealed class AgentOptions
     public ServerOptions? Server { get; set; }
     public SecurityOptions? Security { get; set; }
     public CloudOptions? Cloud { get; set; }
+}
+
+sealed class ConnectorCorsOptions
+{
+    public string[] AllowedOrigins { get; set; } = [];
+    public bool AllowVercelSubdomains { get; set; } = true;
+
+    public static bool IsAllowedOrigin(string? origin, ConnectorCorsOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(origin))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var host = uri.Host.ToLowerInvariant();
+        if (host == "localhost" || host == "127.0.0.1" || host == "::1")
+        {
+            return true;
+        }
+
+        if (options.AllowVercelSubdomains && host.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return options.AllowedOrigins.Any(allowed => string.Equals(allowed?.Trim(), origin, StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 sealed class ServerOptions

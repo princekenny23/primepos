@@ -45,15 +45,13 @@ def sales_report(request):
     end_date = request.query_params.get('end_date')
     outlet_id = get_outlet_id_from_request(request)
     payment_method = request.query_params.get('payment_method')
+
+    if not outlet_id:
+        return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
     
     queryset = Sale.objects.filter(tenant=tenant, status='completed')
     
-    # Always filter by outlet if provided (required for outlet isolation)
-    if outlet_id:
-        queryset = queryset.filter(outlet_id=outlet_id)
-    else:
-        # If no outlet specified, return empty results (reports are outlet-specific)
-        queryset = queryset.none()
+    queryset = queryset.filter(outlet_id=outlet_id)
     
     if start_date:
         queryset = queryset.filter(created_at__gte=start_date)
@@ -148,7 +146,11 @@ def customers_report(request):
     if not tenant:
         return Response({"detail": "User must have a tenant"}, status=400)
     
-    queryset = Customer.objects.filter(tenant=tenant, is_active=True)
+    outlet_id = get_outlet_id_from_request(request)
+    if not outlet_id:
+        return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
+
+    queryset = Customer.objects.filter(tenant=tenant, outlet_id=outlet_id, is_active=True)
     
     total_customers = queryset.count()
     total_points = queryset.aggregate(Sum('loyalty_points'))['loyalty_points__sum'] or 0
@@ -425,6 +427,9 @@ def cash_summary_report(request):
         return Response({"detail": "Invalid date format. Use YYYY-MM-DD"}, status=status.HTTP_400_BAD_REQUEST)
     
     outlet_id = get_outlet_id_from_request(request)
+
+    if not outlet_id:
+        return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
     
     # Filter cash sales
     queryset = Sale.objects.filter(
@@ -434,8 +439,7 @@ def cash_summary_report(request):
         created_at__date=report_date
     )
     
-    if outlet_id:
-        queryset = queryset.filter(outlet_id=outlet_id)
+    queryset = queryset.filter(outlet_id=outlet_id)
     
     # Aggregations
     total_cash_sales = queryset.count()
@@ -776,9 +780,11 @@ def expenses_report(request):
     end_date = request.query_params.get('end_date')
     outlet_id = get_outlet_id_from_request(request)
 
+    if not outlet_id:
+        return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
+
     queryset = Expense.objects.filter(tenant=tenant, status='approved')
-    if outlet_id:
-        queryset = queryset.filter(outlet_id=outlet_id)
+    queryset = queryset.filter(outlet_id=outlet_id)
     if start_date:
         queryset = queryset.filter(expense_date__gte=start_date)
     if end_date:

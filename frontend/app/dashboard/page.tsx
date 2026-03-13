@@ -19,6 +19,13 @@ import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 import { useAuthStore } from "@/stores/authStore"
 
+function formatDate(date?: Date) {
+  if (!date) return undefined
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString().split("T")[0]
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet } = useBusinessStore()
@@ -29,6 +36,12 @@ export default function DashboardPage() {
   const [chartData, setChartData] = useState<any[]>([])
   const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
+  const [selectedRange, setSelectedRange] = useState<{ start?: Date; end?: Date }>(() => {
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - 6)
+    return { start, end }
+  })
   const [isLoadingData, setIsLoadingData] = useState(true)
   const loadingRef = useRef(false)
   const { user } = useAuthStore()
@@ -45,7 +58,7 @@ export default function DashboardPage() {
   
   // Memoize outlet ID to prevent unnecessary re-renders
   const outletId = useMemo(() => currentOutlet?.id || tenantOutlet?.id, [currentOutlet?.id, tenantOutlet?.id])
-  
+
   // Redirect based on business type (only if on main dashboard, not if already on business-specific dashboard)
   useEffect(() => {
     if (!currentBusiness) {
@@ -92,12 +105,15 @@ export default function DashboardPage() {
     try {
       const today = new Date()
       today.setHours(0, 0, 0, 0)
-      const todayStr = today.toISOString().split("T")[0]
+      const startDate = selectedRange.start || today
+      const endDate = selectedRange.end || today
+      const startDateStr = formatDate(startDate)
+      const endDateStr = formatDate(endDate)
 
       const [kpi, chart, recentSales, lowStockData] = await Promise.all([
-        generateKPIData(currentBusiness.id, currentBusiness, outletId),
-        generateChartData(currentBusiness.id, outletId),
-        saleService.list({ outlet: outletId, status: "completed", start_date: todayStr, limit: 10 }).catch(() => ({ results: [] })),
+        generateKPIData(currentBusiness.id, currentBusiness, outletId, selectedRange),
+        generateChartData(currentBusiness.id, outletId, selectedRange),
+        saleService.list({ outlet: outletId, status: "completed", start_date: startDateStr, end_date: endDateStr, limit: 10 }).catch(() => ({ results: [] })),
         // Use getLowStock instead of loading all products
         productService.getLowStock(outletId).catch(() => []),
       ])
@@ -142,7 +158,7 @@ export default function DashboardPage() {
       setIsLoadingData(false)
       loadingRef.current = false
     }
-  }, [currentBusiness, outletId])
+  }, [currentBusiness, outletId, selectedRange])
   
   useEffect(() => {
     if (!currentBusiness) return
@@ -168,8 +184,6 @@ export default function DashboardPage() {
     products: { value: 0, change: 0 },
     expenses: { value: 0, change: 0 },
     profit: { value: 0, change: 0 },
-    transactions: { value: 0, change: 0 },
-    avgOrderValue: { value: 0, change: 0 },
     lowStockItems: { value: 0, change: 0 },
     outstandingCredit: { value: 0, change: 0 },
     returns: { value: 0, change: 0 },
@@ -219,7 +233,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <PageRefreshButton />
-            <DateRangeFilter />
+            <DateRangeFilter onRangeChange={setSelectedRange} />
           </div>
         </div>
 
@@ -231,7 +245,7 @@ export default function DashboardPage() {
           <Card className="h-full">
             <CardHeader>
               <CardTitle>Sales Overview</CardTitle>
-              <CardDescription>Sales and profit trends over the last 7 days.</CardDescription>
+              <CardDescription>Sales and profit trends for the selected period.</CardDescription>
             </CardHeader>
             <CardContent>
               <SalesChart data={chartData} type="area" />

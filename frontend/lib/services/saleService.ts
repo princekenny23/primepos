@@ -292,7 +292,7 @@ export const saleService = {
     return api.get(`/sales/stats/${query ? `?${query}` : ""}`)
   },
 
-  async getChartData(outletId?: string, status?: string): Promise<Array<{
+  async getChartData(outletId?: string, status?: string, startDate?: string, endDate?: string): Promise<Array<{
     date: string
     sales: number
     profit: number
@@ -300,6 +300,8 @@ export const saleService = {
     const params = new URLSearchParams()
     if (outletId) params.append("outlet", outletId)
     if (status) params.append("status", status)
+    if (startDate) params.append("start_date", startDate)
+    if (endDate) params.append("end_date", endDate)
     const query = params.toString()
     return api.get(`/sales/chart_data/${query ? `?${query}` : ""}`)
   },

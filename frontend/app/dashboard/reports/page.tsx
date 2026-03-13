@@ -107,12 +107,6 @@ export default function ReportsPage() {
           icon: Wallet,
           href: "/dashboard/reports/profit-loss",
         },
-        {
-          id: "expenses",
-          title: "Expense Report",
-          icon: FileText,
-          href: "/dashboard/reports/expenses",
-        },
       ],
     },
     {

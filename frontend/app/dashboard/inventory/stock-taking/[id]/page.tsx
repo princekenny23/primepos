@@ -582,51 +582,20 @@ export default function StockTakingDetailPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Adjust Count</DialogTitle>
-            <DialogDescription>
-              Update the physical count for {selectedItemForEdit?.product_name}
-            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Product Name</Label>
-              <p className="font-medium">{selectedItemForEdit?.product_name}</p>
-            </div>
-            <div className="space-y-2">
-              <Label>Barcode</Label>
-              <p className="text-sm text-muted-foreground">{selectedItemForEdit?.barcode || "N/A"}</p>
-            </div>
-            <div className="space-y-2">
-              <Label>Expected Quantity</Label>
-              <p className="font-medium">{selectedItemForEdit?.expectedQty}</p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="count">Counted Quantity *</Label>
+              <Label htmlFor="count">Counted</Label>
               <Input
                 id="count"
                 type="number"
                 min="0"
                 value={editCountValue}
                 onChange={(e) => setEditCountValue(e.target.value)}
-                placeholder="Enter physical count"
+                placeholder="Counted"
                 autoFocus
               />
             </div>
-            {selectedItemForEdit && (
-              <div className="space-y-2">
-                <Label>Difference</Label>
-                <p className={cn(
-                  "font-semibold",
-                  (parseInt(editCountValue) || 0) - selectedItemForEdit.expectedQty === 0
-                    ? "text-muted-foreground"
-                    : (parseInt(editCountValue) || 0) - selectedItemForEdit.expectedQty > 0
-                    ? "text-green-600"
-                    : "text-red-600"
-                )}>
-                  {(parseInt(editCountValue) || 0) - selectedItemForEdit.expectedQty >= 0 ? "+" : ""}
-                  {(parseInt(editCountValue) || 0) - selectedItemForEdit.expectedQty}
-                </p>
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setSelectedItemForEdit(null)}>

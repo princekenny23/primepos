@@ -1223,9 +1223,9 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         end_date = request.query_params.get('end_date')
         
         if start_date:
-            queryset = queryset.filter(created_at__gte=start_date)
+            queryset = queryset.filter(created_at__date__gte=start_date)
         if end_date:
-            queryset = queryset.filter(created_at__lte=end_date)
+            queryset = queryset.filter(created_at__date__lte=end_date)
         
         # Use database aggregation instead of Python iteration (much faster)
         stats = queryset.aggregate(
@@ -1248,10 +1248,11 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     
     @action(detail=False, methods=['get'])
     def chart_data(self, request):
-        """Get chart data for last 7 days - optimized single query"""
+        """Get chart data for selected range (defaults to last 7 days) - optimized single query"""
         from django.db.models import Sum, Count
         from django.db.models.functions import TruncDate
         from datetime import timedelta
+        from django.utils.dateparse import parse_date
         
         queryset = self.filter_queryset(self.get_queryset())
         
@@ -1260,9 +1261,12 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if outlet:
             queryset = queryset.filter(outlet=outlet)
         
-        # Get date range (last 7 days)
-        end_date = timezone.now().date()
-        start_date = end_date - timedelta(days=6)
+        # Get date range from params, fallback to last 7 days
+        end_date = parse_date(request.query_params.get('end_date', '')) or timezone.now().date()
+        start_date = parse_date(request.query_params.get('start_date', '')) or (end_date - timedelta(days=6))
+
+        if start_date > end_date:
+            start_date, end_date = end_date, start_date
         
         # Filter by date range
         queryset = queryset.filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
@@ -1278,10 +1282,11 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Create a map of date -> stats
         stats_map = {str(item['date']): item for item in daily_stats}
         
-        # Build response for all 7 days
+        # Build response for all days in requested range
         chart_data = []
-        for i in range(6, -1, -1):
-            date = end_date - timedelta(days=i)
+        total_days = (end_date - start_date).days
+        for i in range(total_days + 1):
+            date = start_date + timedelta(days=i)
             date_str = str(date)
             day_stats = stats_map.get(date_str, {'sales': 0, 'count': 0})
             
@@ -1312,9 +1317,9 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
         if start_date:
-            queryset = queryset.filter(created_at__gte=start_date)
+            queryset = queryset.filter(created_at__date__gte=start_date)
         if end_date:
-            queryset = queryset.filter(created_at__lte=end_date)
+            queryset = queryset.filter(created_at__date__lte=end_date)
         
         # Aggregate sale items by product
         top_items = SaleItem.objects.filter(

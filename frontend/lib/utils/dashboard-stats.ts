@@ -36,6 +36,41 @@ export interface ActivityItem {
   amount?: number
 }
 
+export interface DashboardDateRange {
+  start?: Date
+  end?: Date
+}
+
+function toDateOnlyString(date: Date): string {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString().split("T")[0]
+}
+
+function buildRange(range?: DashboardDateRange): { start: Date; end: Date; previousStart: Date; previousEnd: Date } {
+  const end = range?.end ? new Date(range.end) : new Date()
+  end.setHours(0, 0, 0, 0)
+
+  const start = range?.start ? new Date(range.start) : new Date(end)
+  if (!range?.start) {
+    start.setDate(start.getDate() - 6)
+  }
+  start.setHours(0, 0, 0, 0)
+
+  const diffDays = Math.max(1, Math.floor((end.getTime() - start.getTime()) / 86400000) + 1)
+  const previousEnd = new Date(start)
+  previousEnd.setDate(previousEnd.getDate() - 1)
+  const previousStart = new Date(previousEnd)
+  previousStart.setDate(previousStart.getDate() - (diffDays - 1))
+
+  return { start, end, previousStart, previousEnd }
+}
+
+function percentChange(current: number, previous: number): number {
+  if (previous > 0) return ((current - previous) / previous) * 100
+  return current > 0 ? 100 : 0
+}
+
 function extractResults<T = any>(response: any): T[] {
   if (Array.isArray(response)) return response
   return response?.results || []
@@ -68,75 +103,53 @@ async function fetchAllCustomers(outletId?: string): Promise<any[]> {
 export async function generateKPIData(
   businessId: string,
   business: Business,
-  outletId?: string
+  outletId?: string,
+  range?: DashboardDateRange
 ): Promise<DashboardKPI> {
   try {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const todayStr = today.toISOString().split("T")[0]
-    
-    const yesterday = new Date()
-    yesterday.setDate(yesterday.getDate() - 1)
-    yesterday.setHours(0, 0, 0, 0)
-    const yesterdayStr = yesterday.toISOString().split("T")[0]
-    
-    const thisMonthStart = new Date()
-    thisMonthStart.setDate(1)
-    thisMonthStart.setHours(0, 0, 0, 0)
-    const thisMonthStartStr = thisMonthStart.toISOString().split("T")[0]
-    
-    const lastMonthStart = new Date(thisMonthStart)
-    lastMonthStart.setMonth(lastMonthStart.getMonth() - 1)
-    const lastMonthStartStr = lastMonthStart.toISOString().split("T")[0]
-
-    const lastMonthEnd = new Date(thisMonthStart)
-    lastMonthEnd.setDate(0)
-    const lastMonthEndStr = lastMonthEnd.toISOString().split("T")[0]
+    const { start, end, previousStart, previousEnd } = buildRange(range)
+    const startStr = toDateOnlyString(start)
+    const endStr = toDateOnlyString(end)
+    const prevStartStr = toDateOnlyString(previousStart)
+    const prevEndStr = toDateOnlyString(previousEnd)
     
     // Fetch all data in parallel with caching
     const [
-      todayStats,
-      yesterdayStats,
-      todaySales,
-      yesterdaySales,
-      productCount,
+      currentStats,
+      previousStats,
+      currentSales,
+      previousSales,
       staffList,
       customersList,
-      thisMonthCustomers,
-      lastMonthCustomers,
-      thisMonthExpenseStats,
-      lastMonthExpenseStats,
-      yesterdayExpenseStats,
+      currentExpenseStats,
+      previousExpenseStats,
       lowStockProducts,
-      returnsToday,
-      returnsYesterday,
+      returnsCurrent,
+      returnsPrevious,
     ] = await Promise.all([
-      requestCache.getOrSet(`stats-${businessId}-${outletId || 'all'}-${todayStr}`, () => 
-        saleService.getStats({ start_date: todayStr, end_date: todayStr, outlet: outletId, status: "completed" }).catch((err) => {
-          console.error('Failed to fetch today stats:', err)
+      requestCache.getOrSet(`stats-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () => 
+        saleService.getStats({ start_date: startStr, end_date: endStr, outlet: outletId, status: "completed" }).catch((err) => {
+          console.error('Failed to fetch current stats:', err)
           return { total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }
         })
       ),
-      requestCache.getOrSet(`stats-${businessId}-${outletId || 'all'}-${yesterdayStr}`, () =>
-        saleService.getStats({ start_date: yesterdayStr, end_date: yesterdayStr, outlet: outletId, status: "completed" }).catch((err) => {
-          console.error('Failed to fetch yesterday stats:', err)
+      requestCache.getOrSet(`stats-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
+        saleService.getStats({ start_date: prevStartStr, end_date: prevEndStr, outlet: outletId, status: "completed" }).catch((err) => {
+          console.error('Failed to fetch previous stats:', err)
           return { total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }
         })
       ),
-      requestCache.getOrSet(`sales-${businessId}-${outletId || 'all'}-${todayStr}`, () =>
-        saleService.list({ outlet: outletId, start_date: todayStr, end_date: todayStr, page: 1 }).catch((err) => {
-          console.error('Failed to fetch today sales:', err)
+      requestCache.getOrSet(`sales-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () =>
+        saleService.list({ outlet: outletId, start_date: startStr, end_date: endStr, page: 1 }).catch((err) => {
+          console.error('Failed to fetch current sales:', err)
           return { results: [], count: 0 }
         })
       ),
-      requestCache.getOrSet(`sales-${businessId}-${outletId || 'all'}-${yesterdayStr}`, () =>
-        saleService.list({ outlet: outletId, start_date: yesterdayStr, end_date: yesterdayStr, page: 1 }).catch((err) => {
-          console.error('Failed to fetch yesterday sales:', err)
+      requestCache.getOrSet(`sales-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
+        saleService.list({ outlet: outletId, start_date: prevStartStr, end_date: prevEndStr, page: 1 }).catch((err) => {
+          console.error('Failed to fetch previous sales:', err)
           return { results: [], count: 0 }
         })
-      ),
-      requestCache.getOrSet(`products-count-${businessId}-${outletId || 'all'}`, () =>
-        productService.count({ is_active: true, outlet: outletId }).catch(() => 0)
       ),
       requestCache.getOrSet(`staff-active-${businessId}-${outletId || 'all'}`, () =>
         staffService.list({ is_active: true }).then(res => res.results || []).catch(() => [])
@@ -144,98 +157,63 @@ export async function generateKPIData(
       requestCache.getOrSet(`customers-${businessId}-${outletId || 'all'}`, () =>
         fetchAllCustomers(outletId).catch(() => [])
       ),
-      requestCache.getOrSet(`customers-this-month-${businessId}-${outletId || 'all'}`, () =>
-        fetchAllCustomers(outletId).catch(() => [])
+      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () =>
+        expenseService.stats({ outlet: outletId, start_date: startStr, end_date: endStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
       ),
-      requestCache.getOrSet(`customers-last-month-${businessId}-${outletId || 'all'}`, () =>
-        fetchAllCustomers(outletId).catch(() => [])
-      ),
-      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${thisMonthStartStr}-${todayStr}`, () =>
-        expenseService.stats({ outlet: outletId, start_date: thisMonthStartStr, end_date: todayStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
-      ),
-      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${lastMonthStartStr}-${lastMonthEndStr}`, () =>
-        expenseService.stats({ outlet: outletId, start_date: lastMonthStartStr, end_date: lastMonthEndStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
-      ),
-      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${yesterdayStr}`, () =>
-        expenseService.stats({ outlet: outletId, start_date: yesterdayStr, end_date: yesterdayStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
+      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
+        expenseService.stats({ outlet: outletId, start_date: prevStartStr, end_date: prevEndStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
       ),
       requestCache.getOrSet(`low-stock-${businessId}-${outletId || 'all'}`, () =>
         productService.getLowStock(outletId).catch(() => [])
       ),
-      requestCache.getOrSet(`returns-${businessId}-${outletId || 'all'}-${todayStr}`, () =>
-        returnService.list({ outlet: outletId, start_date: todayStr, end_date: todayStr }).catch(() => ({ results: [], count: 0 }))
+      requestCache.getOrSet(`returns-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () =>
+        returnService.list({ outlet: outletId, start_date: startStr, end_date: endStr }).catch(() => ({ results: [], count: 0 }))
       ),
-      requestCache.getOrSet(`returns-${businessId}-${outletId || 'all'}-${yesterdayStr}`, () =>
-        returnService.list({ outlet: outletId, start_date: yesterdayStr, end_date: yesterdayStr }).catch(() => ({ results: [], count: 0 }))
+      requestCache.getOrSet(`returns-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
+        returnService.list({ outlet: outletId, start_date: prevStartStr, end_date: prevEndStr }).catch(() => ({ results: [], count: 0 }))
       ),
     ])
     
-    // Calculate sales metrics
-    const todayRevenue = todayStats.today_revenue || todayStats.total_revenue || 0
-    const yesterdayRevenue = yesterdayStats.today_revenue || yesterdayStats.total_revenue || 0
-    const salesChange = yesterdayRevenue > 0
-      ? ((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100
-      : todayRevenue > 0 ? 100 : 0
-    
-    // Calculate transaction metrics - use count if available, otherwise use results length
-    console.log('📊 Transaction Debug:', {
-      todaySales,
-      yesterdaySales,
-      todaySalesType: typeof todaySales,
-      isArray: Array.isArray(todaySales),
-      count: todaySales?.count,
-      resultsLength: todaySales?.results?.length
-    })
-    const todayTransactions = todaySales.count ?? (Array.isArray(todaySales) ? todaySales.length : (todaySales.results?.length || 0))
-    const yesterdayTransactions = yesterdaySales.count ?? (Array.isArray(yesterdaySales) ? yesterdaySales.length : (yesterdaySales.results?.length || 0))
-    console.log('📊 Transaction Counts:', { todayTransactions, yesterdayTransactions })
-    const transactionsChange = yesterdayTransactions > 0
-      ? ((todayTransactions - yesterdayTransactions) / yesterdayTransactions) * 100
-      : todayTransactions > 0 ? 100 : 0
-    
-    // Calculate average order value
-    const todayAvgOrder = todayTransactions > 0 ? todayRevenue / todayTransactions : 0
-    const yesterdayAvgOrder = yesterdayTransactions > 0 ? yesterdayRevenue / yesterdayTransactions : 0
-    const avgOrderChange = yesterdayAvgOrder > 0
-      ? ((todayAvgOrder - yesterdayAvgOrder) / yesterdayAvgOrder) * 100
-      : todayAvgOrder > 0 ? 100 : 0
+    const currentRevenue = Number(currentStats.total_revenue || currentStats.today_revenue || 0)
+    const previousRevenue = Number(previousStats.total_revenue || previousStats.today_revenue || 0)
+    const salesChange = percentChange(currentRevenue, previousRevenue)
+
+    const currentTransactions = Number(currentStats.total_sales || currentSales.count || (Array.isArray(currentSales) ? currentSales.length : currentSales.results?.length || 0))
+    const previousTransactions = Number(previousStats.total_sales || previousSales.count || (Array.isArray(previousSales) ? previousSales.length : previousSales.results?.length || 0))
+    const transactionsChange = percentChange(currentTransactions, previousTransactions)
+
+    const currentAvgOrder = currentTransactions > 0 ? currentRevenue / currentTransactions : 0
+    const previousAvgOrder = previousTransactions > 0 ? previousRevenue / previousTransactions : 0
+    const avgOrderChange = percentChange(currentAvgOrder, previousAvgOrder)
     
     // Calculate customer metrics
     const customersCount = extractResults(customersList).length
     
     // Calculate customer change - compare new customers this month vs last month
     const allCustomers = extractResults(customersList)
-    const thisMonthNewCustomers = allCustomers.filter((c: any) => {
+    const currentRangeNewCustomers = allCustomers.filter((c: any) => {
       if (!c.created_at && !c.createdAt) return false
       const createdDate = new Date(c.created_at || c.createdAt)
-      return createdDate >= thisMonthStart && createdDate <= today
+      return createdDate >= start && createdDate <= end
     }).length
     
-    const lastMonthNewCustomers = allCustomers.filter((c: any) => {
+    const previousRangeNewCustomers = allCustomers.filter((c: any) => {
       if (!c.created_at && !c.createdAt) return false
       const createdDate = new Date(c.created_at || c.createdAt)
-      return createdDate >= lastMonthStart && createdDate <= lastMonthEnd
+      return createdDate >= previousStart && createdDate <= previousEnd
     }).length
     
-    const customersChange = lastMonthNewCustomers > 0
-      ? ((thisMonthNewCustomers - lastMonthNewCustomers) / lastMonthNewCustomers) * 100
-      : thisMonthNewCustomers > 0 ? 100 : 0
+    const customersChange = percentChange(currentRangeNewCustomers, previousRangeNewCustomers)
     
     // Calculate expense metrics
-    const thisMonthExpenses = thisMonthExpenseStats.total_expenses || 0
-    const lastMonthExpenses = lastMonthExpenseStats.total_expenses || 0
-    const expensesChange = lastMonthExpenses > 0
-      ? ((thisMonthExpenses - lastMonthExpenses) / lastMonthExpenses) * 100
-      : thisMonthExpenses > 0 ? 100 : 0
+    const currentExpenses = Number(currentExpenseStats.total_expenses || 0)
+    const previousExpenses = Number(previousExpenseStats.total_expenses || 0)
+    const expensesChange = percentChange(currentExpenses, previousExpenses)
     
     // Calculate profit (sales - expenses for today)
-    const todayExpenses = thisMonthExpenseStats.today_expenses || 0
-    const todayProfit = todayRevenue - todayExpenses
-    const yesterdayExpenses = yesterdayExpenseStats.today_expenses || 0
-    const yesterdayProfit = yesterdayRevenue - yesterdayExpenses
-    const profitChange = yesterdayProfit > 0
-      ? ((todayProfit - yesterdayProfit) / yesterdayProfit) * 100
-      : todayProfit > 0 ? 100 : 0
+    const currentProfit = currentRevenue - currentExpenses
+    const previousProfit = previousRevenue - previousExpenses
+    const profitChange = percentChange(currentProfit, previousProfit)
     
     // Calculate outstanding credit
     const customersWithCredit = extractResults(customersList).filter((c: any) => c.credit_enabled && Number(c.outstanding_balance || 0) > 0)
@@ -248,11 +226,9 @@ export async function generateKPIData(
     const outstandingCreditChange = 0
     
     // Calculate returns
-    const returnsTodayCount = Array.isArray(returnsToday) ? returnsToday.length : (returnsToday.count || returnsToday.results?.length || 0)
-    const returnsYesterdayCount = Array.isArray(returnsYesterday) ? returnsYesterday.length : (returnsYesterday.count || returnsYesterday.results?.length || 0)
-    const returnsChange = returnsYesterdayCount > 0
-      ? ((returnsTodayCount - returnsYesterdayCount) / returnsYesterdayCount) * 100
-      : returnsTodayCount > 0 ? 100 : 0
+    const returnsCurrentCount = Array.isArray(returnsCurrent) ? returnsCurrent.length : (returnsCurrent.count || returnsCurrent.results?.length || 0)
+    const returnsPreviousCount = Array.isArray(returnsPrevious) ? returnsPrevious.length : (returnsPrevious.count || returnsPrevious.results?.length || 0)
+    const returnsChange = percentChange(returnsCurrentCount, returnsPreviousCount)
     
     // Low stock items count
     const lowStockCount = Array.isArray(lowStockProducts) ? lowStockProducts.length : (lowStockProducts.results?.length || 0)
@@ -270,33 +246,31 @@ export async function generateKPIData(
     const employeesCount = filteredStaff.length
     
     // Calculate employee change - compare active employees this month vs last month
-    const thisMonthNewStaff = filteredStaff.filter((s: any) => {
+    const thisRangeNewStaff = filteredStaff.filter((s: any) => {
       if (!s.created_at) return false
       const createdDate = new Date(s.created_at)
-      return createdDate >= thisMonthStart && createdDate <= today
+      return createdDate >= start && createdDate <= end
     }).length
     
-    const lastMonthNewStaff = filteredStaff.filter((s: any) => {
+    const previousRangeNewStaff = filteredStaff.filter((s: any) => {
       if (!s.created_at) return false
       const createdDate = new Date(s.created_at)
-      return createdDate >= lastMonthStart && createdDate <= lastMonthEnd
+      return createdDate >= previousStart && createdDate <= previousEnd
     }).length
     
-    const employeesChange = lastMonthNewStaff > 0
-      ? ((thisMonthNewStaff - lastMonthNewStaff) / lastMonthNewStaff) * 100
-      : thisMonthNewStaff > 0 ? 100 : 0
+    const employeesChange = percentChange(thisRangeNewStaff, previousRangeNewStaff)
     
     return {
-      sales: { value: todayRevenue, change: salesChange },
+      sales: { value: currentRevenue, change: salesChange },
       customers: { value: customersCount, change: customersChange },
       products: { value: employeesCount, change: employeesChange },
-      expenses: { value: thisMonthExpenses, change: expensesChange },
-      profit: { value: todayProfit, change: profitChange },
-      transactions: { value: todayTransactions, change: transactionsChange },
-      avgOrderValue: { value: todayAvgOrder, change: avgOrderChange },
+      expenses: { value: currentExpenses, change: expensesChange },
+      profit: { value: currentProfit, change: profitChange },
+      transactions: { value: currentTransactions, change: transactionsChange },
+      avgOrderValue: { value: currentAvgOrder, change: avgOrderChange },
       lowStockItems: { value: lowStockCount, change: 0 },
       outstandingCredit: { value: totalOutstandingCredit, change: outstandingCreditChange },
-      returns: { value: returnsTodayCount, change: returnsChange },
+      returns: { value: returnsCurrentCount, change: returnsChange },
     }
   } catch (error) {
     console.error("Failed to load KPI data from API:", error)
@@ -321,12 +295,17 @@ export async function generateKPIData(
  */
 export async function generateChartData(
   businessId: string,
-  outletId?: string
+  outletId?: string,
+  range?: DashboardDateRange
 ): Promise<ChartDataPoint[]> {
   try {
+    const { start, end } = buildRange(range)
+    const startStr = toDateOnlyString(start)
+    const endStr = toDateOnlyString(end)
+
     // Use cache for chart data
-    const cacheKey = `chart-${businessId}-${outletId || 'all'}-completed`
-    const chartData = await requestCache.getOrSet(cacheKey, () => saleService.getChartData(outletId, "completed"))
+    const cacheKey = `chart-${businessId}-${outletId || 'all'}-${startStr}-${endStr}-completed`
+    const chartData = await requestCache.getOrSet(cacheKey, () => saleService.getChartData(outletId, "completed", startStr, endStr))
     return chartData.map((item: any) => ({
       date: item.date,
       sales: item.sales,

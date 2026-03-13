@@ -19,8 +19,9 @@ import { format } from "date-fns"
 
 export default function ProfitLossReportsPage() {
   const { t } = useI18n()
-  const { currentBusiness } = useBusinessStore()
-  const { currentOutlet } = useTenant()
+  const { currentBusiness, currentOutlet: businessOutlet } = useBusinessStore()
+  const { currentOutlet: tenantOutlet } = useTenant()
+  const currentOutlet = tenantOutlet || businessOutlet
   const { toast } = useToast()
   
   const [showSettings, setShowSettings] = useState(false)
@@ -45,7 +46,17 @@ export default function ProfitLossReportsPage() {
   const [chartData, setChartData] = useState<any[]>([])
 
   const loadReportData = async () => {
-    if (!currentBusiness || !currentOutlet) return
+    if (!currentBusiness) return
+
+    if (!currentOutlet) {
+      setIsLoading(false)
+      toast({
+        title: t("common.messages.error"),
+        description: "Outlet is required to load this report.",
+        variant: "destructive",
+      })
+      return
+    }
     
     setIsLoading(true)
     try {
@@ -77,6 +88,22 @@ export default function ProfitLossReportsPage() {
         setChartData([
           { date: startDate, revenue, profit: netProfit },
         ])
+      } else {
+        setData({
+          revenue: 0,
+          cogs: 0,
+          grossProfit: 0,
+          grossMargin: 0,
+          expenses: 0,
+          netProfit: 0,
+          netMargin: 0,
+        })
+        setChartData([])
+        toast({
+          title: t("common.messages.error"),
+          description: "Unable to load Profit & Loss. Check outlet selection and date filters.",
+          variant: "destructive",
+        })
       }
     } catch (error) {
       console.error("Failed to load P&L report:", error)

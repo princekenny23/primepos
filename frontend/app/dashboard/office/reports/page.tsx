@@ -8,7 +8,6 @@ import {
   Users,
   Receipt,
   Wallet,
-  DollarSign,
   ClipboardList,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
@@ -51,13 +50,6 @@ const reportCards: ReportNavCard[] = [
     description: "Financial performance analysis",
     icon: Wallet,
     href: "/dashboard/office/reports/profit-loss",
-  },
-  {
-    id: "expenses",
-    title: "Expenses Report",
-    description: "Operating expense tracking",
-    icon: DollarSign,
-    href: "/dashboard/office/reports/expenses",
   },
 ]
 

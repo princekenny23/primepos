@@ -24,14 +24,32 @@ function isLocalhostHost(hostname: string): boolean {
 async function proxyToAgent(request: NextRequest, pathParts: string[]): Promise<Response> {
   const requestedPath = (pathParts || []).join("/").toLowerCase()
   const hostName = request.nextUrl.hostname
+  const isCloudHost = !isLocalhostHost(hostName)
 
   // Cloud-safe fallback: do not treat /health as an error on non-localhost deployments.
-  if (requestedPath === "health" && !isLocalhostHost(hostName)) {
+  if (requestedPath === "health" && isCloudHost) {
     return new Response(
       JSON.stringify({
         status: "cloud",
         connected: false,
         detail: "Local Print Agent is only reachable from localhost.",
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    )
+  }
+
+  // Cloud-safe fallback: printer discovery cannot work from serverless cloud to localhost.
+  if (requestedPath === "printers" && isCloudHost) {
+    return new Response(
+      JSON.stringify({
+        status: "cloud",
+        printers: [],
+        default: null,
+        connected: false,
+        detail: "Local printers can only be discovered from localhost.",
       }),
       {
         status: 200,
