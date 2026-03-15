@@ -119,6 +119,7 @@ sealed class ConnectorCorsOptions
 {
     public string[] AllowedOrigins { get; set; } = [];
     public bool AllowVercelSubdomains { get; set; } = true;
+    public bool AllowRenderSubdomains { get; set; } = true;
 
     public static bool IsAllowedOrigin(string? origin, ConnectorCorsOptions options)
     {
@@ -139,6 +140,11 @@ sealed class ConnectorCorsOptions
         }
 
         if (options.AllowVercelSubdomains && host.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (options.AllowRenderSubdomains && host.EndsWith(".onrender.com", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

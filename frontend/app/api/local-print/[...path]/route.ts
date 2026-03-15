@@ -58,6 +58,24 @@ async function proxyToAgent(request: NextRequest, pathParts: string[]): Promise<
     )
   }
 
+  // Cloud-safe fallback: print jobs from a cloud-deployed frontend cannot be proxied to a
+  // localhost agent running on a different machine. Print requests must go through the backend
+  // queue (enqueue-print API) so the local connector can claim and execute them.
+  if (requestedPath === "print" && isCloudHost) {
+    return new Response(
+      JSON.stringify({
+        status: "cloud",
+        detail:
+          "Direct agent printing is not available from a cloud-deployed frontend. " +
+          "Print jobs are automatically queued via the backend for the local PrimePOS Connector to claim.",
+      }),
+      {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }
+    )
+  }
+
   const targetUrl = buildTargetUrl(pathParts, request.nextUrl.search)
 
   const headers = new Headers(request.headers)
