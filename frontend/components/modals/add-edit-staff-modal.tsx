@@ -334,9 +334,11 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{staff ? "Edit Staff Member" : "Add New Staff Member"}</DialogTitle>
+          <DialogTitle>{staff ? "Edit Staff Assignment" : "Assign Staff"}</DialogTitle>
           <DialogDescription>
-            {staff ? "Update staff member information" : "Create a new staff member account"}
+            {staff
+              ? "Update role and outlet assignments for this staff member"
+              : "Assign a user to staff with role and outlet access"}
           </DialogDescription>
         </DialogHeader>
         
@@ -361,7 +363,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="new">Create New User</SelectItem>
-                    <SelectItem value="existing">Select Existing Office User</SelectItem>
+                    <SelectItem value="existing">Use Existing Office User</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -448,7 +450,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="role_id">Role</Label>
+              <Label htmlFor="role_id">Role Assignment</Label>
               <div className="relative">
                 <Shield className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Select
@@ -456,7 +458,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                   onValueChange={(value) => setFormData({ ...formData, role_id: value === "none" ? "" : value })}
                 >
                   <SelectTrigger className="pl-10">
-                    <SelectValue placeholder="Select role (optional)" />
+                    <SelectValue placeholder="Select role for this staff assignment" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No role assigned</SelectItem>
@@ -507,7 +509,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
             )}
 
             <div className="space-y-2 md:col-span-2">
-              <Label>Outlets (Optional)</Label>
+              <Label>Outlet Assignment</Label>
               <div className="border rounded-md p-4 max-h-48 overflow-y-auto">
                 {outlets.filter(o => o.isActive).length === 0 ? (
                   <p className="text-sm text-muted-foreground">No active outlets available</p>
@@ -548,7 +550,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading}>
-              {isLoading ? (staff ? "Updating..." : "Creating...") : (staff ? "Update Staff" : "Create Staff")}
+              {isLoading ? (staff ? "Updating..." : "Assigning...") : (staff ? "Update Assignment" : "Assign Staff")}
             </Button>
           </DialogFooter>
         </form>

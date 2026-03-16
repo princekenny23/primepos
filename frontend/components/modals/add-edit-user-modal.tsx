@@ -11,14 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { User, Mail, Phone, Shield } from "lucide-react"
+import { User, Mail, Phone } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { userService } from "@/lib/services/userService"
@@ -190,10 +183,10 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <User className="h-5 w-5" />
-            {user ? "Edit User" : "Add User"}
+            {user ? "Edit User" : "Create User"}
           </DialogTitle>
           <DialogDescription>
-            {user ? "Update user information" : "Create a new user account"}
+            {user ? "Update user information" : "Create a new office user account"}
           </DialogDescription>
         </DialogHeader>
         
@@ -246,30 +239,8 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="role">Role *</Label>
-              <div className="relative">
-                <Shield className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-                <Select
-                  value={formData.role}
-                  onValueChange={(value: any) => setFormData({ ...formData, role: value })}
-                  required
-                >
-                  <SelectTrigger className="pl-10">
-                    <SelectValue placeholder={t("settings.users.role_placeholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="cashier">Cashier</SelectItem>
-                    <SelectItem value="staff">Staff</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
             {!user && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
                 <div className="space-y-2">
                   <Label htmlFor="password">Password *</Label>
                   <Input

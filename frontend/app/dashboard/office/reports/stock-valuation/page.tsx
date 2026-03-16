@@ -196,11 +196,11 @@ export default function StockValuationReportPage() {
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleExportXlsx}>
               <FileSpreadsheet className="mr-2 h-4 w-4" />
-              {t("reports.actions.export_excel")}
+              Download Excel
             </Button>
             <Button variant="outline" size="sm" onClick={handleExportPdf}>
               <Printer className="mr-2 h-4 w-4" />
-              {t("reports.actions.print")}
+              Download PDF
             </Button>
           </div>
         }

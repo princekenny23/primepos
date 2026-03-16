@@ -64,6 +64,10 @@ export function ExpenseApprovalModal({
         description: `${expense.expense_number} has been ${action === "approve" ? "approved" : "rejected"} successfully.`,
       })
 
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("expense-updated", { detail: { action, expenseId: expense.id } }))
+      }
+
       setNotes("")
       onOpenChange(false)
       onSuccess?.()

@@ -269,11 +269,11 @@ export default function CategorySalesPage() {
 
               <Button variant="outline" onClick={() => handleExport("xlsx")}>
                 <FileSpreadsheet className="mr-2 h-4 w-4" />
-                Export
+                Download Excel
               </Button>
               <Button variant="outline" onClick={() => handleExport("pdf")}>
                 <Printer className="mr-2 h-4 w-4" />
-                Print
+                Download PDF
               </Button>
               <Button variant="ghost" onClick={loadReportData} disabled={isLoading}>
                 <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />

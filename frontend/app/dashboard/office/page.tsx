@@ -16,8 +16,7 @@ import { isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
 const officeOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   {
     id: "users",
-    title: "Users and Staff Management",
-    titleKey: "settings.menu.users",
+    title: "User and Staff Management",
     href: "/dashboard/office/users",
     icon: UserCircle,
   },
@@ -44,8 +43,7 @@ const officeOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   },
   {
     id: "expenses",
-    title: "Expenses",
-    titleKey: "reports.menu.expenses",
+    title: "Expensee",
     href: "/dashboard/office/expenses",
     icon: Receipt,
   },

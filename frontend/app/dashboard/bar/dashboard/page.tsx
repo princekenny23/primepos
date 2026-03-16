@@ -169,8 +169,10 @@ export default function BarDashboardPage() {
     }
 
     window.addEventListener("sale-completed", handleDashboardRefresh)
+    window.addEventListener("expense-updated", handleDashboardRefresh)
     return () => {
       window.removeEventListener("sale-completed", handleDashboardRefresh)
+      window.removeEventListener("expense-updated", handleDashboardRefresh)
     }
   }, [])
 

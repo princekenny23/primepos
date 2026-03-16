@@ -306,7 +306,7 @@ export default function AccountsPage() {
   return (
     <DashboardLayout>
       <PageLayout
-        title={t("settings.menu.users")}
+        title="User and Staff Management"
         description={t("settings.users.description")}
         noPadding={true}
       >
@@ -333,7 +333,7 @@ export default function AccountsPage() {
                     className="bg-[#1e3a8a] text-white hover:bg-blue-800"
                   >
                     <Plus className="mr-2 h-4 w-4" />
-                    Add User
+                    Create User
                   </Button>
                 </div>
                 <div className="mb-4 pb-4 border-b border-gray-300">
@@ -489,7 +489,7 @@ export default function AccountsPage() {
                     className="bg-[#1e3a8a] text-white hover:bg-blue-800"
                   >
                     <Plus className="mr-2 h-4 w-4" />
-                    Add Staff
+                    Assign Staff
                   </Button>
                 </div>
 

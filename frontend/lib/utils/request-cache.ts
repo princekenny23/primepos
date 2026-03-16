@@ -99,6 +99,17 @@ if (typeof window !== 'undefined') {
     requestCache.invalidate('sales-')
     requestCache.invalidate('activity-')
     requestCache.invalidate('top-selling-')
+    requestCache.invalidate('pnl-')
+    requestCache.invalidate('customer-summary-')
+  })
+
+  window.addEventListener('expense-updated', () => {
+    requestCache.invalidate('stats-')
+    requestCache.invalidate('sales-')
+    requestCache.invalidate('activity-')
+    requestCache.invalidate('top-selling-')
+    requestCache.invalidate('pnl-')
+    requestCache.invalidate('customer-summary-')
   })
   
   window.addEventListener('outlet-changed', () => {
