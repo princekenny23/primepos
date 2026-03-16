@@ -133,7 +133,7 @@ class NotificationService {
       // For actual API errors (400, 401, 403, 500, etc.), still throw
       const apiErrorMessage = error?.response?.data?.detail || 
                               error?.data?.detail || 
-                              errorMessage || 
+                              error?.message || 
                               "Failed to fetch notifications"
       throw new Error(apiErrorMessage)
     }
@@ -191,7 +191,7 @@ class NotificationService {
       // For actual API errors (400, 401, 403, 500, etc.), still throw
       const apiErrorMessage = error?.response?.data?.detail || 
                               error?.data?.detail || 
-                              errorMessage || 
+                              error?.message || 
                               "Failed to fetch unread count"
       throw new Error(apiErrorMessage)
     }
@@ -225,7 +225,7 @@ class NotificationService {
       // For actual API errors (400, 401, 403, 500, etc.), still throw
       const apiErrorMessage = error?.response?.data?.detail || 
                               error?.data?.detail || 
-                              errorMessage || 
+                              error?.message || 
                               "Failed to fetch notification summary"
       throw new Error(apiErrorMessage)
     }

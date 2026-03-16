@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -14,7 +14,7 @@ const sanitizeNextRoute = (value: string | null): string => {
   return value
 }
 
-export default function SelectOutletPage() {
+function SelectOutletPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const nextRoute = sanitizeNextRoute(searchParams.get("next"))
@@ -133,29 +133,29 @@ export default function SelectOutletPage() {
           )}
 
           {!isBootstrapping && !error && selectableOutlets.length > 1 && (
-            <div className="flex gap-3 overflow-x-auto pb-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
               {selectableOutlets.map((outlet) => (
                 <div
                   key={outlet.id}
-                  className="min-w-[220px] max-w-[220px] rounded-lg border p-4 bg-white flex flex-col items-center text-center gap-3"
+                  className="rounded-lg border p-3 bg-white flex flex-col items-center text-center gap-2"
                 >
-                  <div className="h-12 w-12 rounded-full bg-blue-100 text-blue-900 flex items-center justify-center">
-                    <Store className="h-6 w-6" />
+                  <div className="h-9 w-9 rounded-full bg-blue-100 text-blue-900 flex items-center justify-center">
+                    <Store className="h-4 w-4" />
                   </div>
 
                   <div className="space-y-1">
-                    <p className="font-medium text-gray-900">{outlet.name}</p>
+                    <p className="font-medium text-sm text-gray-900">{outlet.name}</p>
                     {outlet.address ? (
-                      <p className="text-sm text-gray-500 flex items-center justify-center gap-1">
-                        <MapPin className="h-3.5 w-3.5" />
+                      <p className="text-xs text-gray-500 flex items-center justify-center gap-1">
+                        <MapPin className="h-3 w-3" />
                         {outlet.address}
                       </p>
                     ) : (
-                      <p className="text-sm text-gray-400">No address</p>
+                      <p className="text-xs text-gray-400">No address</p>
                     )}
                   </div>
 
-                  <Button className="w-full" onClick={() => handleSelectOutlet(outlet.id)}>
+                  <Button size="sm" className="w-full" onClick={() => handleSelectOutlet(outlet.id)}>
                     Use Outlet
                   </Button>
                 </div>
@@ -169,5 +169,23 @@ export default function SelectOutletPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function SelectOutletPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
+          <Card className="w-full max-w-2xl">
+            <CardContent className="py-8">
+              <p className="text-sm text-muted-foreground text-center">Loading outlets...</p>
+            </CardContent>
+          </Card>
+        </div>
+      }
+    >
+      <SelectOutletPageContent />
+    </Suspense>
   )
 }
