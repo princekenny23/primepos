@@ -77,16 +77,30 @@ export const useBusinessStore = create<BusinessState>()(
       },
       
       setCurrentOutlet: (outletId: string) => {
-        const outlet = get().outlets.find((o) => o.id === outletId)
+        const normalizedOutletId = String(outletId)
+        const outlet = get().outlets.find((o) => String(o.id) === normalizedOutletId)
         if (outlet) {
           set({ currentOutlet: outlet, currentTill: null })
+          if (typeof window !== "undefined") {
+            localStorage.setItem("currentOutletId", String(outlet.id))
+            window.dispatchEvent(
+              new CustomEvent("outlet-changed", {
+                detail: {
+                  outletId: String(outlet.id),
+                  outletName: outlet.name,
+                  outlet,
+                },
+              })
+            )
+          }
           // Load tills for this outlet
-          get().loadTills(outletId)
+          get().loadTills(String(outlet.id))
         }
       },
 
       setCurrentTill: (tillId: string) => {
-        const till = get().tills.find((t) => t.id === tillId)
+        const normalizedTillId = String(tillId)
+        const till = get().tills.find((t) => String(t.id) === normalizedTillId)
         if (till) {
           set({ currentTill: till })
         }
@@ -162,7 +176,7 @@ export const useBusinessStore = create<BusinessState>()(
           const current = get().currentTill
           if (!current && tills.length > 0) {
             set({ currentTill: tills[0] })
-          } else if (current && !tills.find(t => t.id === current.id)) {
+          } else if (current && !tills.find(t => String(t.id) === String(current.id))) {
             // Clear till if it no longer exists in outlet
             set({ currentTill: null })
           }

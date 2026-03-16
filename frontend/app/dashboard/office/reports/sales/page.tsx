@@ -66,6 +66,8 @@ import {
   Printer,
   RefreshCw,
 } from "lucide-react"
+import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
+import type { DataExchangeConfig } from "@/lib/utils/data-exchange-config"
 
 type DateRange = {
   start: Date
@@ -93,6 +95,7 @@ export default function SalesReportsLandingPage() {
   const [showDateModal, setShowDateModal] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [datePreset, setDatePreset] = useState("thisMonth")
+  const [showExportModal, setShowExportModal] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     const now = new Date()
     return {
@@ -120,7 +123,7 @@ export default function SalesReportsLandingPage() {
 
   const formatCurrency = useCallback(
     (value: number) => {
-      const symbol = currentBusiness?.currencySymbol || "MK"
+      const symbol = currentBusiness?.currencySymbol || "MWK"
       return `${symbol} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     },
     [currentBusiness]
@@ -321,6 +324,33 @@ export default function SalesReportsLandingPage() {
 
   const headerRangeLabel = `${format(dateRange.start, "MMM dd, yyyy")} - ${format(dateRange.end, "MMM dd, yyyy")}`
 
+  const salesExportConfig: DataExchangeConfig = {
+    entityType: "sales",
+    fields: [
+      { name: "product_name", label: "Product", type: "string", required: true },
+      { name: "category", label: "Category", type: "string", required: false },
+      { name: "total_sold", label: "Quantity Sold", type: "number", required: true },
+      { name: "total_revenue", label: "Revenue", type: "number", required: true },
+    ],
+    requiredFields: ["product_name", "total_sold", "total_revenue"],
+    defaultFormat: "xlsx",
+    filters: {
+      outlet: true,
+      dateRange: true,
+    },
+    apiEndpoints: {
+      import: "/reports/sales/",
+      export: "/reports/sales/export/",
+    },
+  }
+
+  const exportRows = itemRows.map((item) => ({
+    product_name: item.product_name || "",
+    category: item.category || "Uncategorized",
+    total_sold: Number(item.total_sold || 0),
+    total_revenue: Number(item.total_revenue || 0),
+  }))
+
   return (
     <DashboardLayout>
       <PageLayout
@@ -375,9 +405,9 @@ export default function SalesReportsLandingPage() {
                 {DATE_PRESETS.find((preset) => preset.id === datePreset)?.label || "Custom"}
               </Button>
 
-              <Button variant="outline" onClick={() => handleExport("xlsx")}>
+              <Button variant="outline" onClick={() => setShowExportModal(true)}>
                 <FileSpreadsheet className="mr-2 h-4 w-4" />
-                Download Excel
+                Export Data
               </Button>
               <Button variant="outline" onClick={() => handleExport("pdf")}>
                 <Printer className="mr-2 h-4 w-4" />
@@ -669,6 +699,15 @@ export default function SalesReportsLandingPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DataExchangeModal
+        open={showExportModal}
+        onOpenChange={setShowExportModal}
+        type="export"
+        config={salesExportConfig}
+        data={exportRows}
+        outlets={outletOptions.map((outlet) => ({ id: outlet.id, name: outlet.name }))}
+      />
     </DashboardLayout>
   )
 }

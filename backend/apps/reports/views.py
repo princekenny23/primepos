@@ -859,10 +859,15 @@ def _pdf_response_from_tables(filename, title, tables):
     return response
 
 
+def _as_django_request(request):
+    """Return the underlying Django HttpRequest when inside a DRF Request."""
+    return getattr(request, '_request', request)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_sales_report_xlsx(request):
-    response = sales_report(request)
+    response = sales_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -892,7 +897,7 @@ def export_sales_report_xlsx(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_sales_report_pdf(request):
-    response = sales_report(request)
+    response = sales_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -923,7 +928,7 @@ def export_sales_report_pdf(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_products_report_xlsx(request):
-    response = products_report(request)
+    response = products_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -948,7 +953,7 @@ def export_products_report_xlsx(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_products_report_pdf(request):
-    response = products_report(request)
+    response = products_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -973,7 +978,7 @@ def export_products_report_pdf(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_customers_report_xlsx(request):
-    response = customers_report(request)
+    response = customers_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -997,7 +1002,7 @@ def export_customers_report_xlsx(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_customers_report_pdf(request):
-    response = customers_report(request)
+    response = customers_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -1020,7 +1025,7 @@ def export_customers_report_pdf(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_profit_loss_report_xlsx(request):
-    response = profit_loss_report(request)
+    response = profit_loss_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -1040,7 +1045,7 @@ def export_profit_loss_report_xlsx(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_profit_loss_report_pdf(request):
-    response = profit_loss_report(request)
+    response = profit_loss_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -1060,7 +1065,7 @@ def export_profit_loss_report_pdf(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_stock_movement_report_xlsx(request):
-    response = stock_movement_report(request)
+    response = stock_movement_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -1077,7 +1082,7 @@ def export_stock_movement_report_xlsx(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_stock_movement_report_pdf(request):
-    response = stock_movement_report(request)
+    response = stock_movement_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -1094,7 +1099,7 @@ def export_stock_movement_report_pdf(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_inventory_valuation_report_xlsx(request):
-    response = inventory_valuation_report(request)
+    response = inventory_valuation_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -1126,7 +1131,7 @@ def export_inventory_valuation_report_xlsx(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_inventory_valuation_report_pdf(request):
-    response = inventory_valuation_report(request)
+    response = inventory_valuation_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -1153,7 +1158,7 @@ def export_inventory_valuation_report_pdf(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_expenses_report_xlsx(request):
-    response = expenses_report(request)
+    response = expenses_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data
@@ -1178,7 +1183,7 @@ def export_expenses_report_xlsx(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_expenses_report_pdf(request):
-    response = expenses_report(request)
+    response = expenses_report(_as_django_request(request))
     if response.status_code != 200:
         return response
     data = response.data

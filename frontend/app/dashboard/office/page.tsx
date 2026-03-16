@@ -43,7 +43,7 @@ const officeOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   },
   {
     id: "expenses",
-    title: "Expensee",
+    title: "Expenses",
     href: "/dashboard/office/expenses",
     icon: Receipt,
   },

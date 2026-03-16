@@ -123,6 +123,7 @@ export default function AccountsPage() {
           id: String(backendUser.id),
           email: backendUser.email || "",
           name: backendUser.name || backendUser.username || backendUser.email?.split("@")[0] || "",
+          phone: backendUser.phone || "",
           role: backendUser.role || "staff",
           effective_role: backendUser.effective_role || backendUser.role || "staff",
           businessId: String(currentBusiness.id),
@@ -869,7 +870,10 @@ export default function AccountsPage() {
       {/* Modals */}
       <AddEditUserModal
         open={showAddUser}
-        onOpenChange={setShowAddUser}
+        onOpenChange={(open) => {
+          setShowAddUser(open)
+          if (!open) setSelectedUser(null)
+        }}
         user={selectedUser}
         onSuccess={handleAccessStateRefresh}
       />
@@ -894,7 +898,10 @@ export default function AccountsPage() {
 
       <AddEditStaffModal
         open={showAddStaff}
-        onOpenChange={setShowAddStaff}
+        onOpenChange={(open) => {
+          setShowAddStaff(open)
+          if (!open) setSelectedStaff(null)
+        }}
         staff={selectedStaff}
         onSuccess={handleAccessStateRefresh}
       />

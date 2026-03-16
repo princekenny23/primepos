@@ -286,10 +286,37 @@ export const reportService = {
       throw new Error(text || `Failed to download report: ${response.status}`)
     }
 
-    const blob = await response.blob()
+    const contentType = response.headers.get("content-type") || ""
+    const rawBlob = await response.blob()
+
+    // Some endpoints may return a generic content type; infer by endpoint when needed.
+    const lowerEndpoint = endpoint.toLowerCase()
+    const isPdf = contentType.includes("pdf") || lowerEndpoint.includes("/pdf/")
+    const isXlsx =
+      contentType.includes("spreadsheet") ||
+      contentType.includes("sheet") ||
+      lowerEndpoint.includes("/xlsx/")
+    const isCsv = contentType.includes("csv") || lowerEndpoint.includes("/csv/")
+
+    const normalizedBlob = new Blob([rawBlob], {
+      type: isPdf
+        ? "application/pdf"
+        : isXlsx
+          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          : isCsv
+            ? "text/csv"
+            : rawBlob.type || "application/octet-stream",
+    })
+
+    const ext = isPdf ? "pdf" : isXlsx ? "xlsx" : isCsv ? "csv" : "bin"
+    const resolvedName = (() => {
+      const safe = filename || "report"
+      return /\.[a-z0-9]+$/i.test(safe) ? safe : `${safe}.${ext}`
+    })()
+
     const link = document.createElement("a")
-    link.href = window.URL.createObjectURL(blob)
-    link.download = filename || "report"
+    link.href = window.URL.createObjectURL(normalizedBlob)
+    link.download = resolvedName
     document.body.appendChild(link)
     link.click()
     link.remove()
