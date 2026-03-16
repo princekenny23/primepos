@@ -1413,6 +1413,102 @@ class ReceiptViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         
         return queryset
 
+    @action(detail=False, methods=['get'], url_path='by-number/(?P<receipt_number>[^/.]+)')
+    def by_number(self, request, receipt_number=None):
+        """Get receipt by receipt number (public access)"""
+        try:
+            receipt = ReceiptService.get_receipt_by_number(receipt_number)
+
+            # Check tenant access if authenticated
+            if request.user.is_authenticated:
+                tenant = getattr(request, 'tenant', None) or request.user.tenant
+                if tenant and receipt.tenant != tenant:
+                    return Response(
+                        {'error': 'Receipt not found'},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+            serializer = self.get_serializer(receipt)
+            return Response(serializer.data)
+        except Receipt.DoesNotExist:
+            return Response(
+                {'error': 'Receipt not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=False, methods=['get'], url_path='by-sale/(?P<sale_id>[^/.]+)')
+    def by_sale(self, request, sale_id=None):
+        """Get receipt by sale ID"""
+        try:
+            receipt = ReceiptService.get_receipt_by_sale(sale_id)
+
+            # Verify tenant access
+            tenant = getattr(request, 'tenant', None) or request.user.tenant
+            if not tenant or receipt.tenant != tenant:
+                return Response(
+                    {'error': 'Receipt not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            serializer = self.get_serializer(receipt)
+            return Response(serializer.data)
+        except Receipt.DoesNotExist:
+            return Response(
+                {'error': 'Receipt not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+    @action(detail=True, methods=['post'], url_path='regenerate')
+    def regenerate(self, request, pk=None):
+        """Regenerate receipt (admin only). This creates a new immutable receipt
+        record and voids the previous one to preserve audit history."""
+        receipt = self.get_object()
+        format_type = request.data.get('format', 'pdf')
+
+        try:
+            new_receipt = ReceiptService.regenerate_receipt(receipt.id, format=format_type, user=request.user)
+            serializer = self.get_serializer(new_receipt)
+            return Response(serializer.data)
+        except Exception as e:
+            return Response(
+                {'error': f'Failed to regenerate receipt: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    # NOTE: Receipts are immutable legal records. The `update-content` endpoint
+    # used to allow editing stored receipt content; that is removed to enforce
+    # immutability. Use the `regenerate` action which creates a new receipt record
+    # (voiding the old one) if you need a new version (admin only).
+    @action(detail=True, methods=['get'], url_path='download')
+    def download(self, request, pk=None):
+        """Download receipt - PDF file if available, ESC/POS content otherwise"""
+        receipt = self.get_object()
+
+        from django.http import HttpResponse, FileResponse
+
+        # If PDF file exists, serve it
+        if receipt.pdf_file:
+            receipt.increment_access()
+            return FileResponse(
+                receipt.pdf_file.open('rb'),
+                as_attachment=True,
+                filename=f"receipt_{receipt.receipt_number}.pdf",
+                content_type='application/pdf'
+            )
+
+        # Otherwise, if ESC/POS content, return as text file
+        if receipt.format == 'escpos' and receipt.content:
+            receipt.increment_access()
+            response = HttpResponse(receipt.content, content_type='text/plain')
+            response['Content-Disposition'] = f'attachment; filename="receipt_{receipt.receipt_number}.txt"'
+            return response
+
+        # Fallback
+        return Response(
+            {'error': 'No downloadable content available for this receipt'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
 
 class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
     """Read/claim/complete print jobs for local print agents."""
@@ -1509,102 +1605,6 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             job.save(update_fields=['status', 'error_message', 'updated_at'])
 
         return Response(PrintJobSerializer(job).data)
-    
-    @action(detail=False, methods=['get'], url_path='by-number/(?P<receipt_number>[^/.]+)')
-    def by_number(self, request, receipt_number=None):
-        """Get receipt by receipt number (public access)"""
-        try:
-            receipt = ReceiptService.get_receipt_by_number(receipt_number)
-            
-            # Check tenant access if authenticated
-            if request.user.is_authenticated:
-                tenant = getattr(request, 'tenant', None) or request.user.tenant
-                if tenant and receipt.tenant != tenant:
-                    return Response(
-                        {'error': 'Receipt not found'},
-                        status=status.HTTP_404_NOT_FOUND
-                    )
-            
-            serializer = self.get_serializer(receipt)
-            return Response(serializer.data)
-        except Receipt.DoesNotExist:
-            return Response(
-                {'error': 'Receipt not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
-    @action(detail=False, methods=['get'], url_path='by-sale/(?P<sale_id>[^/.]+)')
-    def by_sale(self, request, sale_id=None):
-        """Get receipt by sale ID"""
-        try:
-            receipt = ReceiptService.get_receipt_by_sale(sale_id)
-            
-            # Verify tenant access
-            tenant = getattr(request, 'tenant', None) or request.user.tenant
-            if not tenant or receipt.tenant != tenant:
-                return Response(
-                    {'error': 'Receipt not found'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-            
-            serializer = self.get_serializer(receipt)
-            return Response(serializer.data)
-        except Receipt.DoesNotExist:
-            return Response(
-                {'error': 'Receipt not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-    
-    @action(detail=True, methods=['post'], url_path='regenerate')
-    def regenerate(self, request, pk=None):
-        """Regenerate receipt (admin only). This creates a new immutable receipt
-        record and voids the previous one to preserve audit history."""
-        receipt = self.get_object()
-        format_type = request.data.get('format', 'pdf')
-        
-        try:
-            new_receipt = ReceiptService.regenerate_receipt(receipt.id, format=format_type, user=request.user)
-            serializer = self.get_serializer(new_receipt)
-            return Response(serializer.data)
-        except Exception as e:
-            return Response(
-                {'error': f'Failed to regenerate receipt: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    # NOTE: Receipts are immutable legal records. The `update-content` endpoint
-    # used to allow editing stored receipt content; that is removed to enforce
-    # immutability. Use the `regenerate` action which creates a new receipt record
-    # (voiding the old one) if you need a new version (admin only).    
-    @action(detail=True, methods=['get'], url_path='download')
-    def download(self, request, pk=None):
-        """Download receipt - PDF file if available, ESC/POS content otherwise"""
-        receipt = self.get_object()
-        
-        from django.http import HttpResponse, FileResponse
-        
-        # If PDF file exists, serve it
-        if receipt.pdf_file:
-            receipt.increment_access()
-            return FileResponse(
-                receipt.pdf_file.open('rb'),
-                as_attachment=True,
-                filename=f"receipt_{receipt.receipt_number}.pdf",
-                content_type='application/pdf'
-            )
-        
-        # Otherwise, if ESC/POS content, return as text file
-        if receipt.format == 'escpos' and receipt.content:
-            receipt.increment_access()
-            response = HttpResponse(receipt.content, content_type='text/plain')
-            response['Content-Disposition'] = f'attachment; filename="receipt_{receipt.receipt_number}.txt"'
-            return response
-        
-        # Fallback
-        return Response(
-            {'error': 'No downloadable content available for this receipt'},
-            status=status.HTTP_404_NOT_FOUND
-        )
 
 
 class ReceiptTemplateViewSet(viewsets.ModelViewSet, TenantFilterMixin):

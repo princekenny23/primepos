@@ -13,11 +13,17 @@ import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
 import { formatDistanceToNow } from "date-fns"
 import { notificationService, type Notification } from "@/lib/services/notificationService"
+import { getThrottleRemainingSeconds } from "@/lib/api"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { NotificationDetailModal } from "@/components/modals/notification-detail-modal"
 
-export function NotificationBell() {
+interface NotificationBellProps {
+  triggerClassName?: string
+  unreadRingClassName?: string
+}
+
+export function NotificationBell({ triggerClassName, unreadRingClassName }: NotificationBellProps = {}) {
   const { currentBusiness } = useBusinessStore()
   const { currentOutlet } = useTenant()
   const [notifications, setNotifications] = useState<Notification[]>([])
@@ -29,13 +35,23 @@ export function NotificationBell() {
   useEffect(() => {
     if (!currentBusiness) return
 
-    loadNotifications()
-    loadUnreadCount()
+    const loadIfAllowed = () => {
+      if (getThrottleRemainingSeconds() > 0) {
+        setIsLoading(false)
+        setNotifications([])
+        setUnreadCount(0)
+        return
+      }
+
+      loadNotifications()
+      loadUnreadCount()
+    }
+
+    loadIfAllowed()
 
     // Poll for notifications every 30 seconds
     const interval = setInterval(() => {
-      loadNotifications()
-      loadUnreadCount()
+      loadIfAllowed()
     }, 30000)
 
     return () => clearInterval(interval)
@@ -44,6 +60,11 @@ export function NotificationBell() {
 
   const loadNotifications = async () => {
     if (!currentBusiness) return
+    if (getThrottleRemainingSeconds() > 0) {
+      setIsLoading(false)
+      setNotifications([])
+      return
+    }
 
     try {
       setIsLoading(true)
@@ -64,6 +85,10 @@ export function NotificationBell() {
 
   const loadUnreadCount = async () => {
     if (!currentBusiness) return
+    if (getThrottleRemainingSeconds() > 0) {
+      setUnreadCount(0)
+      return
+    }
 
     try {
       const count = await notificationService.getUnreadCount()
@@ -138,15 +163,15 @@ export function NotificationBell() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
+        <Button variant="ghost" size="icon" className={`relative ${triggerClassName || ""}`}>
           <div className="relative flex items-center justify-center">
             <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
               <>
                 {/* Blinking blue ring - outer pulsing ring */}
-                <span className="absolute inset-0 rounded-full border-2 border-blue-900 animate-ping opacity-75" />
+                <span className={`absolute inset-0 rounded-full border-2 animate-ping opacity-75 ${unreadRingClassName || "border-blue-900"}`} />
                 {/* Blinking blue ring - solid ring */}
-                <span className="absolute inset-0 rounded-full border-2 border-blue-900 animate-blink" />
+                <span className={`absolute inset-0 rounded-full border-2 animate-blink ${unreadRingClassName || "border-blue-900"}`} />
               </>
             )}
           </div>

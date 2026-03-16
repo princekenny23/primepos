@@ -73,22 +73,12 @@ export const inventoryService = {
     
     const query = params.toString()
     const url = `${apiEndpoints.inventory.movements}${query ? `?${query}` : ""}`
-    console.log("getMovements API call:", { url, filters })
     
     try {
       const response = await api.get<any>(url)
-      console.log("getMovements raw response:", {
-        isArray: Array.isArray(response),
-        hasResults: !Array.isArray(response) && 'results' in response,
-        responseType: typeof response,
-        responseKeys: !Array.isArray(response) ? Object.keys(response) : [],
-        response
-      })
       
       const results = Array.isArray(response) ? response : (response.results || [])
       const count = response.count || (Array.isArray(response) ? response.length : 0)
-      
-      console.log("getMovements processed:", { resultsCount: results.length, count })
       
       return {
         results,

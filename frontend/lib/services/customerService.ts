@@ -36,6 +36,21 @@ export interface CustomerFilters {
   limit?: number
 }
 
+export interface CustomerSummaryFilters {
+  outlet?: string
+  start_date?: string
+  end_date?: string
+  previous_start_date?: string
+  previous_end_date?: string
+}
+
+export interface CustomerSummary {
+  total_customers: number
+  current_period_new_customers: number
+  previous_period_new_customers: number
+  outstanding_credit: number
+}
+
 export interface CreditSummary {
   customer_id: string
   customer_name: string
@@ -99,6 +114,18 @@ export const customerService = {
       return response
     }
     return response
+  },
+
+  async summary(filters?: CustomerSummaryFilters): Promise<CustomerSummary> {
+    const params = new URLSearchParams()
+    if (filters?.outlet) params.append("outlet", filters.outlet)
+    if (filters?.start_date) params.append("start_date", filters.start_date)
+    if (filters?.end_date) params.append("end_date", filters.end_date)
+    if (filters?.previous_start_date) params.append("previous_start_date", filters.previous_start_date)
+    if (filters?.previous_end_date) params.append("previous_end_date", filters.previous_end_date)
+
+    const query = params.toString()
+    return api.get<CustomerSummary>(`${apiEndpoints.customers.summary}${query ? `?${query}` : ""}`)
   },
 
   async get(id: string): Promise<Customer> {

@@ -1,4 +1,4 @@
-import { api, apiEndpoints } from "@/lib/api"
+import { api, apiEndpoints, getThrottleRemainingSeconds, isThrottleError } from "@/lib/api"
 
 // Notification interfaces
 export interface Notification {
@@ -79,6 +79,23 @@ export interface NotificationPreference {
  */
 class NotificationService {
   // ========== Notification Methods ==========
+
+  private isRetryableOfflineError(error: any): boolean {
+    const errorMessage = error?.message || ''
+    return errorMessage.includes('Unable to connect to the server') ||
+      errorMessage.includes('Failed to fetch') ||
+      errorMessage.includes('NetworkError') ||
+      errorMessage.includes('fetch failed') ||
+      errorMessage.includes('Request timed out') ||
+      error?.name === 'TypeError' ||
+      error?.name === 'AbortError' ||
+      error?.code === 'ECONNREFUSED' ||
+      error?.code === 'ENOTFOUND'
+  }
+
+  private isThrottled(error: any): boolean {
+    return isThrottleError(error) || getThrottleRemainingSeconds() > 0
+  }
   
   async list(filters: NotificationFilters = {}): Promise<{ results: Notification[]; count: number }> {
     try {
@@ -104,20 +121,11 @@ class NotificationService {
         count: response.count || (response.results?.length || 0),
       }
     } catch (error: any) {
-      // Handle network/connection errors gracefully
-      const errorMessage = error?.message || ''
-      const isNetworkError = errorMessage.includes('Unable to connect to the server') ||
-                            errorMessage.includes('Failed to fetch') || 
-                            errorMessage.includes('NetworkError') ||
-                            errorMessage.includes('fetch failed') ||
-                            errorMessage.includes('Request timed out') ||
-                            error?.name === 'TypeError' ||
-                            error?.name === 'AbortError' ||
-                            error?.code === 'ECONNREFUSED' ||
-                            error?.code === 'ENOTFOUND'
-      
-      if (isNetworkError) {
-        // Return empty results for network errors instead of crashing
+      if (this.isThrottled(error)) {
+        return { results: [], count: 0 }
+      }
+
+      if (this.isRetryableOfflineError(error)) {
         console.warn("Unable to connect to server for notifications list. Returning empty results.")
         return { results: [], count: 0 }
       }
@@ -171,20 +179,11 @@ class NotificationService {
     try {
       return await api.get<{ unread_count: number }>(apiEndpoints.notifications.unreadCount)
     } catch (error: any) {
-      // Handle network/connection errors gracefully
-      const errorMessage = error?.message || ''
-      const isNetworkError = errorMessage.includes('Unable to connect to the server') ||
-                            errorMessage.includes('Failed to fetch') || 
-                            errorMessage.includes('NetworkError') ||
-                            errorMessage.includes('fetch failed') ||
-                            errorMessage.includes('Request timed out') ||
-                            error?.name === 'TypeError' ||
-                            error?.name === 'AbortError' ||
-                            error?.code === 'ECONNREFUSED' ||
-                            error?.code === 'ENOTFOUND'
-      
-      if (isNetworkError) {
-        // Return default value for network errors instead of crashing
+      if (this.isThrottled(error)) {
+        return { unread_count: 0 }
+      }
+
+      if (this.isRetryableOfflineError(error)) {
         console.warn("Unable to connect to server for unread count. Returning default value.")
         return { unread_count: 0 }
       }
@@ -202,20 +201,17 @@ class NotificationService {
     try {
       return await api.get<NotificationSummary>(apiEndpoints.notifications.summary)
     } catch (error: any) {
-      // Handle network/connection errors gracefully
-      const errorMessage = error?.message || ''
-      const isNetworkError = errorMessage.includes('Unable to connect to the server') ||
-                            errorMessage.includes('Failed to fetch') || 
-                            errorMessage.includes('NetworkError') ||
-                            errorMessage.includes('fetch failed') ||
-                            errorMessage.includes('Request timed out') ||
-                            error?.name === 'TypeError' ||
-                            error?.name === 'AbortError' ||
-                            error?.code === 'ECONNREFUSED' ||
-                            error?.code === 'ENOTFOUND'
-      
-      if (isNetworkError) {
-        // Return default value for network errors instead of crashing
+      if (this.isThrottled(error)) {
+        return {
+          total: 0,
+          unread: 0,
+          read: 0,
+          by_type: {},
+          by_priority: {}
+        }
+      }
+
+      if (this.isRetryableOfflineError(error)) {
         console.warn("Unable to connect to server for notification summary. Returning default value.")
         return {
           total: 0,

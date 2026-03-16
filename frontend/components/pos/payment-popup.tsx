@@ -52,7 +52,6 @@ export function PaymentPopup({
 }: PaymentPopupProps) {
   const [selectedMethod, setSelectedMethod] = useState<string>('cash');
   const [receivedAmount, setReceivedAmount] = useState<string>('');
-  const [showNumpad, setShowNumpad] = useState(true);
 
   const handleNumpadClick = (value: string) => {
     if (value === 'Backspace') {
@@ -79,7 +78,6 @@ export function PaymentPopup({
     onConfirm(selectedMethod as "cash" | "card" | "mobile" | "tab", received || undefined, change);
     setSelectedMethod('cash');
     setReceivedAmount('');
-    setShowNumpad(false);
   };
 
   return (
@@ -185,41 +183,31 @@ export function PaymentPopup({
             </div>
 
             {/* Numeric Keypad - Compact */}
-            {showNumpad && (
-              <div className="mb-4 grid grid-cols-3 gap-1">
-                {NUMPAD.map((row, rowIdx) => (
-                  <div key={rowIdx} className="contents">
-                    {row.map(btn => (
-                      <button
-                        key={btn}
-                        onClick={() => handleNumpadClick(btn)}
-                        className={`py-2 px-1 text-sm font-semibold transition-colors rounded ${
-                          btn === 'Backspace'
-                            ? 'bg-red-500 hover:bg-red-600 text-white'
-                            : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
-                        }`}
-                      >
-                        {btn === 'Backspace' ? '⌫' : btn}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-                <button
-                  onClick={() => setReceivedAmount('')}
-                  className="col-span-3 bg-gray-200 hover:bg-gray-300 text-gray-900 font-semibold py-2 rounded transition-colors text-sm"
-                >
-                  Clear
-                </button>
-              </div>
-            )}
-
-            {/* Toggle Keypad Button */}
-            <button
-              onClick={() => setShowNumpad(!showNumpad)}
-              className="mb-4 w-full bg-slate-600 hover:bg-slate-700 text-white font-semibold py-2 rounded transition-colors text-sm"
-            >
-              {showNumpad ? '▼ Hide Keypad' : '▶ Show Keypad'}
-            </button>
+            <div className="mb-4 grid grid-cols-3 gap-1">
+              {NUMPAD.map((row, rowIdx) => (
+                <div key={rowIdx} className="contents">
+                  {row.map(btn => (
+                    <button
+                      key={btn}
+                      onClick={() => handleNumpadClick(btn)}
+                      className={`py-2 px-1 text-sm font-semibold transition-colors rounded ${
+                        btn === 'Backspace'
+                          ? 'bg-red-500 hover:bg-red-600 text-white'
+                          : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                      }`}
+                    >
+                      {btn === 'Backspace' ? '⌫' : btn}
+                    </button>
+                  ))}
+                </div>
+              ))}
+              <button
+                onClick={() => setReceivedAmount('')}
+                className="col-span-3 bg-gray-200 hover:bg-gray-300 text-gray-900 font-semibold py-2 rounded transition-colors text-sm"
+              >
+                Clear
+              </button>
+            </div>
 
             {/* Action Buttons */}
             <div className="flex gap-2 mt-auto">

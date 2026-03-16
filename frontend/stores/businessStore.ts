@@ -8,6 +8,9 @@ import { outletService } from "@/lib/services/outletService"
 import { tillService } from "@/lib/services/tillService"
 import { useRealAPI } from "@/lib/utils/api-config"
 
+let inFlightBusinessRequest: Promise<void> | null = null
+let inFlightBusinessId: string | null = null
+
 interface BusinessState {
   currentBusiness: Business | null
   currentOutlet: Outlet | null
@@ -37,22 +40,38 @@ export const useBusinessStore = create<BusinessState>()(
       isLoading: false,
       
       setCurrentBusiness: async (businessId: string): Promise<void> => {
+        const normalizedBusinessId = String(businessId)
+
+        if (inFlightBusinessRequest && inFlightBusinessId === normalizedBusinessId) {
+          return inFlightBusinessRequest
+        }
+
         try {
-          set({ isLoading: true })
-          const business = await tenantService.get(businessId)
-          set({ currentBusiness: business, currentOutlet: null, currentTill: null })
-          await get().loadOutlets(businessId)
-          
-          const outlets = get().outlets
-          if (outlets.length > 0 && !get().currentOutlet) {
-            set({ currentOutlet: outlets[0] })
-            // Load tills for the first outlet
-            await get().loadTills(outlets[0].id)
-          }
+          const request = (async () => {
+            set({ isLoading: true })
+            const business = await tenantService.get(normalizedBusinessId)
+            set({ currentBusiness: business, currentOutlet: null, currentTill: null })
+            await get().loadOutlets(normalizedBusinessId)
+
+            const outlets = get().outlets
+            if (outlets.length > 0 && !get().currentOutlet) {
+              set({ currentOutlet: outlets[0] })
+              // Load tills for the first outlet
+              await get().loadTills(outlets[0].id)
+            }
+          })()
+
+          inFlightBusinessRequest = request
+          inFlightBusinessId = normalizedBusinessId
+          await request
         } catch (error) {
           console.error("Failed to set current business:", error)
           throw error
         } finally {
+          if (inFlightBusinessId === normalizedBusinessId) {
+            inFlightBusinessRequest = null
+            inFlightBusinessId = null
+          }
           set({ isLoading: false })
         }
       },
@@ -95,13 +114,32 @@ export const useBusinessStore = create<BusinessState>()(
             return outletTenantId === String(businessId)
           })
           set({ outlets: tenantOutlets, tills: [] })
-          
-          const current = get().currentOutlet
-          if (!current && tenantOutlets.length > 0) {
-            const defaultOutlet = tenantOutlets.find((o: any) => o.isActive) || tenantOutlets[0]
-            set({ currentOutlet: defaultOutlet })
-            // Load tills for the default outlet
-            await get().loadTills(defaultOutlet.id)
+
+          if (tenantOutlets.length > 0) {
+            const current = get().currentOutlet
+            const storedOutletId =
+              typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null
+
+            const currentMatch = current
+              ? tenantOutlets.find((o: any) => String(o.id) === String(current.id))
+              : null
+
+            const storedMatch = storedOutletId
+              ? tenantOutlets.find((o: any) => String(o.id) === String(storedOutletId))
+              : null
+
+            const preferredOutlet =
+              currentMatch ||
+              storedMatch ||
+              tenantOutlets.find((o: any) => o.isActive) ||
+              tenantOutlets[0]
+
+            if (!current || String(current.id) !== String(preferredOutlet.id)) {
+              set({ currentOutlet: preferredOutlet, currentTill: null })
+              await get().loadTills(preferredOutlet.id)
+            }
+          } else {
+            set({ currentOutlet: null, currentTill: null })
           }
         } catch (error) {
           console.error("Failed to load outlets:", error)

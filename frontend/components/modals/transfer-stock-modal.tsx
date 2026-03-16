@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import {
   Dialog,
@@ -18,8 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ArrowRightLeft, Plus, Trash2 } from "lucide-react"
-import { useState, useEffect, useCallback } from "react"
+import { ArrowRightLeft, Pencil, Search, Trash2, X } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { productService } from "@/lib/services/productService"
@@ -49,6 +49,10 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
   const [fromOutletId, setFromOutletId] = useState("")
   const [toOutletId, setToOutletId] = useState("")
   const [commonReason, setCommonReason] = useState("")
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedProductId, setSelectedProductId] = useState("")
+  const [draftQuantity, setDraftQuantity] = useState("")
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
 
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true)
@@ -70,55 +74,70 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
   useEffect(() => {
     if (open) {
       loadProducts()
-      // Initialize with one empty item
-      setTransferItems([{
-        id: Date.now().toString(),
-        product_id: "",
-        quantity: "",
-      }])
+      setTransferItems([])
       setFromOutletId("")
       setToOutletId("")
       setCommonReason("")
+      setSearchTerm("")
+      setSelectedProductId("")
+      setDraftQuantity("")
+      setEditingItemId(null)
     }
   }, [open, loadProducts])
 
-  useEffect(() => {
-    if (open) {
-      loadProducts()
-    }
-  }, [open, loadProducts])
+  const filteredProducts = useMemo(() => {
+    const addedIds = new Set(
+      transferItems.filter(i => i.id !== editingItemId).map(i => i.product_id)
+    )
+    return products.filter(p =>
+      !addedIds.has(String(p.id)) &&
+      (p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+       (p as any).sku?.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
+  }, [products, transferItems, searchTerm, editingItemId])
 
-  const addTransferItem = () => {
-    setTransferItems([...transferItems, {
-      id: Date.now().toString(),
-      product_id: "",
-      quantity: "",
-    }])
+  const resetDraft = () => {
+    setSelectedProductId("")
+    setDraftQuantity("")
+    setEditingItemId(null)
+    setSearchTerm("")
+  }
+
+  const upsertItem = () => {
+    const product = products.find(p => String(p.id) === selectedProductId)
+    if (!product || !draftQuantity || parseInt(draftQuantity) <= 0) return
+    if (editingItemId) {
+      setTransferItems(prev => prev.map(i =>
+        i.id === editingItemId
+          ? { ...i, product_id: selectedProductId, product_name: product.name, quantity: draftQuantity }
+          : i
+      ))
+    } else {
+      setTransferItems(prev => [...prev, {
+        id: Date.now().toString(),
+        product_id: selectedProductId,
+        product_name: product.name,
+        quantity: draftQuantity,
+      }])
+    }
+    resetDraft()
+  }
+
+  const handleEditItem = (item: TransferItem) => {
+    setEditingItemId(item.id)
+    setSelectedProductId(item.product_id)
+    setDraftQuantity(item.quantity)
+    setSearchTerm(item.product_name || "")
   }
 
   const removeTransferItem = (id: string) => {
-    setTransferItems(transferItems.filter(item => item.id !== id))
-  }
-
-  const updateTransferItem = (id: string, field: keyof TransferItem, value: string) => {
-    setTransferItems(transferItems.map(item => {
-      if (item.id === id) {
-        const updated = { ...item, [field]: value }
-        // Update product_name when product_id changes
-        if (field === "product_id") {
-          const product = products.find(p => p.id === value)
-          updated.product_name = product?.name
-        }
-        return updated
-      }
-      return item
-    }))
+    setTransferItems(prev => prev.filter(i => i.id !== id))
+    if (editingItemId === id) resetDraft()
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    // Validate outlets
     if (!fromOutletId || !toOutletId) {
       toast({
         title: "Validation Error",
@@ -137,8 +156,7 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
       return
     }
 
-    // Validate all items
-    const validItems = transferItems.filter(item => 
+    const validItems = transferItems.filter(item =>
       item.product_id && item.quantity && parseInt(item.quantity) > 0
     )
 
@@ -154,19 +172,14 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
     setIsLoading(true)
 
     try {
-      // Process all transfers
-      const transfers = validItems.map(item => {
-        const quantity = parseInt(item.quantity)
-        return {
-          product_id: item.product_id,
-          from_outlet_id: fromOutletId,
-          to_outlet_id: toOutletId,
-          quantity: quantity,
-          reason: commonReason || "Stock transfer",
-        }
-      })
+      const transfers = validItems.map(item => ({
+        product_id: item.product_id,
+        from_outlet_id: fromOutletId,
+        to_outlet_id: toOutletId,
+        quantity: parseInt(item.quantity),
+        reason: commonReason || "Stock transfer",
+      }))
 
-      // Submit all transfers sequentially
       const results = []
       const errors = []
       
@@ -180,16 +193,15 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
         }
       }
 
-      // Show results
       if (errors.length === 0) {
         toast({
           title: "Transfers Initiated",
-          description: `Successfully transferred ${results.length} product${results.length > 1 ? 's' : ''}.`,
+          description: `Successfully transferred ${results.length} product${results.length > 1 ? "s" : ""}.`,
         })
       } else if (results.length > 0) {
         toast({
           title: "Partial Success",
-          description: `${results.length} transfer${results.length > 1 ? 's' : ''} succeeded, ${errors.length} failed.`,
+          description: `${results.length} transfer${results.length > 1 ? "s" : ""} succeeded, ${errors.length} failed.`,
           variant: "default",
         })
       } else {
@@ -200,14 +212,10 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
         })
       }
       
-      // Close modal first
       onOpenChange(false)
       
-      // Call onSuccess callback AFTER closing to reload data
       if (onSuccess && results.length > 0) {
-        setTimeout(() => {
-          onSuccess()
-        }, 500)
+        setTimeout(() => { onSuccess() }, 500)
       }
     } catch (error: any) {
       console.error("Failed to transfer stock:", error)
@@ -223,7 +231,7 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ArrowRightLeft className="h-5 w-5" />
@@ -243,11 +251,7 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="from">From Outlet *</Label>
-                  <Select 
-                    value={fromOutletId}
-                    onValueChange={setFromOutletId}
-                    required
-                  >
+                  <Select value={fromOutletId} onValueChange={setFromOutletId} required>
                     <SelectTrigger id="from">
                       <SelectValue placeholder="Select source outlet" />
                     </SelectTrigger>
@@ -263,11 +267,7 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
 
                 <div className="space-y-2">
                   <Label htmlFor="to">To Outlet *</Label>
-                  <Select 
-                    value={toOutletId}
-                    onValueChange={setToOutletId}
-                    required
-                  >
+                  <Select value={toOutletId} onValueChange={setToOutletId} required>
                     <SelectTrigger id="to">
                       <SelectValue placeholder="Select destination outlet" />
                     </SelectTrigger>
@@ -288,7 +288,7 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
                 <Label htmlFor="reason">Reason/Notes</Label>
                 <textarea
                   id="reason"
-                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   placeholder="Optional reason or notes for this transfer"
                   value={commonReason}
                   onChange={(e) => setCommonReason(e.target.value)}
@@ -297,77 +297,85 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
             </div>
 
             {/* Transfer Items */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">Products to Transfer</h3>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addTransferItem}
-                  disabled={loadingProducts}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Product
-                </Button>
-              </div>
+            <div className="space-y-3">
+              <h3 className="font-semibold text-sm">Products to Transfer</h3>
 
-              <div className="space-y-3">
-                {transferItems.map((item, index) => (
-                  <div key={item.id} className="p-4 border rounded-lg space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-muted-foreground">
-                        Product {index + 1}
-                      </span>
-                      {transferItems.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeTransferItem(item.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label>Product *</Label>
-                        <Select 
-                          value={item.product_id}
-                          onValueChange={(value) => updateTransferItem(item.id, "product_id", value)}
-                          required
-                          disabled={loadingProducts}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select product" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {products.map(product => (
-                              <SelectItem key={product.id} value={product.id}>
-                                {product.name} (Stock: {product.stock})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Quantity *</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          required
-                          value={item.quantity}
-                          onChange={(e) => updateTransferItem(item.id, "quantity", e.target.value)}
-                          placeholder="Enter quantity"
-                        />
-                      </div>
-                    </div>
+              {/* Entry Lane */}
+              <div className="p-3 border rounded-lg space-y-3 bg-muted/30">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search product..."
+                    value={searchTerm}
+                    onChange={e => { setSearchTerm(e.target.value); setSelectedProductId("") }}
+                    className="pl-9"
+                    disabled={loadingProducts}
+                  />
+                </div>
+                {searchTerm && !selectedProductId && (
+                  <div className="border rounded-md bg-background max-h-48 overflow-y-auto">
+                    {filteredProducts.slice(0, 8).length > 0 ? filteredProducts.slice(0, 8).map(p => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center justify-between"
+                        onClick={() => { setSelectedProductId(String(p.id)); setSearchTerm(p.name) }}
+                      >
+                        <span>{p.name}</span>
+                        <span className="text-xs text-muted-foreground">Stock: {(p as any).stock ?? "—"}</span>
+                      </button>
+                    )) : (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">No products found</p>
+                    )}
                   </div>
-                ))}
+                )}
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">Quantity *</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      placeholder="Qty"
+                      value={draftQuantity}
+                      onChange={e => setDraftQuantity(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!selectedProductId || !draftQuantity || parseInt(draftQuantity) <= 0}
+                    onClick={upsertItem}
+                  >
+                    {editingItemId ? "Update Item" : "Add Item"}
+                  </Button>
+                  {editingItemId && (
+                    <Button type="button" size="sm" variant="outline" onClick={resetDraft}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
+
+              {/* Queued Items */}
+              {transferItems.length > 0 && (
+                <div className="space-y-1">
+                  {transferItems.map(item => (
+                    <div
+                      key={item.id}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm ${editingItemId === item.id ? "border-primary bg-primary/5" : "bg-background"}`}
+                    >
+                      <span className="flex-1 font-medium truncate">{item.product_name}</span>
+                      <span className="text-muted-foreground whitespace-nowrap">Qty: {item.quantity}</span>
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditItem(item)}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeTransferItem(item.id)}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -375,11 +383,11 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               disabled={isLoading || loadingProducts || outlets.length < 2 || !fromOutletId || !toOutletId || transferItems.length === 0}
             >
-              {isLoading ? `Processing ${transferItems.length} transfer${transferItems.length > 1 ? 's' : ''}...` : `Transfer ${transferItems.length} Product${transferItems.length > 1 ? 's' : ''}`}
+              {isLoading ? `Processing ${transferItems.length} transfer${transferItems.length > 1 ? "s" : ""}...` : `Transfer ${transferItems.length} Product${transferItems.length > 1 ? "s" : ""}`}
             </Button>
           </DialogFooter>
         </form>
@@ -387,4 +395,3 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
     </Dialog>
   )
 }
-

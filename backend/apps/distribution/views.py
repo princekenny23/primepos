@@ -194,11 +194,12 @@ class TripViewSet(DistributionBaseViewSet):
                     'id': order.id,
                     'sales_order_id': order.sales_order_id,
                     'receipt_number': order.sales_order.receipt_number,
+                    'total_goods_amount': order.sales_order.total,
                     'delivery_status': order.delivery_status,
                 },
                 'vehicle_plate_number': order.assigned_vehicle.plate_number if order.assigned_vehicle else None,
                 'driver_name': order.assigned_driver.name if order.assigned_driver else None,
-                'total_cost': '0.00',
+                'total_goods_amount': order.sales_order.total,
             }
             for order in active_orders
         ]

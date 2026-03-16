@@ -1042,10 +1042,10 @@ export function RetailPOS() {
           </div>
 
           <div className="border-t bg-card px-2 py-1.5">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-nowrap gap-1.5 overflow-x-auto">
               <Button
                 size="sm"
-                className="h-9 gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                className="h-9 gap-1 px-2.5 text-xs bg-amber-600 text-white hover:bg-amber-700 shrink-0"
                 onClick={() => requestRowActionConfirmation("discount")}
               >
                 <Tag className="h-4 w-4" />
@@ -1053,7 +1053,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-1.5 bg-blue-600 text-white hover:bg-blue-700"
+                className="h-9 gap-1 px-2.5 text-xs bg-blue-600 text-white hover:bg-blue-700 shrink-0"
                 onClick={() => requestRowActionConfirmation("refund")}
               >
                 <RotateCcw className="h-4 w-4" />
@@ -1061,7 +1061,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
+                className="h-9 gap-1 px-2.5 text-xs bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
                 onClick={() => requestRowActionConfirmation("hold")}
               >
                 <PauseCircle className="h-4 w-4" />
@@ -1069,7 +1069,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700"
+                className="h-9 gap-1 px-2.5 text-xs bg-indigo-600 text-white hover:bg-indigo-700 shrink-0"
                 onClick={() => requestRowActionConfirmation("retrieve")}
               >
                 <History className="h-4 w-4" />
@@ -1077,7 +1077,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-1.5 bg-orange-600 text-white hover:bg-orange-700"
+                className="h-9 gap-1 px-2.5 text-xs bg-orange-600 text-white hover:bg-orange-700 shrink-0"
                 onClick={() => requestRowActionConfirmation("drawer")}
               >
                 <Wallet className="h-4 w-4" />
@@ -1085,7 +1085,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-1.5 bg-slate-600 text-white hover:bg-slate-700"
+                className="h-9 gap-1 px-2.5 text-xs bg-slate-600 text-white hover:bg-slate-700 shrink-0"
                 onClick={() => requestRowActionConfirmation("close")}
               >
                 <Lock className="h-4 w-4" />
@@ -1093,7 +1093,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-1.5 bg-red-600 text-white hover:bg-red-700"
+                className="h-9 gap-1 px-2.5 text-xs bg-red-600 text-white hover:bg-red-700 shrink-0"
                 onClick={() => requestRowActionConfirmation("void")}
               >
                 <Ban className="h-4 w-4" />
@@ -1101,7 +1101,7 @@ export function RetailPOS() {
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-1.5 bg-sky-600 text-white hover:bg-sky-700"
+                className="h-9 gap-1 px-2.5 text-xs bg-sky-600 text-white hover:bg-sky-700 shrink-0"
                 onClick={() => requestRowActionConfirmation("delivery")}
               >
                 <Truck className="h-4 w-4" />
@@ -1112,7 +1112,7 @@ export function RetailPOS() {
         </div>
 
         {/* Cart Panel - Table Based */}
-        <div className="flex-1 lg:flex-none w-full lg:w-[520px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
+        <div className="flex-1 lg:flex-none w-full lg:w-[560px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
           {/* Cart Header */}
           <div className="p-2 border-b space-y-1.5">
             <div className="flex items-center justify-between">

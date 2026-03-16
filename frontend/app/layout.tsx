@@ -14,8 +14,8 @@ export const metadata: Metadata = {
     title: "PrimePOS",
   },
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: "/icon.jpg",
+    apple: "/icon.jpg",
   },
 }
 

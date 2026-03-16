@@ -6,12 +6,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from decimal import Decimal
 from .models import Customer, LoyaltyTransaction, CreditPayment
 from .serializers import CustomerSerializer, LoyaltyTransactionSerializer, CreditPaymentSerializer
 from apps.tenants.permissions import TenantFilterMixin
 from apps.sales.models import Sale
-from django.db.models import F
+from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 
 
 class CustomerViewSet(viewsets.ModelViewSet, TenantFilterMixin):
@@ -61,6 +62,53 @@ class CustomerViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+
+    @action(detail=False, methods=['get'])
+    def summary(self, request):
+        """Return dashboard-friendly customer aggregates without paginating through every customer."""
+        queryset = self.filter_queryset(self.get_queryset())
+        outlet_id = request.query_params.get('outlet') or request.headers.get('X-Outlet-ID')
+
+        if outlet_id:
+            queryset = queryset.filter(outlet_id=outlet_id)
+
+        total_customers = queryset.count()
+
+        start_date = parse_date(request.query_params.get('start_date') or '')
+        end_date = parse_date(request.query_params.get('end_date') or '')
+        previous_start_date = parse_date(request.query_params.get('previous_start_date') or '')
+        previous_end_date = parse_date(request.query_params.get('previous_end_date') or '')
+
+        current_period_new_customers = 0
+        if start_date and end_date:
+            current_period_new_customers = queryset.filter(
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date,
+            ).count()
+
+        previous_period_new_customers = 0
+        if previous_start_date and previous_end_date:
+            previous_period_new_customers = queryset.filter(
+                created_at__date__gte=previous_start_date,
+                created_at__date__lte=previous_end_date,
+            ).count()
+
+        outstanding_expression = ExpressionWrapper(
+            F('total') - F('amount_paid'),
+            output_field=DecimalField(max_digits=12, decimal_places=2),
+        )
+        outstanding_credit = Sale.objects.filter(
+            customer__in=queryset,
+            payment_method__in=['credit', 'tab'],
+            payment_status__in=['unpaid', 'partially_paid', 'overdue'],
+        ).aggregate(total=Sum(outstanding_expression))['total'] or Decimal('0')
+
+        return Response({
+            'total_customers': total_customers,
+            'current_period_new_customers': current_period_new_customers,
+            'previous_period_new_customers': previous_period_new_customers,
+            'outstanding_credit': float(outstanding_credit),
+        })
     
     def perform_create(self, serializer):
         """Always set tenant from request context (frontend doesn't send it)"""

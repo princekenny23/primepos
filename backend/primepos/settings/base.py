@@ -4,6 +4,7 @@ Django settings for primepos project - Base Configuration
 from pathlib import Path
 from decouple import config
 import os
+from urllib.parse import quote_plus
 import dj_database_url
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
@@ -95,11 +96,21 @@ WSGI_APPLICATION = 'primepos.wsgi.application'
 # Supports Render PostgreSQL and local development
 DATABASE_URL = config('DATABASE_URL', default=None)
 
+# If DATABASE_URL is not provided, build one from DB_* variables so local
+# development still uses URL-based configuration consistently.
+if not DATABASE_URL:
+    db_name = config('DB_NAME', default='primepos')
+    db_user = config('DB_USER', default='postgres')
+    db_password = quote_plus(config('DB_PASSWORD', default='kwitonda'))
+    db_host = config('DB_HOST', default='localhost')
+    db_port = config('DB_PORT', default='5432')
+    DATABASE_URL = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
 # During build (collectstatic), provide a dummy database config
 # so Django can load without connecting
 IS_BUILD_PHASE = os.getenv('IS_BUILD_PHASE', 'false').lower() == 'true'
 
-if DATABASE_URL and not IS_BUILD_PHASE:
+if not IS_BUILD_PHASE:
     DATABASES = {
         'default': dj_database_url.config(
             default=DATABASE_URL,
@@ -107,27 +118,15 @@ if DATABASE_URL and not IS_BUILD_PHASE:
             conn_health_checks=True,
         )
     }
-    
+
     # Connection health checks for stability
     # Render PostgreSQL is on internal network - no SSL needed
-elif DATABASE_URL and IS_BUILD_PHASE:
+elif IS_BUILD_PHASE:
     # Dummy config for build phase to prevent connection attempts
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
             'NAME': ':memory:',
-        }
-    }
-else:
-    # Local development fallback
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': config('DB_NAME', default='primepos'),
-            'USER': config('DB_USER', default='postgres'),
-            'PASSWORD': config('DB_PASSWORD', default='kwitonda'),
-            'HOST': config('DB_HOST', default='localhost'),
-            'PORT': config('DB_PORT', default='5432'),
         }
     }
 

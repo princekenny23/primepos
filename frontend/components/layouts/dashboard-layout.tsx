@@ -40,7 +40,6 @@ import { Badge } from "@/components/ui/badge"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useAuthStore } from "@/stores/authStore"
 import { useRouter } from "next/navigation"
-import { PrimePOSLogo } from "@/components/brand/primepos-logo"
 import { useI18n } from "@/contexts/i18n-context"
 import { getOutletBusinessRouteSegment, getOutletDashboardRoute } from "@/lib/utils/outlet-settings"
 import { canAccessTenantPath, hasDistributionAccess, isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
@@ -243,6 +242,15 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const navigation = allNavigation
     .filter((item) => hasPermission(item.permission))
     .filter((item) => hasTenantAppAccess(item.name))
+
+  const firstAllowedDashboardRoute = useMemo(() => {
+    if (navigation.length > 0) {
+      return navigation[0].href
+    }
+    if (hasPermission("pos")) return "/dashboard/pos"
+    if (hasPermission("sales")) return "/dashboard/sales"
+    return "/onboarding/setup-business"
+  }, [navigation, hasPermission])
   
   // For admin routes, don't require business selection
   // For regular dashboard routes, redirect if no business (unless SaaS admin)
@@ -288,6 +296,14 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
 
   useEffect(() => {
     if (!pathname || isAdminRoute || !pathname.startsWith("/dashboard") && !pathname.startsWith("/pos/")) return
+
+    if ((pathname === "/dashboard" || pathname === "/dashboard/") && !hasPermission("dashboard")) {
+      if (pathname !== firstAllowedDashboardRoute) {
+        router.replace(firstAllowedDashboardRoute)
+      }
+      return
+    }
+
     if (canAccessTenantPath(user, pathname)) {
       permissionRedirectRef.current = false
       return
@@ -295,9 +311,12 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
 
     if (!permissionRedirectRef.current) {
       permissionRedirectRef.current = true
-      router.replace("/dashboard")
+      const fallbackRoute = firstAllowedDashboardRoute || "/onboarding/setup-business"
+      if (pathname !== fallbackRoute) {
+        router.replace(fallbackRoute)
+      }
     }
-  }, [isAdminRoute, pathname, router, user])
+  }, [firstAllowedDashboardRoute, hasPermission, isAdminRoute, pathname, router, user])
 
   return (
     <div className="min-h-screen flex bg-background">
@@ -312,7 +331,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
       {/* Sidebar */}
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 w-20 bg-card transform transition-transform duration-300 ease-in-out lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 w-20 bg-blue-900 text-white transform transition-transform duration-300 ease-in-out lg:translate-x-0",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
@@ -321,12 +340,18 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
           <div className="px-2 py-3">
             <div className="flex items-center justify-between lg:justify-start">
               <Link href="/dashboard" className="flex items-center justify-start w-full">
-                <PrimePOSLogo variant="full" size="lg" version={1} className="w-full h-5" />
+                <img
+                  src="/icon.jpg"
+                  alt="PrimePOS"
+                  width={40}
+                  height={40}
+                  className="h-10 w-10 rounded-md object-cover"
+                />
               </Link>
               <Button
                 variant="ghost"
                 size="icon"
-                className="lg:hidden h-8 w-8"
+                className="lg:hidden h-8 w-8 text-white hover:bg-blue-800 hover:text-white"
                 onClick={() => setSidebarOpen(false)}
               >
                 <X className="h-4 w-4" />
@@ -335,7 +360,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-2 space-y-1 overflow-y-auto border-r">
+          <nav className="flex-1 p-2 space-y-1 overflow-y-auto border-r border-blue-800">
             {navigation.map((item) => {
               const isActive = pathname === item.href || pathname?.startsWith(item.href + "/")
               return (
@@ -346,8 +371,8 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                   className={cn(
                     "flex flex-col items-center justify-center gap-1.5 px-2 py-3 rounded-lg text-xs font-medium transition-colors min-h-[72px]",
                     isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                      ? "bg-white text-blue-900"
+                      : "text-blue-100 hover:bg-blue-800 hover:text-white"
                   )}
                   title={translateNavItem(item.name)}
                 >
@@ -365,13 +390,13 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
         {/* Topbar */}
         <header 
           data-navbar="main" 
-          className="sticky top-0 z-30 bg-background border-b"
+          className="sticky top-0 z-30 bg-blue-900 text-white border-b border-blue-800"
         >
           <div className="flex items-center justify-between px-4 py-3 lg:px-6">
             <Button
               variant="ghost"
               size="icon"
-              className="lg:hidden"
+              className="lg:hidden text-white hover:bg-blue-800 hover:text-white"
               onClick={() => setSidebarOpen(true)}
             >
               <Menu className="h-5 w-5" />
@@ -381,22 +406,22 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
             {!isAdminRoute && !isLoading && displayTenantName && (
               <div className="flex items-center gap-4 mr-4">
                 <div className="text-sm">
-                  <span className="font-medium">{displayTenantName}</span>
+                  <span className="font-medium text-white">{displayTenantName}</span>
                 </div>
                 {displayOutlet ? (
                   displayOutlets.length > 1 ? (
                     <div className="flex items-center gap-2 text-sm">
-                      <Store className="h-4 w-4 text-muted-foreground" />
+                      <Store className="h-4 w-4 text-blue-200" />
                       <Select
                         value={String(displayOutlet.id)}
                         onValueChange={requestOutletSwitch}
                       >
-                        <SelectTrigger className="h-9 w-[220px]">
+                        <SelectTrigger className="h-9 w-[220px] border-blue-200 bg-white text-slate-900 hover:bg-slate-50 focus:ring-blue-300 [&>span]:text-slate-900">
                           <SelectValue placeholder="Select outlet" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="border-blue-200 bg-white text-slate-900">
                           {displayOutlets.map((outlet) => (
-                            <SelectItem key={String(outlet.id)} value={String(outlet.id)}>
+                            <SelectItem key={String(outlet.id)} value={String(outlet.id)} className="text-slate-900 focus:bg-blue-50 focus:text-slate-900">
                               {outlet.name}
                             </SelectItem>
                           ))}
@@ -405,12 +430,12 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 text-sm select-none">
-                      <Store className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{displayOutlet.name}</span>
+                      <Store className="h-4 w-4 text-blue-200" />
+                      <span className="font-medium text-white">{displayOutlet.name}</span>
                     </div>
                   )
                 ) : (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2 text-sm text-blue-200">
                     <Store className="h-4 w-4" />
                     <span>{t("settings.outlets.no_outlet")}</span>
                   </div>
@@ -421,19 +446,17 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
             <div className="flex items-center gap-2 ml-auto select-none">
               <Badge
                 variant="outline"
-                className="flex items-center gap-2 px-3 py-1.5"
-                title="Local Print Agent status"
+                className="flex items-center gap-2 px-3 py-1.5 border-blue-600 text-white"
+                title="PA connector status"
               >
                 <span
                   className={cn(
                     "inline-block h-2 w-2 rounded-full",
-                    agentStatus === "connected" && "bg-emerald-500",
-                    agentStatus === "disconnected" && "bg-red-500",
-                    agentStatus === "checking" && "bg-amber-500"
+                    agentStatus === "connected" ? "bg-green-500" : "bg-red-500"
                   )}
                 />
                 <span className="text-xs">
-                  Print Agent: {agentStatus === "connected" ? "Connected" : agentStatus === "disconnected" ? "Offline" : "Checking"}
+                  PA {agentStatus === "connected" ? "Connected" : "Not Connected"}
                 </span>
               </Badge>
               {/* Shift Status Indicator - Only show for current outlet */}
@@ -443,7 +466,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                   const date = new Date(activeShift.startTime)
                   if (isNaN(date.getTime())) return null
                   return (
-                    <Badge variant="outline" className="flex items-center gap-1.5 px-3 py-1.5">
+                    <Badge variant="outline" className="flex items-center gap-1.5 px-3 py-1.5 border-blue-600 text-white">
                       <Clock className="h-3.5 w-3.5" />
                       <span className="text-xs">
                         {t("shifts.shift")}: {format(date, "HH:mm")}
@@ -460,16 +483,16 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                 <Link href="/dashboard/office/users">
                   <Button 
                     variant="ghost" 
-                    className="flex items-center gap-2 h-9 px-3 hover:bg-accent"
+                    className="flex items-center gap-2 h-9 px-3 text-white hover:bg-blue-800 hover:text-white"
                   >
-                    <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center">
-                      <User className="h-4 w-4 text-primary" />
+                    <div className="h-7 w-7 rounded-full bg-white/20 flex items-center justify-center">
+                      <User className="h-4 w-4 text-white" />
                     </div>
                     <div className="flex flex-col items-start">
-                      <span className="text-sm font-medium leading-none">
+                      <span className="text-sm font-medium leading-none text-white">
                         {user?.name || user?.email?.split("@")[0] || "User"}
                       </span>
-                      <span className="text-xs text-muted-foreground leading-none mt-0.5 capitalize">
+                      <span className="text-xs text-blue-200 leading-none mt-0.5 capitalize">
                         {role || "staff"}
                       </span>
                     </div>
@@ -477,10 +500,14 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                 </Link>
               )}
               
-              <NotificationBell />
+              <NotificationBell
+                triggerClassName="text-white hover:bg-blue-800 hover:text-white"
+                unreadRingClassName="border-white/90"
+              />
               <Button 
                 variant="ghost" 
                 size="icon"
+                className="text-white hover:bg-blue-800 hover:text-white"
                 onClick={async () => {
                   const { logout } = useAuthStore.getState()
                   await logout()

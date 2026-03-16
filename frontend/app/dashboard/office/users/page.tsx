@@ -49,7 +49,7 @@ import type { User } from "@/lib/types"
 import { useI18n } from "@/contexts/i18n-context"
 
 export default function AccountsPage() {
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const refreshUser = useAuthStore((state) => state.refreshUser)
   const { toast } = useToast()
   const { t } = useI18n()
@@ -75,6 +75,35 @@ export default function AccountsPage() {
   const [showDeleteStaffDialog, setShowDeleteStaffDialog] = useState(false)
   const useReal = useRealAPI()
 
+  const currentOutletId = currentOutlet?.id ? String(currentOutlet.id) : ""
+
+  const extractUserOutletIds = (backendUser: any): string[] => {
+    const fromPrimitiveArray = (value: unknown): string[] => {
+      if (!Array.isArray(value)) return []
+      return value
+        .map((item) => {
+          if (item === null || item === undefined) return ""
+          if (typeof item === "object") {
+            const maybeId = (item as any).id ?? (item as any).outlet_id
+            return maybeId !== undefined && maybeId !== null ? String(maybeId) : ""
+          }
+          return String(item)
+        })
+        .filter(Boolean)
+    }
+
+    const candidates = [
+      backendUser?.outlet_ids,
+      backendUser?.outletIds,
+      backendUser?.outlets,
+      backendUser?.staff?.outlets,
+      backendUser?.staff_profile?.outlets,
+    ]
+
+    const ids = candidates.flatMap((candidate) => fromPrimitiveArray(candidate))
+    return Array.from(new Set(ids))
+  }
+
   const loadUsers = useCallback(async () => {
     if (!currentBusiness) {
       setUsers([])
@@ -97,7 +126,7 @@ export default function AccountsPage() {
           role: backendUser.role || "staff",
           effective_role: backendUser.effective_role || backendUser.role || "staff",
           businessId: String(currentBusiness.id),
-          outletIds: [],
+          outletIds: extractUserOutletIds(backendUser),
           createdAt: backendUser.date_joined || new Date().toISOString(),
           is_saas_admin: backendUser.is_saas_admin || false,
           tenant: currentBusiness,
@@ -146,7 +175,10 @@ export default function AccountsPage() {
     setIsStaffLoading(true)
     try {
       if (useReal) {
-        const response = await staffService.list({ tenant: currentBusiness.id })
+        const response = await staffService.list({
+          tenant: currentBusiness.id,
+          ...(currentOutletId ? { outlet: currentOutletId } : {}),
+        })
         setStaffMembers(response.results || [])
       } else {
         setStaffMembers([])
@@ -157,7 +189,7 @@ export default function AccountsPage() {
     } finally {
       setIsStaffLoading(false)
     }
-  }, [currentBusiness, useReal])
+  }, [currentBusiness, currentOutletId, useReal])
 
   useEffect(() => {
     loadUsers()
@@ -204,12 +236,19 @@ export default function AccountsPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
+      if (currentOutletId && !user.is_saas_admin) {
+        const assignedOutlets = (user.outletIds || []).map((id) => String(id))
+        if (assignedOutlets.length === 0 || !assignedOutlets.includes(currentOutletId)) {
+          return false
+        }
+      }
+
       const name = user.name || ""
       const email = user.email || ""
       const searchLower = searchTerm.toLowerCase()
       return name.toLowerCase().includes(searchLower) || email.toLowerCase().includes(searchLower)
     })
-  }, [users, searchTerm])
+  }, [users, searchTerm, currentOutletId])
 
   const filteredRoles = useMemo(() => {
     return roles.filter(role => {
@@ -221,12 +260,17 @@ export default function AccountsPage() {
   const filteredStaff = useMemo(() => {
     const term = searchTerm.toLowerCase()
     return staffMembers.filter(staff => {
+      if (currentOutletId) {
+        const hasOutlet = (staff.outlets || []).some((outlet) => String(outlet.id) === currentOutletId)
+        if (!hasOutlet) return false
+      }
+
       const name = staff.user?.name?.toLowerCase() || ""
       const email = staff.user?.email?.toLowerCase() || ""
       const role = staff.role?.name?.toLowerCase() || ""
       return name.includes(term) || email.includes(term) || role.includes(term)
     })
-  }, [staffMembers, searchTerm])
+  }, [staffMembers, searchTerm, currentOutletId])
 
   const tabsConfig: TabConfig[] = [
     {

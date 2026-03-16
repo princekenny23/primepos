@@ -17,10 +17,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, Package, Info } from "lucide-react"
+import { Package } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useState } from "react"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { Product, ProductUnit } from "@/lib/types"
 
@@ -32,7 +31,6 @@ interface ProductGridProps {
 export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedUnit, setSelectedUnit] = useState<ProductUnit | null>(null)
-  const [quantity, setQuantity] = useState("1")
   const [showSelector, setShowSelector] = useState(false)
 
   if (products.length === 0) {
@@ -58,42 +56,26 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
       setSelectedUnit(null)
     }
 
-    setQuantity("1")
-    
+
     // Show selector if has multiple units
     // Otherwise add directly to cart
     if (product.selling_units && product.selling_units.length > 1) {
       setShowSelector(true)
     } else {
       // No selector needed - add directly with auto-selected unit
-      const qty = 1
       const unit = product.selling_units && product.selling_units.length === 1 ? product.selling_units[0] : undefined
-      onAddToCart(product, unit, qty)
+      onAddToCart(product, unit, 1)
     }
   }
 
   const handleAddToCart = () => {
     if (!selectedProduct) return
 
-    const qty = parseInt(quantity) || 1
-    onAddToCart(selectedProduct, selectedUnit || undefined, qty)
+    onAddToCart(selectedProduct, selectedUnit || undefined, 1)
     
     setShowSelector(false)
     setSelectedProduct(null)
     setSelectedUnit(null)
-    setQuantity("1")
-  }
-
-  // Calculate available quantity per selected unit
-  const getAvailableQuantity = () => {
-    if (!selectedProduct) return 0
-    
-    if (selectedProduct.selling_units && selectedProduct.selling_units.length > 0 && selectedUnit) {
-      const baseQty = selectedProduct.stock || 0
-      return Math.floor(baseQty / selectedUnit.conversion_factor)
-    }
-
-    return selectedProduct.stock || 0
   }
 
   // Get display price based on selection
@@ -105,58 +87,21 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
     return Number(selectedProduct?.retail_price || selectedProduct?.price || 0)
   }
 
-  // Get unit label
-  const getUnitLabel = () => {
-    if (selectedUnit) {
-      if (selectedUnit.conversion_factor > 1) {
-        return `1 ${selectedUnit.unit_name} (${selectedUnit.conversion_factor} pieces)`
-      }
-      return selectedUnit.unit_name
-    }
-    return "piece"
-  }
-
-  const getUnitsSummary = (product: Product) => {
-    const baseUnit = (product.unit || "piece").trim()
-    const unitNames = (product.selling_units || [])
-      .filter((u) => u.is_active !== false)
-      .map((u) => (u.unit_name || "").trim())
-      .filter(Boolean)
-
-    const allUnits = Array.from(new Set([baseUnit, ...unitNames]))
-    return allUnits.join(" | ")
-  }
-
   return (
     <>
       <ScrollArea className="flex-1">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 p-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 p-3">
           {products.map((product) => {
-            const hasUnits = (product.selling_units?.length || 0) > 0
-            const stockStatus = product.is_low_stock ? "low" : "normal"
-            const stockColor = stockStatus === "low" ? "text-orange-600" : "text-green-600"
-
             return (
               <Card
                 key={product.id}
-                className="h-36 cursor-pointer hover:shadow-md transition-shadow border border-muted"
+                className="h-28 cursor-pointer hover:shadow-md transition-shadow border border-muted"
                 onClick={() => handleProductClick(product)}
               >
-                <CardContent className="h-full p-3">
-                  <div className="flex h-full flex-col gap-1.5">
-                    <div className="min-h-[2.5rem] text-sm font-medium leading-tight overflow-hidden">
+                <CardContent className="h-full p-2.5">
+                  <div className="flex h-full flex-col gap-1">
+                    <div className="min-h-[2rem] text-xs font-medium leading-tight overflow-hidden">
                       {product.name}
-                    </div>
-
-                    <div
-                      className="truncate text-[11px] text-muted-foreground"
-                      title={getUnitsSummary(product)}
-                    >
-                      Units: {getUnitsSummary(product)}
-                    </div>
-
-                    <div className={`mt-auto text-xs ${stockColor}`}>
-                      Stock: {product.stock || 0}
                     </div>
                   </div>
                 </CardContent>
@@ -172,7 +117,7 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
           <DialogHeader>
             <DialogTitle>{selectedProduct?.name}</DialogTitle>
             <DialogDescription>
-              Select variation and unit to add to cart
+              Select unit to add to cart
             </DialogDescription>
           </DialogHeader>
 
@@ -206,37 +151,6 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
               </div>
             )}
 
-            {/* Quantity input */}
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    setQuantity(String(Math.max(1, parseInt(quantity) - 1)))
-                  }
-                >
-                  −
-                </Button>
-                <Input
-                  id="qty"
-                  type="number"
-                  min="1"
-                  max={getAvailableQuantity()}
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  className="flex-1 text-center"
-                />
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    setQuantity(String(Math.min(getAvailableQuantity(), parseInt(quantity) + 1)))
-                  }
-                >
-                  +
-                </Button>
-              </div>
-            </div>
-
             {/* Price info */}
             <div className="bg-gray-50 p-3 rounded">
               <div className="flex justify-between text-sm">
@@ -245,15 +159,9 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
                   MWK {getDisplayPrice().toFixed(2)}
                 </span>
               </div>
-              <div className="flex justify-between text-sm mt-2">
-                <span className="font-medium">Subtotal:</span>
-                <span className="font-semibold text-lg text-primary">
-                  MWK {(getDisplayPrice() * parseInt(quantity)).toFixed(2)}
-                </span>
-              </div>
               {selectedUnit && selectedUnit.conversion_factor > 1 && (
                 <p className="text-xs text-gray-600 mt-2">
-                  = {parseInt(quantity) * selectedUnit.conversion_factor} pieces
+                  = {selectedUnit.conversion_factor} pieces
                 </p>
               )}
             </div>

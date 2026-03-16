@@ -102,7 +102,7 @@ export default function CreditsPage() {
       return
     }
 
-    const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+    const outletId = outlet?.id || null
     if (!outletId) {
       setIsLoading(false)
       return
@@ -309,7 +309,7 @@ export default function CreditsPage() {
         assignSale._raw?.outlet ||
         assignSale._raw?.outlet_id ||
         outlet?.id ||
-        (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+        null
       // Patch sale to add customer
       const { api, apiEndpoints } = await import("@/lib/api")
       await api.patch(apiEndpoints.sales.update(assignSale.id), {
