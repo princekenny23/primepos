@@ -49,6 +49,7 @@ export interface Role {
 
 export interface StaffFilters {
   tenant?: string
+  outlet?: string
   role?: string
   is_active?: boolean
   search?: string
@@ -58,6 +59,7 @@ export const staffService = {
   async list(filters?: StaffFilters): Promise<{ results: Staff[]; count?: number }> {
     const params = new URLSearchParams()
     if (filters?.tenant) params.append("tenant", filters.tenant)
+    if (filters?.outlet) params.append("outlet", filters.outlet)
     if (filters?.role) params.append("role", filters.role)
     if (filters?.is_active !== undefined) params.append("is_active", String(filters.is_active))
     if (filters?.search) params.append("search", filters.search)

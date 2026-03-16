@@ -72,6 +72,7 @@ import {
 export default function StockControlPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
+  const currentOutletId = currentOutlet?.id ? String(currentOutlet.id) : undefined
   const [activeTab, setActiveTab] = useState<string>("adjusts")
   const pageSize = 10
   const useReal = useRealAPI()
@@ -103,7 +104,6 @@ export default function StockControlPage() {
   // Load adjustments
   const loadAdjustments = useCallback(async () => {
     if (!currentBusiness) {
-      setAdjustments([])
       setIsLoadingAdjustments(false)
       return
     }
@@ -118,6 +118,7 @@ export default function StockControlPage() {
         
         const mappedAdjustments = (movements.results || []).map((m: any) => ({
           id: String(m.id),
+          product_id: String(typeof m.product === 'object' ? (m.product?.id || "") : (m.product || "")),
           product_name: m.product_name || (typeof m.product === 'string' ? m.product : m.product?.name) || "N/A",
           outlet_name: m.outlet_name || (typeof m.outlet === 'object' ? (m.outlet?.name || "N/A") : "N/A"),
           outlet_id: typeof m.outlet === 'object' ? m.outlet?.id : m.outlet,
@@ -127,12 +128,9 @@ export default function StockControlPage() {
           date: m.created_at || m.date || new Date().toISOString(),
         }))
         setAdjustments(mappedAdjustments)
-      } else {
-        setAdjustments([])
       }
     } catch (error) {
       console.error("Failed to load adjustments:", error)
-      setAdjustments([])
     } finally {
       setIsLoadingAdjustments(false)
     }
@@ -351,7 +349,7 @@ export default function StockControlPage() {
 
   // Load returns
   const loadReturns = useCallback(async () => {
-    if (!currentBusiness || !currentOutlet) {
+    if (!currentBusiness || !currentOutletId) {
       setReturns([])
       setIsLoadingReturns(false)
       return
@@ -360,7 +358,7 @@ export default function StockControlPage() {
     setIsLoadingReturns(true)
     try {
       const response = await returnService.list({
-        outlet: String(currentOutlet.id),
+        outlet: currentOutletId,
       })
       setReturns(response.results || [])
     } catch (error) {
@@ -369,7 +367,7 @@ export default function StockControlPage() {
     } finally {
       setIsLoadingReturns(false)
     }
-  }, [currentBusiness, currentOutlet])
+  }, [currentBusiness, currentOutletId])
 
   // Load all data when component mounts or tab changes
   useEffect(() => {
@@ -377,7 +375,13 @@ export default function StockControlPage() {
     loadTransfers()
     loadReceiving()
     loadReturns()
-  }, [loadAdjustments, loadTransfers, loadReceiving, loadReturns])
+    loadProducts()
+  }, [loadAdjustments, loadTransfers, loadReceiving, loadReturns, loadProducts])
+
+  const getResolvedProductName = (item: any) => {
+    const currentName = products.find((p) => String(p.id) === String(item.product_id))?.name
+    return currentName || item.product_name || "N/A"
+  }
 
   const tabs: TabConfig[] = [
     {
@@ -1270,7 +1274,7 @@ export default function StockControlPage() {
                               ? format(new Date(adjustment.date), "MMM dd, yyyy HH:mm")
                               : "N/A"}
                           </TableCell>
-                          <TableCell>{adjustment.product_name}</TableCell>
+                          <TableCell>{getResolvedProductName(adjustment)}</TableCell>
                           <TableCell>{adjustment.outlet_name}</TableCell>
                           <TableCell>{adjustment.reason || "-"}</TableCell>
                           <TableCell>
@@ -1639,6 +1643,7 @@ export default function StockControlPage() {
         open={showAdjustmentModal}
         onOpenChange={setShowAdjustmentModal}
         onSuccess={() => {
+          loadProducts()
           loadAdjustments()
           setShowAdjustmentModal(false)
         }}

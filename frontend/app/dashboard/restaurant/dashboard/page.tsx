@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { generateKPIData, generateChartData } from "@/lib/utils/dashboard-stats"
@@ -18,6 +18,7 @@ import { Store } from "lucide-react"
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
+import { mapExpiryAlerts, mapLowStockAlerts } from "@/lib/utils/inventory-alerts"
 
 function formatDate(date?: Date) {
   if (!date) return undefined
@@ -35,6 +36,7 @@ export default function RestaurantDashboardPage() {
   const [chartData, setChartData] = useState<any[]>([])
   const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
+  const [expiryItems, setExpiryItems] = useState<any[]>([])
   const [selectedRange, setSelectedRange] = useState<{ start?: Date; end?: Date }>(() => {
     const end = new Date()
     const start = new Date(end)
@@ -43,13 +45,15 @@ export default function RestaurantDashboardPage() {
   })
   const [isLoadingData, setIsLoadingData] = useState(true)
   const [refreshTick, setRefreshTick] = useState(0)
+  const [dashboardWarning, setDashboardWarning] = useState<string | null>(null)
+  const inFlightLoadRef = useRef<Promise<void> | null>(null)
+  const lastLoadKeyRef = useRef<string>("")
   
   // Use tenant outlet if available, otherwise fall back to business store outlet
   const currentOutlet = tenantOutlet || businessOutlet
   const posMode = getOutletPosMode(currentOutlet, currentBusiness)
   const outletId = useMemo(() => {
     if (currentOutlet?.id) return String(currentOutlet.id)
-    if (typeof window !== "undefined") return localStorage.getItem("currentOutletId") || undefined
     return undefined
   }, [currentOutlet?.id])
 
@@ -66,7 +70,6 @@ export default function RestaurantDashboardPage() {
         const tenantId = typeof user.tenant === 'object' 
           ? String(user.tenant.id || user.tenant) 
           : String(user.tenant)
-        console.log("Restoring business from user tenant:", tenantId)
         const { setCurrentBusiness } = useBusinessStore.getState()
         setCurrentBusiness(tenantId).catch((error: any) => {
           console.error("Failed to restore business:", error)
@@ -88,60 +91,71 @@ export default function RestaurantDashboardPage() {
   useEffect(() => {
     const loadDashboardData = async () => {
       if (!currentBusiness) return
+
+      const startDateKey = selectedRange.start ? formatDate(selectedRange.start) : "none"
+      const endDateKey = selectedRange.end ? formatDate(selectedRange.end) : "none"
+      const loadKey = `${currentBusiness.id}:${outletId || "all"}:${startDateKey}:${endDateKey}:${refreshTick}`
+
+      if (inFlightLoadRef.current && lastLoadKeyRef.current === loadKey) {
+        return
+      }
+
+      lastLoadKeyRef.current = loadKey
+
+      const loader = (async () => {
       
-      setIsLoadingData(true)
-      try {
-        const today = new Date()
-        today.setHours(0, 0, 0, 0)
-        const startDate = selectedRange.start || today
-        const endDate = selectedRange.end || today
-        const startDateStr = formatDate(startDate)
-        const endDateStr = formatDate(endDate)
+        setIsLoadingData(true)
+        setDashboardWarning(null)
+        try {
+          const today = new Date()
+          today.setHours(0, 0, 0, 0)
+          const startDate = selectedRange.start || today
+          const endDate = selectedRange.end || today
+          const startDateStr = formatDate(startDate)
+          const endDateStr = formatDate(endDate)
 
-        const [kpi, chart, recentSales, lowStockData] = await Promise.all([
-          generateKPIData(currentBusiness.id, currentBusiness, outletId, selectedRange),
-          generateChartData(currentBusiness.id, outletId, selectedRange),
-          saleService.list({ outlet: outletId, status: "completed", start_date: startDateStr, end_date: endDateStr, limit: 10 }).catch(() => ({ results: [] })),
-          productService.getLowStock(outletId).catch(() => []),
-        ])
-        
-        setKpiData(kpi)
-        setChartData(chart)
-
-        // Convert recent sales to activity format
-        const sales = Array.isArray(recentSales) ? recentSales : (recentSales.results || [])
-        const activities = sales.map((sale: any) => ({
-          id: sale.id || `sale-${Math.random()}`,
-          type: "sale" as const,
-          title: `Sale #${sale.id?.toString().slice(-6)}`,
-          description: `${sale.items?.length || 1} item(s) - Amount: ${sale.total || sale.amount || 0}`,
-          timestamp: new Date(sale.created_at || new Date()),
-          amount: sale.total || sale.amount || 0,
-        }))
-        setRecentActivities(activities)
-
-        const lowStock = Array.isArray(lowStockData) ? lowStockData : ((lowStockData as any)?.results || [])
-        const processedLowStock = lowStock.map((p: any) => {
-          const lowVariation = p.variations?.find((v: any) => 
-            v.track_inventory && 
-            v.low_stock_threshold > 0 && 
-            (v.total_stock || v.stock || 0) <= v.low_stock_threshold
-          )
+          const [kpi, chart, recentSales, lowStockData, productsData] = await Promise.all([
+            generateKPIData(currentBusiness.id, currentBusiness, outletId, selectedRange),
+            generateChartData(currentBusiness.id, outletId, selectedRange),
+            saleService.list({ outlet: outletId, status: "completed", start_date: startDateStr, end_date: endDateStr, limit: 10 }).catch(() => ({ results: [] })),
+            productService.getLowStock(outletId).catch(() => []),
+            productService.list({ outlet: outletId, limit: 1000 }).catch(() => ({ results: [] })),
+          ])
           
-          return {
-            id: p.id,
-            name: p.name,
-            sku: p.sku || lowVariation?.sku || "N/A",
-            currentStock: lowVariation ? (lowVariation.total_stock || lowVariation.stock || 0) : (p.stock || 0),
-            minStock: lowVariation ? (lowVariation.low_stock_threshold || 0) : (p.low_stock_threshold || 0),
-            category: p.category?.name || "General",
+          setKpiData(kpi)
+          setChartData(chart)
+
+          // Convert recent sales to activity format
+          const sales = Array.isArray(recentSales) ? recentSales : (recentSales.results || [])
+          const activities = sales.map((sale: any) => ({
+            id: sale.id || `sale-${Math.random()}`,
+            type: "sale" as const,
+            title: `Sale #${sale.id?.toString().slice(-6)}`,
+            description: `${sale.items?.length || 1} item(s) - Amount: ${sale.total || sale.amount || 0}`,
+            timestamp: new Date(sale.created_at || new Date()),
+            amount: sale.total || sale.amount || 0,
+          }))
+          setRecentActivities(activities)
+
+          const lowStock = Array.isArray(lowStockData) ? lowStockData : ((lowStockData as any)?.results || [])
+          setLowStockItems(mapLowStockAlerts(lowStock))
+
+          const products = Array.isArray(productsData) ? productsData : (productsData.results || [])
+          setExpiryItems(mapExpiryAlerts(products))
+        } catch (error: any) {
+          console.error("Failed to load dashboard data:", error)
+          if (error?.status === 429 || String(error?.message || "").toLowerCase().includes("throttled")) {
+            setDashboardWarning("Backend is throttling requests. Showing cached or partial data until cooldown ends.")
           }
-        })
-        setLowStockItems(processedLowStock)
-      } catch (error) {
-        console.error("Failed to load dashboard data:", error)
-      } finally {
-        setIsLoadingData(false)
+        } finally {
+          setIsLoadingData(false)
+        }
+      })()
+
+      inFlightLoadRef.current = loader
+      await loader
+      if (inFlightLoadRef.current === loader) {
+        inFlightLoadRef.current = null
       }
     }
     
@@ -161,7 +175,7 @@ export default function RestaurantDashboardPage() {
     }
   }, [])
 
-  if (!currentBusiness || posMode !== "restaurant" || isLoadingData || tenantLoading || !kpiData) {
+  if (!currentBusiness || posMode !== "restaurant" || (isLoadingData && !kpiData) || tenantLoading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">
@@ -186,6 +200,12 @@ export default function RestaurantDashboardPage() {
   return (
     <DashboardLayout>
       <div className="space-y-5">
+        {dashboardWarning && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {dashboardWarning}
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
@@ -224,7 +244,7 @@ export default function RestaurantDashboardPage() {
 
         {/* Low Stock and Recent Activity */}
         <div className="grid gap-4 md:grid-cols-2">
-          <LowStockAlerts items={lowStockItems} />
+          <LowStockAlerts items={lowStockItems} expiryItems={expiryItems} />
           <RecentActivity activities={recentActivities} business={currentBusiness} />
         </div>
 

@@ -19,6 +19,33 @@ const normalizeRole = (value?: string, isSaasAdmin?: boolean): string => {
   return "staff"
 }
 
+const extractUserOutletIds = (backendUser: any): string[] => {
+  const fromPrimitiveArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return []
+    return value
+      .map((item) => {
+        if (item === null || item === undefined) return ""
+        if (typeof item === "object") {
+          const maybeId = (item as any).id ?? (item as any).outlet_id
+          return maybeId !== undefined && maybeId !== null ? String(maybeId) : ""
+        }
+        return String(item)
+      })
+      .filter(Boolean)
+  }
+
+  const candidates = [
+    backendUser?.outlet_ids,
+    backendUser?.outletIds,
+    backendUser?.outlets,
+    backendUser?.staff?.outlets,
+    backendUser?.staff_profile?.outlets,
+  ]
+
+  const ids = candidates.flatMap((candidate) => fromPrimitiveArray(candidate))
+  return Array.from(new Set(ids))
+}
+
 export interface LoginResponse {
   access: string
   refresh: string
@@ -63,6 +90,7 @@ export const authService = {
         response.user?.role ||
         response.user?.staff_role?.name
       const resolvedRole = normalizeRole(backendRole, isSaasAdmin)
+      const outletIds = extractUserOutletIds(response.user)
 
       // Transform backend user data to match frontend User type
       const user = response.user ? {
@@ -74,7 +102,7 @@ export const authService = {
         permissions: response.user.permissions || undefined,
         staff_role: response.user.staff_role || undefined,
         businessId: response.user.tenant ? String(response.user.tenant.id) : '',
-        outletIds: [],
+        outletIds,
         createdAt: response.user.date_joined || new Date().toISOString(),
         is_saas_admin: isSaasAdmin,
         tenant: response.user.tenant ? {
@@ -160,6 +188,7 @@ export const authService = {
     const isSaasAdmin = response.is_saas_admin || false
     const backendRole = response.effective_role || response.role || response?.staff_role?.name
     const resolvedRole = normalizeRole(backendRole, isSaasAdmin)
+    const outletIds = extractUserOutletIds(response)
     // Transform backend user data to match frontend User type
     return {
       id: String(response.id),
@@ -170,7 +199,7 @@ export const authService = {
       permissions: response.permissions || undefined,
       staff_role: response.staff_role || undefined,
       businessId: response.tenant ? String(response.tenant.id) : '',
-      outletIds: [],
+      outletIds,
       createdAt: response.date_joined || new Date().toISOString(),
       is_saas_admin: isSaasAdmin,
       tenant: response.tenant ? {

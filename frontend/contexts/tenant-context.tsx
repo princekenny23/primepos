@@ -89,7 +89,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     let isMounted = true
     const initializeTenant = async () => {
       setIsLoading(true)
-      initializedBusinessRef.current = currentBusiness.id
       
       if (useReal && currentBusiness) {
         try {
@@ -111,17 +110,8 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           let tenantOutlets = tenantData.outlets || []
           const tenantId = String(tenantData.id)
           
-          console.log("Tenant Context - Loading outlets for tenant:", {
-            tenantId,
-            tenantName: tenantData.name,
-            outletsFromTenant: tenantOutlets.length,
-            outletIds: tenantOutlets.map((o: any) => o.id),
-            fullTenantData: tenantData // Debug: log full response
-          })
-          
           // If no outlets from tenant data, try loading from outlet service
           if (tenantOutlets.length === 0) {
-            console.warn("No outlets in tenant data, trying outlet service...")
             try {
               const outletService = (await import("@/lib/services/outletService")).outletService
               const allOutlets = await outletService.list()
@@ -130,11 +120,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
                   ? (typeof outlet.tenant === 'object' ? String(outlet.tenant.id) : String(outlet.tenant))
                   : String(outlet.businessId || "")
                 return outletTenantId === tenantId
-              })
-              console.log("Loaded outlets from outlet service:", {
-                total: allOutlets.length,
-                filtered: filteredOutlets.length,
-                tenantId
               })
               if (filteredOutlets.length > 0) {
                 // Transform outlets from outlet service to match tenant data format
@@ -149,7 +134,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
                   settings: normalizeBusinessSettings(o.settings),
                   is_active: o.isActive !== undefined ? o.isActive : true,
                 }))
-                console.log("Using outlets from outlet service:", tenantOutlets.length)
               }
             } catch (error) {
               console.error("Failed to load outlets from outlet service:", error)
@@ -163,15 +147,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
               ? (typeof o.tenant === 'object' ? String(o.tenant.id) : String(o.tenant))
               : tenantId
             
-            // Verify outlet belongs to this tenant
-            if (outletTenantId !== tenantId) {
-              console.warn("Outlet does not belong to tenant:", {
-                outletId,
-                outletTenantId,
-                expectedTenantId: tenantId
-              })
-            }
-            
             return {
               id: outletId,
               tenantId: tenantId, // Always use the tenant ID from tenant data
@@ -183,11 +158,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
               settings: normalizeBusinessSettings(o.settings),
               isActive: o.is_active !== undefined ? o.is_active : (o.isActive !== undefined ? o.isActive : true),
             }
-          })
-          
-          console.log("Tenant Context - Transformed outlets:", {
-            count: loadedOutlets.length,
-            outlets: loadedOutlets.map(o => ({ id: o.id, name: o.name, tenantId: o.tenantId }))
           })
           
           setOutlets(loadedOutlets)
@@ -212,33 +182,33 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           
           // Set current outlet - use first active outlet or first outlet
           if (loadedOutlets.length > 0) {
-            // Always use first active outlet or first outlet from this tenant
-            // Don't rely on store outlet as it might be from a different tenant
-            const defaultOutlet = loadedOutlets.find(o => o.isActive) || loadedOutlets[0]
-            setCurrentOutlet(defaultOutlet)
-            
-            console.log("Tenant Context - Set current outlet:", {
-              outletId: defaultOutlet.id,
-              outletName: defaultOutlet.name,
-              tenantId: defaultOutlet.tenantId,
-              isActive: defaultOutlet.isActive
-            })
+            const savedOutletId =
+              typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null
+            const savedOutlet = savedOutletId
+              ? loadedOutlets.find((o) => String(o.id) === String(savedOutletId))
+              : null
+            const storeOutlet = businessOutlet
+              ? loadedOutlets.find((o) => String(o.id) === String(businessOutlet.id))
+              : null
+            const selectedOutlet =
+              savedOutlet || storeOutlet || loadedOutlets.find(o => o.isActive) || loadedOutlets[0]
+
+            setCurrentOutlet(selectedOutlet)
             
             // Update store with correct outlet
             useBusinessStore.setState({ currentOutlet: {
-              id: defaultOutlet.id,
-              businessId: defaultOutlet.tenantId,
-              name: defaultOutlet.name,
-              address: defaultOutlet.address,
-              phone: defaultOutlet.phone,
-              businessType: defaultOutlet.businessType,
-              businessTypeDisplay: defaultOutlet.businessTypeDisplay,
-              settings: defaultOutlet.settings,
-              isActive: defaultOutlet.isActive,
+              id: selectedOutlet.id,
+              businessId: selectedOutlet.tenantId,
+              name: selectedOutlet.name,
+              address: selectedOutlet.address,
+              phone: selectedOutlet.phone,
+              businessType: selectedOutlet.businessType,
+              businessTypeDisplay: selectedOutlet.businessTypeDisplay,
+              settings: selectedOutlet.settings,
+              isActive: selectedOutlet.isActive,
               createdAt: new Date().toISOString(),
             } })
           } else {
-            console.warn("Tenant Context - No outlets found for tenant:", tenantId)
             setCurrentOutlet(null) // Explicitly set to null if no outlets
           }
         } catch (error) {
@@ -282,12 +252,20 @@ export function TenantProvider({ children }: { children: ReactNode }) {
             isActive: store.currentOutlet.isActive,
           })
         } else if (loadedOutlets.length > 0) {
-          const defaultOutlet = loadedOutlets.find(o => o.isActive) || loadedOutlets[0]
-          setCurrentOutlet(defaultOutlet)
+          const savedOutletId =
+            typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null
+          const savedOutlet = savedOutletId
+            ? loadedOutlets.find((o) => String(o.id) === String(savedOutletId))
+            : null
+          const selectedOutlet = savedOutlet || loadedOutlets.find(o => o.isActive) || loadedOutlets[0]
+          setCurrentOutlet(selectedOutlet)
         }
       }
-      
+
+      // Mark initialization complete only after finishing successfully while mounted.
+      // This avoids React StrictMode double-effect runs leaving isLoading stuck true.
       if (isMounted) {
+        initializedBusinessRef.current = currentBusiness.id
         setIsLoading(false)
       }
     }
@@ -297,7 +275,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     return () => {
       isMounted = false
     }
-  }, [currentBusiness?.id, useReal]) // Only depend on business ID, not the whole object or outlets
+  }, [currentBusiness?.id, businessOutlet?.id, useReal]) // Only depend on stable business/outlet identifiers
 
   const switchOutlet = async (outletId: string): Promise<void> => {
     const outlet = outlets.find((o) => String(o.id) === String(outletId))
@@ -327,12 +305,6 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         isActive: outlet.isActive,
         createdAt: new Date().toISOString(),
       }
-    })
-    
-    console.log("Switched outlet:", {
-      outletId: outlet.id,
-      outletName: outlet.name,
-      tenantId: outlet.tenantId
     })
     
     // Store outlet ID in localStorage for API client

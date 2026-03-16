@@ -92,7 +92,7 @@ export default function DiscountsPage() {
       return
     }
 
-    const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+    const outletId = outlet?.id || null
     if (!outletId) {
       setIsLoading(false)
       return

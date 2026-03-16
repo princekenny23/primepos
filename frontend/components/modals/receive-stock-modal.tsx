@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import {
   Dialog,
@@ -18,8 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { PackageCheck, Plus, Trash2 } from "lucide-react"
-import { useState, useEffect, useCallback } from "react"
+import { PackageCheck, Pencil, Search, Trash2, X } from "lucide-react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { productService } from "@/lib/services/productService"
@@ -50,6 +50,11 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
   const [outletId, setOutletId] = useState("")
   const [supplier, setSupplier] = useState("")
   const [reason, setReason] = useState("")
+  const [searchTerm, setSearchTerm] = useState("")
+  const [selectedProductId, setSelectedProductId] = useState("")
+  const [draftQuantity, setDraftQuantity] = useState("")
+  const [draftCost, setDraftCost] = useState("")
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
 
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true)
@@ -71,61 +76,82 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
   useEffect(() => {
     if (open) {
       loadProducts()
-      // Initialize with one empty item
-      setReceiveItems([{
-        id: Date.now().toString(),
-        product_id: "",
-        quantity: "",
-        cost: "",
-      }])
+      setReceiveItems([])
       setOutletId("")
       setSupplier("")
       setReason("")
+      setSearchTerm("")
+      setSelectedProductId("")
+      setDraftQuantity("")
+      setDraftCost("")
+      setEditingItemId(null)
     }
   }, [open, loadProducts])
 
-  useEffect(() => {
-    if (open) {
-      loadProducts()
-    }
-  }, [open, loadProducts])
+  const filteredProducts = useMemo(() => {
+    const addedIds = new Set(
+      receiveItems.filter(i => i.id !== editingItemId).map(i => i.product_id)
+    )
+    return products.filter(p =>
+      !addedIds.has(String(p.id)) &&
+      (p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+       (p as any).sku?.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
+  }, [products, receiveItems, searchTerm, editingItemId])
 
-  const addReceiveItem = () => {
-    setReceiveItems([...receiveItems, {
-      id: Date.now().toString(),
-      product_id: "",
-      quantity: "",
-      cost: "",
-    }])
+  const resetDraft = () => {
+    setSelectedProductId("")
+    setDraftQuantity("")
+    setDraftCost("")
+    setEditingItemId(null)
+    setSearchTerm("")
+  }
+
+  const upsertItem = () => {
+    const product = products.find(p => String(p.id) === selectedProductId)
+    if (!product || !draftQuantity || parseInt(draftQuantity) <= 0) return
+    if (editingItemId) {
+      setReceiveItems(prev => prev.map(i =>
+        i.id === editingItemId
+          ? { ...i, product_id: selectedProductId, product_name: product.name, quantity: draftQuantity, cost: draftCost }
+          : i
+      ))
+    } else {
+      setReceiveItems(prev => [...prev, {
+        id: Date.now().toString(),
+        product_id: selectedProductId,
+        product_name: product.name,
+        quantity: draftQuantity,
+        cost: draftCost,
+      }])
+    }
+    resetDraft()
+  }
+
+  const handleEditItem = (item: ReceiveItem) => {
+    setEditingItemId(item.id)
+    setSelectedProductId(item.product_id)
+    setDraftQuantity(item.quantity)
+    setDraftCost(item.cost)
+    setSearchTerm(item.product_name || "")
+  }
+
+  const handleSelectProduct = (p: Product) => {
+    setSelectedProductId(String(p.id))
+    setSearchTerm(p.name)
+    if ((p as any).cost && !draftCost) {
+      setDraftCost(String((p as any).cost))
+    }
   }
 
   const removeReceiveItem = (id: string) => {
-    setReceiveItems(receiveItems.filter(item => item.id !== id))
-  }
-
-  const updateReceiveItem = (id: string, field: keyof ReceiveItem, value: string) => {
-    setReceiveItems(receiveItems.map(item => {
-      if (item.id === id) {
-        const updated = { ...item, [field]: value }
-        // Update product_name when product_id changes
-        if (field === "product_id") {
-          const product = products.find(p => p.id === value)
-          updated.product_name = product?.name
-          // Auto-fill cost if product has cost
-          if (product?.cost && !updated.cost) {
-            updated.cost = String(product.cost)
-          }
-        }
-        return updated
-      }
-      return item
-    }))
+    setReceiveItems(prev => prev.filter(i => i.id !== id))
+    if (editingItemId === id) resetDraft()
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
-    // Validate outlet
+
     if (!outletId) {
       toast({
         title: "Validation Error",
@@ -135,8 +161,7 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
       return
     }
 
-    // Validate all items
-    const validItems = receiveItems.filter(item => 
+    const validItems = receiveItems.filter(item =>
       item.product_id && item.quantity && parseInt(item.quantity) > 0
     )
 
@@ -152,7 +177,6 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
     setIsLoading(true)
 
     try {
-      // Prepare receiving data
       const items = validItems.map(item => ({
         product_id: item.product_id,
         quantity: parseInt(item.quantity),
@@ -166,7 +190,6 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
         reason: reason || undefined,
       })
 
-      // Show results
       if (response.errors && response.errors.length > 0) {
         if (response.results && response.results.length > 0) {
           toast({
@@ -187,15 +210,11 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
           description: `Successfully received ${response.results?.length || validItems.length} product(s).`,
         })
       }
-      
-      // Close modal first
+
       onOpenChange(false)
-      
-      // Call onSuccess callback AFTER closing to reload data
+
       if (onSuccess && response.results && response.results.length > 0) {
-        setTimeout(() => {
-          onSuccess()
-        }, 500)
+        setTimeout(() => { onSuccess() }, 500)
       }
     } catch (error: any) {
       console.error("Failed to receive stock:", error)
@@ -211,7 +230,7 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <PackageCheck className="h-5 w-5" />
@@ -221,21 +240,17 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
             Receive multiple products from suppliers
           </DialogDescription>
         </DialogHeader>
-        
+
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
-            {/* Outlet and Supplier Selection */}
+            {/* Receiving Details */}
             <div className="space-y-4 p-4 bg-muted/50 rounded-lg">
               <h3 className="font-semibold text-sm">Receiving Details</h3>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="outlet">Outlet *</Label>
-                  <Select 
-                    value={outletId}
-                    onValueChange={setOutletId}
-                    required
-                  >
+                  <Select value={outletId} onValueChange={setOutletId} required>
                     <SelectTrigger id="outlet">
                       <SelectValue placeholder="Select outlet" />
                     </SelectTrigger>
@@ -264,7 +279,7 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
                 <Label htmlFor="reason">Notes</Label>
                 <textarea
                   id="reason"
-                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  className="flex min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   placeholder="Optional notes about this receiving"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
@@ -273,89 +288,98 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
             </div>
 
             {/* Receive Items */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">Products to Receive</h3>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addReceiveItem}
-                  disabled={loadingProducts}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Product
-                </Button>
-              </div>
+            <div className="space-y-3">
+              <h3 className="font-semibold text-sm">Products to Receive</h3>
 
-              <div className="space-y-3">
-                {receiveItems.map((item, index) => (
-                  <div key={item.id} className="p-4 border rounded-lg space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-muted-foreground">
-                        Product {index + 1}
-                      </span>
-                      {receiveItems.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeReceiveItem(item.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="space-y-2">
-                        <Label>Product *</Label>
-                        <Select 
-                          value={item.product_id}
-                          onValueChange={(value) => updateReceiveItem(item.id, "product_id", value)}
-                          required
-                          disabled={loadingProducts}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select product" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {products.map(product => (
-                              <SelectItem key={product.id} value={product.id}>
-                                {product.name} (Stock: {product.stock})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Quantity *</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          required
-                          value={item.quantity}
-                          onChange={(e) => updateReceiveItem(item.id, "quantity", e.target.value)}
-                          placeholder="Enter quantity"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Cost (Optional)</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={item.cost}
-                          onChange={(e) => updateReceiveItem(item.id, "cost", e.target.value)}
-                          placeholder="Product cost"
-                        />
-                      </div>
-                    </div>
+              {/* Entry Lane */}
+              <div className="p-3 border rounded-lg space-y-3 bg-muted/30">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search product..."
+                    value={searchTerm}
+                    onChange={e => { setSearchTerm(e.target.value); setSelectedProductId("") }}
+                    className="pl-9"
+                    disabled={loadingProducts}
+                  />
+                </div>
+                {searchTerm && !selectedProductId && (
+                  <div className="border rounded-md bg-background max-h-48 overflow-y-auto">
+                    {filteredProducts.slice(0, 8).length > 0 ? filteredProducts.slice(0, 8).map(p => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center justify-between"
+                        onClick={() => handleSelectProduct(p)}
+                      >
+                        <span>{p.name}</span>
+                        <span className="text-xs text-muted-foreground">Stock: {(p as any).stock ?? "—"}</span>
+                      </button>
+                    )) : (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">No products found</p>
+                    )}
                   </div>
-                ))}
+                )}
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">Quantity *</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      placeholder="Qty"
+                      value={draftQuantity}
+                      onChange={e => setDraftQuantity(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">Cost (optional)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={draftCost}
+                      onChange={e => setDraftCost(e.target.value)}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!selectedProductId || !draftQuantity || parseInt(draftQuantity) <= 0}
+                    onClick={upsertItem}
+                  >
+                    {editingItemId ? "Update Item" : "Add Item"}
+                  </Button>
+                  {editingItemId && (
+                    <Button type="button" size="sm" variant="outline" onClick={resetDraft}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
+
+              {/* Queued Items */}
+              {receiveItems.length > 0 && (
+                <div className="space-y-1">
+                  {receiveItems.map(item => (
+                    <div
+                      key={item.id}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm ${editingItemId === item.id ? "border-primary bg-primary/5" : "bg-background"}`}
+                    >
+                      <span className="flex-1 font-medium truncate">{item.product_name}</span>
+                      <span className="text-muted-foreground whitespace-nowrap">
+                        Qty: {item.quantity}{item.cost ? ` • Cost: ${item.cost}` : ""}
+                      </span>
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditItem(item)}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => removeReceiveItem(item.id)}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -363,8 +387,8 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               disabled={isLoading || loadingProducts || !outletId || receiveItems.length === 0}
             >
               {isLoading ? `Processing ${receiveItems.length} product(s)...` : `Receive ${receiveItems.length} Product(s)`}
@@ -375,4 +399,3 @@ export function ReceiveStockModal({ open, onOpenChange, onSuccess }: ReceiveStoc
     </Dialog>
   )
 }
-

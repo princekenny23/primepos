@@ -3,8 +3,7 @@ import type { Business } from "../types"
 import { saleService } from "../services/saleService"
 import { productService } from "../services/productService"
 import { customerService } from "../services/customerService"
-import { expenseService } from "../services/expenseService"
-import { returnService } from "../services/returnService"
+import { reportService } from "../services/reportService"
 import { staffService } from "../services/staffService"
 import { requestCache } from "./request-cache"
 
@@ -14,8 +13,6 @@ export interface DashboardKPI {
   products: { value: number; change: number }
   expenses: { value: number; change: number }
   profit: { value: number; change: number }
-  transactions: { value: number; change: number }
-  avgOrderValue: { value: number; change: number }
   lowStockItems: { value: number; change: number }
   outstandingCredit: { value: number; change: number }
   returns: { value: number; change: number }
@@ -76,24 +73,67 @@ function extractResults<T = any>(response: any): T[] {
   return response?.results || []
 }
 
-async function fetchAllCustomers(outletId?: string): Promise<any[]> {
-  const allCustomers: any[] = []
-  let page = 1
-  const maxPages = 100
+interface DashboardCustomerMetrics {
+  totalCustomers: number
+  currentPeriodNewCustomers: number
+  previousPeriodNewCustomers: number
+  outstandingCredit: number
+}
 
-  while (page <= maxPages) {
-    const response: any = await customerService.list({ outlet: outletId, page })
-    const pageItems = extractResults(response)
-    allCustomers.push(...pageItems)
+interface ProfitLossSnapshot {
+  revenue: number
+  expenses: number
+  netProfit: number
+}
 
-    if (Array.isArray(response)) break
-    if (!response?.next) break
-    if (pageItems.length === 0) break
+function normalizeProfitLossResponse(response: any): ProfitLossSnapshot {
+  const revenue = Number(response?.total_revenue || 0)
+  const expenses = Number(response?.expenses || response?.total_expenses || 0)
 
-    page += 1
+  // Prefer explicit net_profit if backend provides it; otherwise derive it from available fields.
+  const netProfit = Number(
+    response?.net_profit ??
+    response?.profit ??
+    ((response?.gross_profit ?? revenue) - expenses)
+  )
+
+  return {
+    revenue,
+    expenses,
+    netProfit,
   }
+}
 
-  return allCustomers
+async function fetchCustomerMetrics(
+  businessId: string,
+  outletId: string | undefined,
+  startStr: string,
+  endStr: string,
+  prevStartStr: string,
+  prevEndStr: string,
+): Promise<DashboardCustomerMetrics> {
+  const summary = await requestCache.getOrSet(
+    `customer-summary-${businessId}-${outletId || 'all'}-${startStr}-${endStr}-${prevStartStr}-${prevEndStr}`,
+    () => customerService.summary({
+      outlet: outletId,
+      start_date: startStr,
+      end_date: endStr,
+      previous_start_date: prevStartStr,
+      previous_end_date: prevEndStr,
+    }).catch(() => ({
+      total_customers: 0,
+      current_period_new_customers: 0,
+      previous_period_new_customers: 0,
+      outstanding_credit: 0,
+    }))
+  )
+
+  return {
+    totalCustomers: Number(summary.total_customers || 0),
+    currentPeriodNewCustomers: Number(summary.current_period_new_customers || 0),
+    previousPeriodNewCustomers: Number(summary.previous_period_new_customers || 0),
+    outstandingCredit: Number(summary.outstanding_credit || 0),
+  }
 }
 
 /**
@@ -115,123 +155,61 @@ export async function generateKPIData(
     
     // Fetch all data in parallel with caching
     const [
-      currentStats,
-      previousStats,
-      currentSales,
-      previousSales,
+      currentPnl,
+      previousPnl,
       staffList,
-      customersList,
-      currentExpenseStats,
-      previousExpenseStats,
-      lowStockProducts,
-      returnsCurrent,
-      returnsPrevious,
+      customerMetrics,
     ] = await Promise.all([
-      requestCache.getOrSet(`stats-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () => 
-        saleService.getStats({ start_date: startStr, end_date: endStr, outlet: outletId, status: "completed" }).catch((err) => {
-          console.error('Failed to fetch current stats:', err)
-          return { total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }
+      requestCache.getOrSet(`pnl-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () => 
+        reportService.getProfitLoss({ outlet: outletId, start_date: startStr, end_date: endStr }).catch((err) => {
+          console.error('Failed to fetch current profit/loss:', err)
+          return null
         })
       ),
-      requestCache.getOrSet(`stats-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
-        saleService.getStats({ start_date: prevStartStr, end_date: prevEndStr, outlet: outletId, status: "completed" }).catch((err) => {
-          console.error('Failed to fetch previous stats:', err)
-          return { total_revenue: 0, today_revenue: 0, total_sales: 0, today_sales: 0 }
-        })
-      ),
-      requestCache.getOrSet(`sales-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () =>
-        saleService.list({ outlet: outletId, start_date: startStr, end_date: endStr, page: 1 }).catch((err) => {
-          console.error('Failed to fetch current sales:', err)
-          return { results: [], count: 0 }
-        })
-      ),
-      requestCache.getOrSet(`sales-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
-        saleService.list({ outlet: outletId, start_date: prevStartStr, end_date: prevEndStr, page: 1 }).catch((err) => {
-          console.error('Failed to fetch previous sales:', err)
-          return { results: [], count: 0 }
+      requestCache.getOrSet(`pnl-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
+        reportService.getProfitLoss({ outlet: outletId, start_date: prevStartStr, end_date: prevEndStr }).catch((err) => {
+          console.error('Failed to fetch previous profit/loss:', err)
+          return null
         })
       ),
       requestCache.getOrSet(`staff-active-${businessId}-${outletId || 'all'}`, () =>
         staffService.list({ is_active: true }).then(res => res.results || []).catch(() => [])
       ),
-      requestCache.getOrSet(`customers-${businessId}-${outletId || 'all'}`, () =>
-        fetchAllCustomers(outletId).catch(() => [])
-      ),
-      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () =>
-        expenseService.stats({ outlet: outletId, start_date: startStr, end_date: endStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
-      ),
-      requestCache.getOrSet(`expenses-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
-        expenseService.stats({ outlet: outletId, start_date: prevStartStr, end_date: prevEndStr }).catch(() => ({ total_expenses: 0, today_expenses: 0, pending_count: 0, category_breakdown: [], status_breakdown: [] }))
-      ),
-      requestCache.getOrSet(`low-stock-${businessId}-${outletId || 'all'}`, () =>
-        productService.getLowStock(outletId).catch(() => [])
-      ),
-      requestCache.getOrSet(`returns-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () =>
-        returnService.list({ outlet: outletId, start_date: startStr, end_date: endStr }).catch(() => ({ results: [], count: 0 }))
-      ),
-      requestCache.getOrSet(`returns-${businessId}-${outletId || 'all'}-${prevStartStr}-${prevEndStr}`, () =>
-        returnService.list({ outlet: outletId, start_date: prevStartStr, end_date: prevEndStr }).catch(() => ({ results: [], count: 0 }))
-      ),
+      fetchCustomerMetrics(businessId, outletId, startStr, endStr, prevStartStr, prevEndStr),
     ])
+
+    const currentProfitLoss = normalizeProfitLossResponse(currentPnl)
+    const previousProfitLoss = normalizeProfitLossResponse(previousPnl)
     
-    const currentRevenue = Number(currentStats.total_revenue || currentStats.today_revenue || 0)
-    const previousRevenue = Number(previousStats.total_revenue || previousStats.today_revenue || 0)
+    const currentRevenue = currentProfitLoss.revenue
+    const previousRevenue = previousProfitLoss.revenue
     const salesChange = percentChange(currentRevenue, previousRevenue)
-
-    const currentTransactions = Number(currentStats.total_sales || currentSales.count || (Array.isArray(currentSales) ? currentSales.length : currentSales.results?.length || 0))
-    const previousTransactions = Number(previousStats.total_sales || previousSales.count || (Array.isArray(previousSales) ? previousSales.length : previousSales.results?.length || 0))
-    const transactionsChange = percentChange(currentTransactions, previousTransactions)
-
-    const currentAvgOrder = currentTransactions > 0 ? currentRevenue / currentTransactions : 0
-    const previousAvgOrder = previousTransactions > 0 ? previousRevenue / previousTransactions : 0
-    const avgOrderChange = percentChange(currentAvgOrder, previousAvgOrder)
     
     // Calculate customer metrics
-    const customersCount = extractResults(customersList).length
-    
-    // Calculate customer change - compare new customers this month vs last month
-    const allCustomers = extractResults(customersList)
-    const currentRangeNewCustomers = allCustomers.filter((c: any) => {
-      if (!c.created_at && !c.createdAt) return false
-      const createdDate = new Date(c.created_at || c.createdAt)
-      return createdDate >= start && createdDate <= end
-    }).length
-    
-    const previousRangeNewCustomers = allCustomers.filter((c: any) => {
-      if (!c.created_at && !c.createdAt) return false
-      const createdDate = new Date(c.created_at || c.createdAt)
-      return createdDate >= previousStart && createdDate <= previousEnd
-    }).length
-    
-    const customersChange = percentChange(currentRangeNewCustomers, previousRangeNewCustomers)
+    const customersCount = customerMetrics.totalCustomers
+    const customersChange = percentChange(
+      customerMetrics.currentPeriodNewCustomers,
+      customerMetrics.previousPeriodNewCustomers
+    )
     
     // Calculate expense metrics
-    const currentExpenses = Number(currentExpenseStats.total_expenses || 0)
-    const previousExpenses = Number(previousExpenseStats.total_expenses || 0)
+    const currentExpenses = currentProfitLoss.expenses
+    const previousExpenses = previousProfitLoss.expenses
     const expensesChange = percentChange(currentExpenses, previousExpenses)
     
-    // Calculate profit (sales - expenses for today)
-    const currentProfit = currentRevenue - currentExpenses
-    const previousProfit = previousRevenue - previousExpenses
+    // Profit KPI is aligned with Profit & Loss report logic.
+    const currentProfit = currentProfitLoss.netProfit
+    const previousProfit = previousProfitLoss.netProfit
     const profitChange = percentChange(currentProfit, previousProfit)
     
     // Calculate outstanding credit
-    const customersWithCredit = extractResults(customersList).filter((c: any) => c.credit_enabled && Number(c.outstanding_balance || 0) > 0)
-    const totalOutstandingCredit = customersWithCredit.reduce((sum: number, c: any) => sum + Number(c.outstanding_balance || 0), 0)
+    const totalOutstandingCredit = customerMetrics.outstandingCredit
     
     // Calculate outstanding credit change
     // Since we don't have historical credit balance data, we'll show change as 0
     // To properly track this, backend would need to store daily/monthly credit snapshots
     // For now, the card shows the TOTAL outstanding credit amount only
     const outstandingCreditChange = 0
-    
-    // Calculate returns
-    const returnsCurrentCount = Array.isArray(returnsCurrent) ? returnsCurrent.length : (returnsCurrent.count || returnsCurrent.results?.length || 0)
-    const returnsPreviousCount = Array.isArray(returnsPrevious) ? returnsPrevious.length : (returnsPrevious.count || returnsPrevious.results?.length || 0)
-    const returnsChange = percentChange(returnsCurrentCount, returnsPreviousCount)
-    
-    // Low stock items count
-    const lowStockCount = Array.isArray(lowStockProducts) ? lowStockProducts.length : (lowStockProducts.results?.length || 0)
     
     // Calculate employees metrics
     // Filter staff by outlet if outletId is provided (staff can work at multiple outlets)
@@ -266,11 +244,9 @@ export async function generateKPIData(
       products: { value: employeesCount, change: employeesChange },
       expenses: { value: currentExpenses, change: expensesChange },
       profit: { value: currentProfit, change: profitChange },
-      transactions: { value: currentTransactions, change: transactionsChange },
-      avgOrderValue: { value: currentAvgOrder, change: avgOrderChange },
-      lowStockItems: { value: lowStockCount, change: 0 },
+      lowStockItems: { value: 0, change: 0 },
       outstandingCredit: { value: totalOutstandingCredit, change: outstandingCreditChange },
-      returns: { value: returnsCurrentCount, change: returnsChange },
+      returns: { value: 0, change: 0 },
     }
   } catch (error) {
     console.error("Failed to load KPI data from API:", error)
@@ -281,8 +257,6 @@ export async function generateKPIData(
       products: { value: 0, change: 0 },
       expenses: { value: 0, change: 0 },
       profit: { value: 0, change: 0 },
-      transactions: { value: 0, change: 0 },
-      avgOrderValue: { value: 0, change: 0 },
       lowStockItems: { value: 0, change: 0 },
       outstandingCredit: { value: 0, change: 0 },
       returns: { value: 0, change: 0 },

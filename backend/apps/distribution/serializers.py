@@ -95,6 +95,7 @@ class DeliveryOrderSerializer(serializers.ModelSerializer):
 
 class TripSerializer(serializers.ModelSerializer):
     delivery_order_reference = serializers.SerializerMethodField()
+    total_goods_amount = serializers.DecimalField(source='delivery_order.sales_order.total', max_digits=12, decimal_places=2, read_only=True)
     vehicle_plate_number = serializers.CharField(source='vehicle.plate_number', read_only=True)
     driver_name = serializers.CharField(source='driver.name', read_only=True)
 
@@ -102,6 +103,7 @@ class TripSerializer(serializers.ModelSerializer):
         model = Trip
         fields = (
             'id', 'tenant', 'delivery_order', 'delivery_order_reference',
+            'total_goods_amount',
             'vehicle', 'vehicle_plate_number', 'driver', 'driver_name',
             'fuel_cost', 'distance_km', 'total_cost', 'profit',
             'created_at', 'updated_at'
@@ -115,6 +117,7 @@ class TripSerializer(serializers.ModelSerializer):
             'id': obj.delivery_order.id,
             'sales_order_id': obj.delivery_order.sales_order_id,
             'receipt_number': getattr(obj.delivery_order.sales_order, 'receipt_number', None),
+            'total_goods_amount': getattr(obj.delivery_order.sales_order, 'total', None),
             'delivery_status': obj.delivery_order.delivery_status,
         }
 

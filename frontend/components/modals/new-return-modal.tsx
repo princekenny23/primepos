@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import {
   Dialog,
@@ -20,14 +20,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { returnService, type ReturnType, type ReturnItem, type CreateReturnData } from "@/lib/services/returnService"
 import { productService } from "@/lib/services/productService"
 import { supplierService } from "@/lib/services/supplierService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
-import { Plus, Trash2, Search, Package } from "lucide-react"
+import { Pencil, Search, Trash2, X } from "lucide-react"
 
 interface NewReturnModalProps {
   open: boolean
@@ -44,13 +44,17 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
   const [products, setProducts] = useState<any[]>([])
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [selectedProductId, setSelectedProductId] = useState("")
   const [selectedSupplier, setSelectedSupplier] = useState<string>("")
   const [fromOutlet, setFromOutlet] = useState<string>("")
   const [toOutlet, setToOutlet] = useState<string>("")
   const [reason, setReason] = useState("")
   const [notes, setNotes] = useState("")
   const [items, setItems] = useState<ReturnItem[]>([])
-  const [showProductSearch, setShowProductSearch] = useState(false)
+  const [draftQuantity, setDraftQuantity] = useState("")
+  const [draftUnitPrice, setDraftUnitPrice] = useState("")
+  const [draftItemReason, setDraftItemReason] = useState("")
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
 
   // Load data
   useEffect(() => {
@@ -58,11 +62,9 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
 
     const loadData = async () => {
       try {
-        // Load suppliers
         const suppliersData = await supplierService.list()
         setSuppliers(Array.isArray(suppliersData) ? suppliersData : suppliersData.results || [])
-        
-        // Load products
+
         const productsData = await productService.list({ is_active: true })
         setProducts(Array.isArray(productsData) ? productsData : productsData.results || [])
       } catch (error) {
@@ -73,7 +75,7 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
     loadData()
   }, [open])
 
-  // Reset form when modal opens/closes
+  // Reset form when modal closes
   useEffect(() => {
     if (!open) {
       setReturnType("supplier")
@@ -84,44 +86,74 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
       setNotes("")
       setItems([])
       setSearchTerm("")
-      setShowProductSearch(false)
+      setSelectedProductId("")
+      setDraftQuantity("")
+      setDraftUnitPrice("")
+      setDraftItemReason("")
+      setEditingIndex(null)
     }
   }, [open])
 
-  const handleAddItem = () => {
-    setShowProductSearch(true)
-  }
+  const filteredProducts = useMemo(() => {
+    const addedIds = new Set(
+      items
+        .filter((_, i) => i !== editingIndex)
+        .map(i => i.product_id)
+    )
+    return products.filter(p =>
+      !addedIds.has(String(p.id)) &&
+      (p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+       p.sku?.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
+  }, [products, items, searchTerm, editingIndex])
 
-  const handleSelectProduct = (product: any) => {
-    const newItem: ReturnItem = {
-      product_id: String(product.id),
-      product_name: product.name,
-      quantity: 1,
-      unit_price: product.price || product.retail_price || "0",
-    }
-    setItems([...items, newItem])
-    setShowProductSearch(false)
+  const resetDraft = () => {
+    setSelectedProductId("")
+    setDraftQuantity("")
+    setDraftUnitPrice("")
+    setDraftItemReason("")
+    setEditingIndex(null)
     setSearchTerm("")
   }
 
+  const upsertItem = () => {
+    const product = products.find(p => String(p.id) === selectedProductId)
+    if (!product || !draftQuantity || parseInt(draftQuantity) <= 0) return
+
+    const newItem: ReturnItem = {
+      product_id: String(product.id),
+      product_name: product.name,
+      quantity: parseInt(draftQuantity),
+      unit_price: draftUnitPrice || undefined,
+      reason: draftItemReason || undefined,
+    }
+
+    if (editingIndex !== null) {
+      setItems(prev => prev.map((item, i) => i === editingIndex ? newItem : item))
+    } else {
+      setItems(prev => [...prev, newItem])
+    }
+    resetDraft()
+  }
+
+  const handleEditItem = (index: number) => {
+    const item = items[index]
+    setEditingIndex(index)
+    setSelectedProductId(item.product_id)
+    setDraftQuantity(String(item.quantity))
+    setDraftUnitPrice(item.unit_price || "")
+    setDraftItemReason(item.reason || "")
+    setSearchTerm(item.product_name || "")
+  }
+
   const handleRemoveItem = (index: number) => {
-    setItems(items.filter((_, i) => i !== index))
+    setItems(prev => prev.filter((_, i) => i !== index))
+    if (editingIndex === index) resetDraft()
   }
-
-  const handleItemChange = (index: number, field: keyof ReturnItem, value: any) => {
-    const updatedItems = [...items]
-    updatedItems[index] = { ...updatedItems[index], [field]: value }
-    setItems(updatedItems)
-  }
-
-  const filteredProducts = products.filter(p =>
-    p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.sku?.toLowerCase().includes(searchTerm.toLowerCase())
-  )
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (items.length === 0) {
       toast({
         title: "Error",
@@ -159,7 +191,6 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
         items: items,
       }
 
-      // Supplier return
       if (returnType === "supplier") {
         if (!selectedSupplier) {
           toast({
@@ -171,9 +202,8 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
           return
         }
         returnData.supplier_id = selectedSupplier
-        returnData.return_date = new Date().toISOString().split('T')[0]
+        returnData.return_date = new Date().toISOString().split("T")[0]
       } else if (returnType === "outlet") {
-        // Outlet return
         if (!fromOutlet || !toOutlet) {
           toast({
             title: "Error",
@@ -188,12 +218,12 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
       }
 
       await returnService.create(returnData)
-      
+
       toast({
         title: "Success",
         description: "Return created successfully",
       })
-      
+
       onReturnCreated?.()
       onOpenChange(false)
     } catch (error: any) {
@@ -210,7 +240,7 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>New Return</DialogTitle>
           <DialogDescription>
@@ -219,7 +249,7 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
         </DialogHeader>
 
         <form onSubmit={handleSubmit}>
-          <div className="space-y-6 py-4">
+          <div className="space-y-4 py-4">
             {/* Return Type Selection */}
             <Tabs value={returnType} onValueChange={(v) => setReturnType(v as ReturnType)}>
               <TabsList className="grid w-full grid-cols-2">
@@ -293,7 +323,7 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Enter reason for return"
                 required
-                rows={3}
+                rows={2}
               />
             </div>
 
@@ -310,107 +340,112 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
             </div>
 
             {/* Items */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <Label>Items to Return</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAddItem}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Item
-                </Button>
-              </div>
+            <div className="space-y-3">
+              <Label>Items to Return</Label>
 
-              {/* Product Search */}
-              {showProductSearch && (
-                <div className="border rounded-lg p-4 space-y-2">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder="Search products..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                  <div className="max-h-40 overflow-y-auto space-y-1">
-                    {filteredProducts.slice(0, 10).map((product) => (
+              {/* Entry Lane */}
+              <div className="p-3 border rounded-lg space-y-3 bg-muted/30">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search product..."
+                    value={searchTerm}
+                    onChange={e => { setSearchTerm(e.target.value); setSelectedProductId("") }}
+                    className="pl-9"
+                  />
+                </div>
+                {searchTerm && !selectedProductId && (
+                  <div className="border rounded-md bg-background max-h-48 overflow-y-auto">
+                    {filteredProducts.slice(0, 8).length > 0 ? filteredProducts.slice(0, 8).map((product) => (
                       <button
                         key={product.id}
                         type="button"
-                        onClick={() => handleSelectProduct(product)}
-                        className="w-full text-left p-2 hover:bg-muted rounded flex items-center gap-2"
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center justify-between"
+                        onClick={() => {
+                          setSelectedProductId(String(product.id))
+                          setSearchTerm(product.name)
+                          if (product.price || product.retail_price) {
+                            setDraftUnitPrice(String(product.price || product.retail_price))
+                          }
+                        }}
                       >
-                        <Package className="h-4 w-4" />
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{product.name}</p>
-                          <p className="text-xs text-muted-foreground">SKU: {product.sku || "N/A"}</p>
-                        </div>
+                        <span>{product.name}</span>
+                        <span className="text-xs text-muted-foreground">SKU: {product.sku || "N/A"}</span>
                       </button>
-                    ))}
+                    )) : (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">No products found</p>
+                    )}
                   </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Quantity *</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      placeholder="Qty"
+                      value={draftQuantity}
+                      onChange={e => setDraftQuantity(e.target.value)}
+                    />
+                  </div>
+                  {returnType === "supplier" && (
+                    <div className="space-y-1">
+                      <Label className="text-xs">Unit Price</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={draftUnitPrice}
+                        onChange={e => setDraftUnitPrice(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
+                <div className="space-y-1">
+                  <Label className="text-xs">Item Reason (optional)</Label>
+                  <Input
+                    placeholder="Reason for this item"
+                    value={draftItemReason}
+                    onChange={e => setDraftItemReason(e.target.value)}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!selectedProductId || !draftQuantity || parseInt(draftQuantity) <= 0}
+                    onClick={upsertItem}
+                  >
+                    {editingIndex !== null ? "Update Item" : "Add Item"}
+                  </Button>
+                  {editingIndex !== null && (
+                    <Button type="button" size="sm" variant="outline" onClick={resetDraft}>
+                      <X className="h-4 w-4 mr-1" />
+                      Cancel Edit
+                    </Button>
+                  )}
+                </div>
+              </div>
 
-              {/* Items List */}
-              {items.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground border rounded-lg">
-                  <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p>No items added. Click &quot;Add Item&quot; to add products.</p>
-                </div>
-              ) : (
-                <div className="space-y-2">
+              {/* Queued Items */}
+              {items.length > 0 && (
+                <div className="space-y-1">
                   {items.map((item, index) => (
-                    <div key={index} className="border rounded-lg p-4 space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <p className="font-medium">{item.product_name || "Product"}</p>
-                          <p className="text-xs text-muted-foreground">SKU: {item.product_id}</p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveItem(index)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Quantity *</Label>
-                          <Input
-                            type="number"
-                            min="1"
-                            value={item.quantity}
-                            onChange={(e) => handleItemChange(index, "quantity", parseInt(e.target.value) || 1)}
-                            required
-                          />
-                        </div>
-                        {returnType === "supplier" && (
-                          <div className="space-y-2">
-                            <Label>Unit Price</Label>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              value={item.unit_price || ""}
-                              onChange={(e) => handleItemChange(index, "unit_price", e.target.value)}
-                              placeholder="0.00"
-                            />
-                          </div>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Item Reason (Optional)</Label>
-                        <Input
-                          value={item.reason || ""}
-                          onChange={(e) => handleItemChange(index, "reason", e.target.value)}
-                          placeholder="Reason for this item"
-                        />
-                      </div>
+                    <div
+                      key={index}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-md border text-sm ${editingIndex === index ? "border-primary bg-primary/5" : "bg-background"}`}
+                    >
+                      <span className="flex-1 font-medium truncate">{item.product_name || item.product_id}</span>
+                      <span className="text-muted-foreground whitespace-nowrap">
+                        Qty: {item.quantity}
+                        {item.unit_price ? ` • MK ${item.unit_price}` : ""}
+                      </span>
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditItem(index)}>
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRemoveItem(index)}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
                     </div>
                   ))}
                 </div>

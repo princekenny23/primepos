@@ -239,16 +239,15 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 
                 # Adjust to the target stock using batch-aware helper
                 if new_stock != current_stock:
+                    update_reason = f"Product update via API - set stock to {new_stock} (was {current_stock})"
                     adjust_stock(
                         product=product,
                         outlet=outlet,
                         new_quantity=new_stock,
                         user=self.request.user,
-                        reason=f"Product update via API - set stock to {new_stock} (was {current_stock})"
+                        reason=update_reason
                     )
-                    logger.info(
-                        f"Adjusted stock for product {product.id}, outlet {outlet.id}: {current_stock} -> {new_stock}"
-                    )
+                    logger.info(f"{update_reason} Stock updated: {current_stock} → {new_stock}")
                 
                 # Also update LocationStock.quantity for backward compatibility
                 LocationStock.objects.update_or_create(

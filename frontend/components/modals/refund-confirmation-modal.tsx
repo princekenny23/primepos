@@ -10,13 +10,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { DollarSign, AlertTriangle } from "lucide-react"
 import { useState } from "react"
 import { useToast } from "@/components/ui/use-toast"
@@ -31,20 +25,10 @@ interface RefundConfirmationModalProps {
 export function RefundConfirmationModal({ open, onOpenChange, returnItem }: RefundConfirmationModalProps) {
   const { toast } = useToast()
   const [isProcessing, setIsProcessing] = useState(false)
-  const [refundMethod, setRefundMethod] = useState<string>("")
 
   if (!returnItem) return null
 
   const handleRefund = async () => {
-    if (!refundMethod) {
-      toast({
-        title: "Refund Method Required",
-        description: "Please select a refund method.",
-        variant: "destructive",
-      })
-      return
-    }
-
     setIsProcessing(true)
 
     // In production, this would call API
@@ -52,9 +36,8 @@ export function RefundConfirmationModal({ open, onOpenChange, returnItem }: Refu
       setIsProcessing(false)
       toast({
         title: "Refund Processed",
-        description: `Refund of $${returnItem.amount.toFixed(2)} has been processed via ${refundMethod}.`,
+        description: `Refund of $${returnItem.amount.toFixed(2)} has been processed via cash.`,
       })
-      setRefundMethod("")
       onOpenChange(false)
     }, 1500)
   }
@@ -102,17 +85,7 @@ export function RefundConfirmationModal({ open, onOpenChange, returnItem }: Refu
 
           <div className="space-y-2">
             <Label htmlFor="refund-method">Refund Method *</Label>
-            <Select value={refundMethod} onValueChange={setRefundMethod} required>
-              <SelectTrigger id="refund-method">
-                <SelectValue placeholder="Select refund method" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="card">Original Card</SelectItem>
-                <SelectItem value="store-credit">Store Credit</SelectItem>
-                <SelectItem value="bank-transfer">Bank Transfer</SelectItem>
-              </SelectContent>
-            </Select>
+            <Input id="refund-method" value="Cash" readOnly />
           </div>
 
           <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
@@ -128,7 +101,7 @@ export function RefundConfirmationModal({ open, onOpenChange, returnItem }: Refu
           </Button>
           <Button
             onClick={handleRefund}
-            disabled={isProcessing || !refundMethod}
+            disabled={isProcessing}
             className="bg-green-600 hover:bg-green-700"
           >
             {isProcessing ? "Processing..." : "Confirm Refund"}

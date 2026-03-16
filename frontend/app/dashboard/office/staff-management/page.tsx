@@ -31,8 +31,10 @@ import { useToast } from "@/components/ui/use-toast"
 import { Plus, Search, Edit, Trash2 } from "lucide-react"
 
 export default function StaffManagementPage() {
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { toast } = useToast()
+
+  const currentOutletId = currentOutlet?.id ? String(currentOutlet.id) : ""
 
   const [staffMembers, setStaffMembers] = useState<Staff[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -51,8 +53,17 @@ export default function StaffManagementPage() {
 
     setIsLoading(true)
     try {
-      const response = await staffService.list({ tenant: currentBusiness.id })
-      setStaffMembers(response.results || [])
+      const response = await staffService.list({
+        tenant: currentBusiness.id,
+        ...(currentOutletId ? { outlet: currentOutletId } : {}),
+      })
+
+      const scopedStaff = (response.results || []).filter((staff) => {
+        if (!currentOutletId) return true
+        return (staff.outlets || []).some((outlet) => String(outlet.id) === currentOutletId)
+      })
+
+      setStaffMembers(scopedStaff)
     } catch (error: any) {
       console.error("Failed to load staff:", error)
       setStaffMembers([])
@@ -64,7 +75,7 @@ export default function StaffManagementPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, toast])
+  }, [currentBusiness, currentOutletId, toast])
 
   useEffect(() => {
     loadStaff()

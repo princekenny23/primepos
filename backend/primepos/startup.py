@@ -61,14 +61,17 @@ def validate_production_env():
 def log_startup_info():
     """Log sanitized startup configuration for debugging."""
     print("\n" + "=" * 60)
-    print("🚀 PRIMEPOS BACKEND STARTUP INFO")
+    print("PRIMEPOS BACKEND STARTUP INFO")
     print("=" * 60)
     print(f"  DEBUG: {settings.DEBUG}")
-    db_url = os.environ.get("DATABASE_URL", "NOT SET")
-    if db_url != "NOT SET":
-        # Sanitize database URL (hide password)
-        db_url = db_url.split("@")[-1] if "@" in db_url else db_url[:30] + "..."
-    print(f"  DATABASE: {db_url}")
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        # Sanitize database URL (hide credentials)
+        db_display = db_url.split("@")[-1] if "@" in db_url else db_url[:30] + "..."
+    else:
+        db_display = "GENERATED FROM DB_*"
+    print(f"  DATABASE_URL: {db_display}")
+    print(f"  DB_ENGINE: {settings.DATABASES['default'].get('ENGINE')}")
     print(f"  ALLOWED_HOSTS: {settings.ALLOWED_HOSTS}")
     cors_origins = getattr(settings, "CORS_ALLOWED_ORIGINS", [])
     print(f"  CORS_ORIGINS: {len(cors_origins)} domain(s) configured")

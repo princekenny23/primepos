@@ -206,10 +206,10 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     
     def list(self, request, *args, **kwargs):
         """Override list to add logging"""
-        logger.info(f"Listing stock movements - User: {request.user.email}, Tenant: {getattr(request.user, 'tenant', None)}")
-        logger.info(f"Query params: {request.query_params}")
+        logger.debug(f"Listing stock movements - User: {request.user.email}, Tenant: {getattr(request.user, 'tenant', None)}")
+        logger.debug(f"Query params: {request.query_params}")
         response = super().list(request, *args, **kwargs)
-        logger.info(f"Stock movements response count: {len(response.data.get('results', [])) if isinstance(response.data, dict) else len(response.data)}")
+        logger.debug(f"Stock movements response count: {len(response.data.get('results', [])) if isinstance(response.data, dict) else len(response.data)}")
         return response
 
 

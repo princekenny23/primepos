@@ -14,6 +14,68 @@ export const apiConfig = {
   timeout: 30000, // 30 seconds
 }
 
+let throttleUntilMs = 0
+let lastThrottleLogMs = 0
+
+export function getThrottleRemainingSeconds(): number {
+  if (throttleUntilMs <= Date.now()) {
+    return 0
+  }
+
+  return Math.max(1, Math.ceil((throttleUntilMs - Date.now()) / 1000))
+}
+
+export function isThrottleError(error: unknown): error is Error & { status: number; data: any } {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  if ("status" in error && (error as { status?: number }).status === 429) {
+    return true
+  }
+
+  if ("message" in error) {
+    return String((error as { message?: string }).message || "").toLowerCase().includes("throttled")
+  }
+
+  return false
+}
+
+function parseRetryAfterSeconds(retryAfter: string | null): number | null {
+  if (!retryAfter) return null
+  const asNumber = Number(retryAfter)
+  if (Number.isFinite(asNumber) && asNumber > 0) {
+    return Math.floor(asNumber)
+  }
+
+  const asDate = Date.parse(retryAfter)
+  if (!Number.isNaN(asDate)) {
+    const deltaMs = asDate - Date.now()
+    if (deltaMs > 0) {
+      return Math.ceil(deltaMs / 1000)
+    }
+  }
+
+  return null
+}
+
+function parseThrottleSecondsFromMessage(message: string): number | null {
+  const match = message.match(/available in\s+(\d+)\s+seconds/i)
+  if (!match) return null
+  const seconds = Number(match[1])
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null
+}
+
+function createThrottleError(seconds: number): Error & { status: number; data: any } {
+  const error = new Error(`Request was throttled. Expected available in ${seconds} seconds.`) as Error & {
+    status: number
+    data: any
+  }
+  error.status = 429
+  error.data = { detail: error.message }
+  return error
+}
+
 /**
  * API Client for making HTTP requests
  * Ready for backend integration
@@ -90,6 +152,18 @@ export class ApiClient {
     }
 
     try {
+      if (throttleUntilMs > Date.now()) {
+        const remainingSeconds = getThrottleRemainingSeconds()
+        if (Date.now() - lastThrottleLogMs > 10000) {
+          lastThrottleLogMs = Date.now()
+          console.warn("Skipping request during throttle cooldown:", {
+            endpoint: url,
+            remainingSeconds,
+          })
+        }
+        throw createThrottleError(remainingSeconds)
+      }
+
       // Support environments where AbortController may be missing (older Node/browsers)
       const AbortCtrl: typeof AbortController | null =
         typeof AbortController !== "undefined" ? AbortController : null
@@ -195,6 +269,13 @@ export class ApiClient {
         if (!errorMessage) {
           errorMessage = (typeof errorData === 'string' ? errorData : null) ||
                          `API Error: ${response.status} ${response.statusText}`
+        }
+
+        if (response.status === 429) {
+          const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("Retry-After"))
+          const messageSeconds = parseThrottleSecondsFromMessage(String(errorMessage))
+          const throttleSeconds = retryAfterSeconds || messageSeconds || 30
+          throttleUntilMs = Date.now() + throttleSeconds * 1000
         }
         
         // Handle authentication errors specifically
@@ -479,6 +560,7 @@ export const apiEndpoints = {
     get: (id: string) => `/customers/${id}/`,
     create: "/customers/",
     update: (id: string) => `/customers/${id}/`,
+    summary: "/customers/summary/",
     adjustPoints: (id: string) => `/customers/${id}/adjust_points/`,
     creditSummary: (id: string) => `/customers/${id}/credit_summary/`,
     adjustCredit: (id: string) => `/customers/${id}/adjust_credit/`,

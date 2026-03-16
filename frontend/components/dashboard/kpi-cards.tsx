@@ -33,24 +33,24 @@ function KPICard({ title, value, change, changeLabel, icon, trend, business, col
   const colors = colorMap[colorVariant]
   
   return (
-    <Card className={cn("h-full border-2", colors.bg, colors.border)}>
-      <CardHeader className={cn("flex flex-row items-center justify-between space-y-0 pb-0 pt-2 px-3 rounded-t-lg", colors.header)}>
-        <CardTitle className="text-xs font-medium leading-tight">{title}</CardTitle>
-        <div className={cn("h-4 w-4", colors.icon)}>
+    <Card className={cn("h-full min-h-[82px] border", colors.bg, colors.border)}>
+      <CardHeader className={cn("flex flex-row items-center justify-between space-y-0 px-2.5 py-1.5 rounded-t-lg", colors.header)}>
+        <CardTitle className="text-[10px] font-medium leading-tight tracking-wide">{title}</CardTitle>
+        <div className={cn("h-3 w-3", colors.icon)}>
           {icon}
         </div>
       </CardHeader>
-      <CardContent className="px-3 py-1.5">
-        <div className="text-lg font-bold leading-tight">{value}</div>
+      <CardContent className="px-2.5 pb-1.5 pt-1">
+        <div className="text-sm font-bold leading-tight lg:text-base">{value}</div>
         {change !== undefined && (
           <p className={cn(
-            "text-xs flex items-center gap-0.5 mt-0.5 leading-tight",
+            "mt-0.5 flex items-center gap-0.5 text-[10px] leading-tight",
             isPositive ? "text-green-500" : "text-red-500"
           )}>
             {isPositive ? (
-              <TrendingUp className="h-2.5 w-2.5" />
+              <TrendingUp className="h-2 w-2" />
             ) : (
-              <TrendingDown className="h-2.5 w-2.5" />
+              <TrendingDown className="h-2 w-2" />
             )}
             <span>{Math.abs(change)}%</span>
             {changeLabel && <span className="text-muted-foreground text-xs"> {changeLabel}</span>}
@@ -77,72 +77,65 @@ interface KPICardsProps {
 
 export function KPICards({ data, business }: KPICardsProps) {
   return (
-    <div className="space-y-4">
-      {/* Group 1: Sales Metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <KPICard
-          title="Sales"
-          value={formatCurrency(data.sales.value, business)}
-          change={data.sales.change}
-          changeLabel="vs previous period"
-          icon={<DollarSign className="h-6 w-6" />}
-          trend={data.sales.change >= 0 ? "up" : "down"}
-          business={business}
-          colorVariant="blue"
-        />
-        <KPICard
-          title="Expenses"
-          value={formatCurrency(data.expenses.value, business)}
-          change={data.expenses.change}
-          changeLabel="vs previous period"
-          icon={<ArrowDownRight className="h-6 w-6" />}
-          trend={data.expenses.change >= 0 ? "down" : "up"}
-          business={business}
-          colorVariant="amber"
-        />
-        <KPICard
-          title="Profit"
-          value={formatCurrency(data.profit.value, business)}
-          change={data.profit.change}
-          changeLabel="vs previous period"
-          icon={<ArrowUpRight className="h-6 w-6" />}
-          trend={data.profit.change >= 0 ? "up" : "down"}
-          business={business}
-          colorVariant="green"
-        />
-      </div>
-
-      {/* Group 2: Business Metrics */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <KPICard
-          title="Customers"
-          value={data.customers.value.toLocaleString('en-US')}
-          change={data.customers.change}
-          changeLabel="total"
-          icon={<Users className="h-6 w-6" />}
-          trend={data.customers.change >= 0 ? "up" : "down"}
-          business={business}
-          colorVariant="indigo"
-        />
-        <KPICard
-          title="Outstanding Credit"
-          value={formatCurrency(data.outstandingCredit.value, business)}
-          change={data.outstandingCredit.change}
-          changeLabel="receivables"
-          icon={<CreditCard className="h-6 w-6" />}
-          business={business}
-          colorVariant="orange"
-        />
-        <KPICard
-          title="Employees"
-          value={data.products.value.toLocaleString('en-US')}
-          change={data.products.change}
-          changeLabel="total"
-          icon={<Users className="h-6 w-6" />}
-          business={business}
-          colorVariant="slate"
-        />
-      </div>
+    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+      <KPICard
+        title="Sales"
+        value={formatCurrency(data.sales.value, business, { symbolOverride: "MK" })}
+        change={data.sales.change}
+        changeLabel="vs previous period"
+        icon={<DollarSign className="h-3.5 w-3.5" />}
+        trend={data.sales.change >= 0 ? "up" : "down"}
+        business={business}
+        colorVariant="blue"
+      />
+      <KPICard
+        title="Expenses"
+        value={formatCurrency(data.expenses.value, business)}
+        change={data.expenses.change}
+        changeLabel="vs previous period"
+        icon={<ArrowDownRight className="h-3.5 w-3.5" />}
+        trend={data.expenses.change >= 0 ? "down" : "up"}
+        business={business}
+        colorVariant="amber"
+      />
+      <KPICard
+        title="Profit"
+        value={formatCurrency(data.profit.value, business)}
+        change={data.profit.change}
+        changeLabel="vs previous period"
+        icon={<ArrowUpRight className="h-3.5 w-3.5" />}
+        trend={data.profit.change >= 0 ? "up" : "down"}
+        business={business}
+        colorVariant="green"
+      />
+      <KPICard
+        title="Customers"
+        value={data.customers.value.toLocaleString('en-US')}
+        change={data.customers.change}
+        changeLabel="total"
+        icon={<Users className="h-3.5 w-3.5" />}
+        trend={data.customers.change >= 0 ? "up" : "down"}
+        business={business}
+        colorVariant="indigo"
+      />
+      <KPICard
+        title="Outstanding Credit"
+        value={formatCurrency(data.outstandingCredit.value, business)}
+        change={data.outstandingCredit.change}
+        changeLabel="receivables"
+        icon={<CreditCard className="h-3.5 w-3.5" />}
+        business={business}
+        colorVariant="orange"
+      />
+      <KPICard
+        title="Employees"
+        value={data.products.value.toLocaleString('en-US')}
+        change={data.products.change}
+        changeLabel="total"
+        icon={<Users className="h-3.5 w-3.5" />}
+        business={business}
+        colorVariant="slate"
+      />
     </div>
   )
 }

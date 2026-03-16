@@ -107,7 +107,7 @@ export default function ShiftManagementPage() {
   const { shiftHistory } = useShift()
   const { t } = useI18n()
   const [activeTab, setActiveTab] = useState<string>("history")
-  const [selectedOutlet, setSelectedOutlet] = useState<string>("all")
+  const [selectedOutlet, setSelectedOutlet] = useState<string>(currentOutlet?.id ? String(currentOutlet.id) : "")
   const [dateRange, setDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
     from: undefined,
     to: undefined,
@@ -139,9 +139,10 @@ export default function ShiftManagementPage() {
     try {
       const baseFilters = buildHistoryFilters()
       let history: Shift[] = []
+      const effectiveOutletId = selectedOutlet || (currentOutlet?.id ? String(currentOutlet.id) : "")
 
-      if (selectedOutlet !== "all") {
-        history = await shiftService.getHistory({ ...baseFilters, outlet: selectedOutlet })
+      if (effectiveOutletId) {
+        history = await shiftService.getHistory({ ...baseFilters, outlet: effectiveOutletId })
       } else if (outlets.length > 0) {
         const results = await Promise.all(
           outlets.map((outlet) => shiftService.getHistory({ ...baseFilters, outlet: outlet.id }))
@@ -160,7 +161,7 @@ export default function ShiftManagementPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, dateRange, selectedOutlet, outlets])
+  }, [currentBusiness, currentOutlet?.id, dateRange, selectedOutlet, outlets])
 
   const loadOpenShifts = async () => {
     if (!currentBusiness) return
@@ -168,9 +169,10 @@ export default function ShiftManagementPage() {
     setIsLoadingActive(true)
     try {
       let openShifts: Shift[] = []
+      const effectiveOutletId = selectedOutlet || (currentOutlet?.id ? String(currentOutlet.id) : "")
 
-      if (selectedOutlet !== "all") {
-        openShifts = await shiftService.listOpen({ outlet: selectedOutlet })
+      if (effectiveOutletId) {
+        openShifts = await shiftService.listOpen({ outlet: effectiveOutletId })
       } else if (outlets.length > 0) {
         const results = await Promise.all(
           outlets.map((outlet) => shiftService.listOpen({ outlet: outlet.id }))
@@ -227,7 +229,22 @@ export default function ShiftManagementPage() {
   // Load active shifts
   useEffect(() => {
     loadOpenShifts()
-  }, [currentBusiness, selectedOutlet, outlets])
+  }, [currentBusiness, selectedOutlet, outlets, currentOutlet?.id])
+
+  useEffect(() => {
+    if (currentOutlet?.id) {
+      setSelectedOutlet(String(currentOutlet.id))
+      return
+    }
+
+    if (selectedOutlet && outlets.some((outlet) => String(outlet.id) === selectedOutlet)) {
+      return
+    }
+
+    if (outlets.length > 0) {
+      setSelectedOutlet(String(outlets[0].id))
+    }
+  }, [currentOutlet?.id, outlets, selectedOutlet])
 
   const handleCloseSuccess = () => {
     // Reload both active shifts and history
@@ -494,10 +511,9 @@ export default function ShiftManagementPage() {
                   <label className="text-sm font-medium text-gray-900">Outlet</label>
                   <Select value={selectedOutlet} onValueChange={setSelectedOutlet}>
                     <SelectTrigger className="bg-white border-gray-300">
-                      <SelectValue placeholder={t("common.all_outlets")} />
+                      <SelectValue placeholder="Select outlet" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Outlets</SelectItem>
                       {outlets.map((outlet) => (
                         <SelectItem key={outlet.id} value={outlet.id}>
                           {outlet.name}

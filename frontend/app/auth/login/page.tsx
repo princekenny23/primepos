@@ -19,6 +19,21 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const getPostLoginRoute = (businessType: string | undefined, isAdminUser: boolean): string => {
+    if (!isAdminUser) return "/dashboard/pos"
+    if (businessType === "restaurant") return "/dashboard/restaurant/dashboard"
+    if (businessType === "bar") return "/dashboard/bar/dashboard"
+    return "/dashboard"
+  }
+
+  const setSelectedOutlet = (outletId: string) => {
+    const store = useBusinessStore.getState()
+    store.setCurrentOutlet(String(outletId))
+    if (typeof window !== "undefined") {
+      localStorage.setItem("currentOutletId", String(outletId))
+    }
+  }
+
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setIsLoading(true)
@@ -71,29 +86,33 @@ export default function LoginPage() {
         try {
           await setCurrentBusiness(String(tenant.id))
 
-          // Non-admin users should land directly on POS
-          if (!isAdminUser) {
-            console.log("Non-admin user detected, redirecting to POS landing...")
-            router.push("/dashboard/pos")
+          const nextRoute = getPostLoginRoute(tenant.type, isAdminUser)
+          const store = useBusinessStore.getState()
+          const allOutlets = (store.outlets || []).filter((outlet) => outlet.isActive !== false)
+          const assignedOutletIds = Array.isArray(result.user.outletIds)
+            ? result.user.outletIds.map((id: any) => String(id)).filter(Boolean)
+            : []
+
+          if (assignedOutletIds.length === 1) {
+            const matchedOutlet = allOutlets.find((outlet) => String(outlet.id) === assignedOutletIds[0])
+            if (matchedOutlet) {
+              setSelectedOutlet(matchedOutlet.id)
+              router.push(nextRoute)
+              return
+            }
+          }
+
+          if (assignedOutletIds.length === 0 || assignedOutletIds.length > 1) {
+            router.push(`/auth/select-outlet?next=${encodeURIComponent(nextRoute)}`)
             return
           }
-          
-          // Get the business type from tenant data to determine dashboard route
-          const businessType = (tenant.type || "") as "wholesale and retail" | "restaurant" | "bar"
-          
-          // Redirect to the appropriate dashboard based on business type
-          let dashboardRoute: string
-          if (businessType === "wholesale and retail") {
-            dashboardRoute = "/dashboard"
-          } else if (businessType === "restaurant") {
-            dashboardRoute = "/dashboard/restaurant/dashboard"
-          } else if (businessType === "bar") {
-            dashboardRoute = "/dashboard/bar/dashboard"
-          } else {
-            dashboardRoute = "/dashboard"
+
+          if (assignedOutletIds.length === 1) {
+            router.push(`/auth/select-outlet?next=${encodeURIComponent(nextRoute)}`)
+            return
           }
-          console.log("Redirecting to dashboard:", dashboardRoute)
-          router.push(dashboardRoute)
+
+          router.push(nextRoute)
           return
         } catch (error) {
           console.error("Failed to set current business:", error)
@@ -108,15 +127,28 @@ export default function LoginPage() {
         const currentTenant = await tenantService.getCurrent()
         await setCurrentBusiness(String(currentTenant.id))
 
-        const businessType = (currentTenant.type || "") as "wholesale and retail" | "restaurant" | "bar"
-        const dashboardRoute =
-          businessType === "restaurant"
-            ? "/dashboard/restaurant/dashboard"
-            : businessType === "bar"
-              ? "/dashboard/bar/dashboard"
-              : "/dashboard"
+        const nextRoute = getPostLoginRoute(currentTenant.type, isAdminUser)
+        const store = useBusinessStore.getState()
+        const allOutlets = (store.outlets || []).filter((outlet) => outlet.isActive !== false)
+        const assignedOutletIds = Array.isArray(result.user.outletIds)
+          ? result.user.outletIds.map((id: any) => String(id)).filter(Boolean)
+          : []
 
-        router.push(isAdminUser ? dashboardRoute : "/dashboard/pos")
+        if (assignedOutletIds.length === 1) {
+          const matchedOutlet = allOutlets.find((outlet) => String(outlet.id) === assignedOutletIds[0])
+          if (matchedOutlet) {
+            setSelectedOutlet(matchedOutlet.id)
+            router.push(nextRoute)
+            return
+          }
+        }
+
+        if (assignedOutletIds.length === 0 || assignedOutletIds.length > 1) {
+          router.push(`/auth/select-outlet?next=${encodeURIComponent(nextRoute)}`)
+          return
+        }
+
+        router.push(`/auth/select-outlet?next=${encodeURIComponent(nextRoute)}`)
         return
       } catch (error) {
         console.error("Tenant recovery failed:", error)
@@ -217,20 +249,19 @@ export default function LoginPage() {
               {/* Logo */}
               <div className="flex justify-center">
                 <img
-                  src="/logo2.png"
+                  src="/icon.jpg"
                   alt="PrimePOS"
-                  width={400}
-                  height={166}
-                  className="w-[28rem] h-32 object-contain"
+                  width={128}
+                  height={128}
+                  className="h-20 w-20 rounded-2xl object-cover shadow-lg"
                 />
               </div>
               
               {/* Description */}
               <div className="space-y-4">
-                <h2 className="text-3xl font-bold text-white">PrimePOS – Smart Point of Sale for Modern Businesses</h2>
+                <h2 className="text-3xl font-bold text-white">PrimePOS - Smart Point of Sale for Modern Businesses</h2>
                 <p className="text-base text-white/90 leading-relaxed">
-                Track sales, manage inventory, control outlets, and grow your business with ease.
-                PrimePOS gives you a secure system to run your business       operations—all in one place.
+                  Track sales, manage inventory, control outlets, and grow your business with ease. PrimePOS gives you a secure system to run your business operations-all in one place.
                 </p>
               </div>
 

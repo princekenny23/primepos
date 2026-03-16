@@ -16,10 +16,10 @@ export default function ActiveTripsPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [loading, setLoading] = useState(false)
 
-  const resolveTotalCost = (row: any) => {
-    const raw = row?.total_cost ?? row?.totalCost
-    if (raw === null || raw === undefined) return "In progress"
-    if (typeof raw === "string" && raw.trim() === "") return "In progress"
+  const resolveGoodsAmount = (row: any) => {
+    const raw = row?.total_goods_amount ?? row?.delivery_order_reference?.total_goods_amount
+    if (raw === null || raw === undefined) return "-"
+    if (typeof raw === "string" && raw.trim() === "") return "-"
     return String(raw)
   }
 
@@ -56,7 +56,7 @@ export default function ActiveTripsPage() {
                   <TableHead>Delivery Order</TableHead>
                   <TableHead>Vehicle</TableHead>
                   <TableHead>Driver</TableHead>
-                  <TableHead>Total Cost</TableHead>
+                  <TableHead>Goods Amount</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -70,7 +70,7 @@ export default function ActiveTripsPage() {
                     <TableCell>#{row.delivery_order_reference?.id || row.delivery_order}</TableCell>
                     <TableCell>{row.vehicle_plate_number || "-"}</TableCell>
                     <TableCell>{row.driver_name || "-"}</TableCell>
-                    <TableCell>{resolveTotalCost(row)}</TableCell>
+                    <TableCell>{resolveGoodsAmount(row)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

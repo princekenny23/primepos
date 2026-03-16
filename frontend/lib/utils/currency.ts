@@ -15,10 +15,11 @@ export function formatCurrency(
   options?: {
     showSymbol?: boolean
     decimals?: number
+    symbolOverride?: string
   }
 ): string {
   const currency = business?.currency || "MWK"
-  const symbol = business?.currencySymbol || "MK"
+  const symbol = options?.symbolOverride || business?.currencySymbol || "MK"
   const decimals = options?.decimals ?? 2
   const showSymbol = options?.showSymbol ?? true
 

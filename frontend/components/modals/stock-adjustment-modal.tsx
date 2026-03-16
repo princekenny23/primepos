@@ -26,7 +26,7 @@ import { productService } from "@/lib/services/productService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import type { Product } from "@/lib/types"
-import { Plus, Trash2, Search, Package } from "lucide-react"
+import { Plus, Trash2, Search, Package, Pencil, X } from "lucide-react"
 import { useI18n } from "@/contexts/i18n-context"
 
 interface StockAdjustmentModalProps {
@@ -59,7 +59,10 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
   const [trackingNumber, setTrackingNumber] = useState<string>("")
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0])
   const [searchTerm, setSearchTerm] = useState("")
-  const [showProductSearch, setShowProductSearch] = useState(false)
+  const [selectedProductId, setSelectedProductId] = useState<string>("")
+  const [draftAdjustmentType, setDraftAdjustmentType] = useState<"increase" | "decrease">("increase")
+  const [draftQuantity, setDraftQuantity] = useState<string>("")
+  const [editingItemId, setEditingItemId] = useState<string | null>(null)
 
   const outlet = tenantOutlet || currentOutlet
 
@@ -106,7 +109,10 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
       setCommonNotes("")
       setDate(new Date().toISOString().split('T')[0])
       setSearchTerm("")
-      setShowProductSearch(false)
+      setSelectedProductId("")
+      setDraftAdjustmentType("increase")
+      setDraftQuantity("")
+      setEditingItemId(null)
     }
   }, [open, outlet, outlets, loadProducts])
 
@@ -116,42 +122,88 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
     }
   }, [open, loadProducts])
 
-  const addAdjustmentItem = () => {
-    setAdjustmentItems([...adjustmentItems, {
-      id: Date.now().toString(),
-      product_id: "",
-      current_qty: 0,
-      adjustmentType: "increase",
-      quantity: "",
-    }])
-    setShowProductSearch(true)
-  }
-
-  const handleSelectProduct = (product: Product) => {
-    // Add product to the last empty item or create new one
-    const emptyItemIndex = adjustmentItems.findIndex(item => !item.product_id)
-    if (emptyItemIndex >= 0) {
-      updateAdjustmentItem(adjustmentItems[emptyItemIndex].id, "product_id", product.id)
-    } else {
-      addAdjustmentItem()
-      setTimeout(() => {
-        const newItem = adjustmentItems[adjustmentItems.length - 1]
-        if (newItem) {
-          updateAdjustmentItem(newItem.id, "product_id", product.id)
-        }
-      }, 100)
-    }
-    setShowProductSearch(false)
-    setSearchTerm("")
-  }
-
   const filteredProducts = useMemo(() => {
-    return products.filter(product =>
-      product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (product.sku && product.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (product.barcode && product.barcode.toLowerCase().includes(searchTerm.toLowerCase()))
+    const searchValue = searchTerm.trim().toLowerCase()
+    const selectedProductIds = new Set(
+      adjustmentItems
+        .filter((item) => item.id !== editingItemId)
+        .map((item) => String(item.product_id))
     )
-  }, [products, searchTerm])
+
+    return products.filter(product =>
+      !selectedProductIds.has(String(product.id)) && (
+        searchValue.length === 0 ||
+        product.name?.toLowerCase().includes(searchValue) ||
+        (product.sku && product.sku.toLowerCase().includes(searchValue)) ||
+        (product.barcode && product.barcode.toLowerCase().includes(searchValue))
+      )
+    )
+  }, [adjustmentItems, editingItemId, products, searchTerm])
+
+  const selectedProduct = useMemo(
+    () => products.find((product) => String(product.id) === String(selectedProductId)),
+    [products, selectedProductId]
+  )
+
+  const draftCurrentQty = selectedProduct?.stock || 0
+  const parsedDraftQty = parseInt(draftQuantity) || 0
+  const draftNewQty = draftAdjustmentType === "increase"
+    ? draftCurrentQty + parsedDraftQty
+    : draftCurrentQty - parsedDraftQty
+
+  const resetDraftFields = () => {
+    setSearchTerm("")
+    setSelectedProductId("")
+    setDraftAdjustmentType("increase")
+    setDraftQuantity("")
+    setEditingItemId(null)
+  }
+
+  const upsertAdjustmentItem = () => {
+    if (!selectedProductId) {
+      toast({
+        title: "Validation Error",
+        description: "Please select a product.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!draftQuantity || parsedDraftQty <= 0) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter a valid adjustment quantity.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const payload: AdjustmentItem = {
+      id: editingItemId || Date.now().toString(),
+      product_id: selectedProductId,
+      product_name: selectedProduct?.name || "",
+      current_qty: draftCurrentQty,
+      adjustmentType: draftAdjustmentType,
+      quantity: draftQuantity,
+    }
+
+    if (editingItemId) {
+      setAdjustmentItems((prev) => prev.map((item) => (item.id === editingItemId ? payload : item)))
+    } else {
+      setAdjustmentItems((prev) => [...prev, payload])
+    }
+
+    resetDraftFields()
+  }
+
+  const handleEditItem = (item: AdjustmentItem) => {
+    const product = products.find((p) => String(p.id) === String(item.product_id))
+    setEditingItemId(item.id)
+    setSelectedProductId(String(item.product_id))
+    setSearchTerm(product?.name || item.product_name || "")
+    setDraftAdjustmentType(item.adjustmentType)
+    setDraftQuantity(item.quantity)
+  }
 
   const removeAdjustmentItem = (id: string) => {
     setAdjustmentItems(adjustmentItems.filter(item => item.id !== id))
@@ -376,154 +428,131 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-semibold text-sm">Products to Adjust</h3>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={addAdjustmentItem}
-                  disabled={loadingProducts}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Product
-                </Button>
+                {adjustmentItems.length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {adjustmentItems.length} item{adjustmentItems.length !== 1 ? "s" : ""} queued
+                  </span>
+                )}
               </div>
 
-              {/* Product Search */}
-              {showProductSearch && (
-                <div className="border rounded-lg p-4 space-y-2">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder={t("common.search_products_placeholder")}
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-10"
-                    />
+              <div className="rounded-lg border p-4 space-y-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Search Product</Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        placeholder={t("common.search_products_placeholder")}
+                        value={searchTerm}
+                        onChange={(e) => {
+                          setSearchTerm(e.target.value)
+                          if (!e.target.value.trim()) {
+                            setSelectedProductId("")
+                          }
+                        }}
+                        className="pl-10"
+                      />
+                    </div>
+                    <div className="max-h-36 overflow-y-auto rounded-md border">
+                      {filteredProducts.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-muted-foreground">No matching products.</p>
+                      ) : (
+                        filteredProducts.slice(0, 8).map((product) => (
+                          <button
+                            key={product.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedProductId(String(product.id))
+                              setSearchTerm(product.name || "")
+                            }}
+                            className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-muted"
+                          >
+                            <span className="truncate">{product.name}</span>
+                            <span className="ml-3 text-xs text-muted-foreground">Stock: {product.stock || 0}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
                   </div>
-                  <div className="max-h-40 overflow-y-auto space-y-1">
-                    {filteredProducts.slice(0, 10).map((product) => (
-                      <button
-                        key={product.id}
-                        type="button"
-                        onClick={() => handleSelectProduct(product)}
-                        className="w-full text-left p-2 hover:bg-muted rounded flex items-center gap-2"
+
+                  <div className="space-y-2">
+                    <Label>Adjust</Label>
+                    <div className="flex items-center gap-2">
+                      <Select
+                        value={draftAdjustmentType}
+                        onValueChange={(value: "increase" | "decrease") => setDraftAdjustmentType(value)}
                       >
-                        <Package className="h-4 w-4" />
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{product.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            SKU: {product.sku || "N/A"} | Stock: {product.stock || 0}
-                          </p>
-                        </div>
-                      </button>
-                    ))}
+                        <SelectTrigger className="w-[110px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="increase">Increase</SelectItem>
+                          <SelectItem value="decrease">Decrease</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={draftQuantity}
+                        onChange={(e) => setDraftQuantity(e.target.value)}
+                        placeholder={t("common.qty")}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded border bg-muted/40 px-2 py-1.5">
+                        Current: <span className="font-semibold">{selectedProductId ? draftCurrentQty : "-"}</span>
+                      </div>
+                      <div className={`rounded border px-2 py-1.5 ${draftNewQty < 0 ? "bg-red-50 text-red-600" : "bg-muted/40"}`}>
+                        New: <span className="font-semibold">{selectedProductId ? draftNewQty : "-"}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button type="button" size="sm" onClick={upsertAdjustmentItem} disabled={loadingProducts}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        {editingItemId ? "Update Item" : "Add Item"}
+                      </Button>
+                      {editingItemId && (
+                        <Button type="button" size="sm" variant="ghost" onClick={resetDraftFields}>
+                          <X className="mr-2 h-4 w-4" />
+                          Cancel Edit
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 </div>
-              )}
+              </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {adjustmentItems.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground border rounded-lg">
+                  <div className="text-center py-6 text-muted-foreground border rounded-lg">
                     <Package className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                    <p>No items added. Click &quot;Add Product&quot; to add products.</p>
+                    <p>No products queued yet.</p>
                   </div>
                 ) : (
-                  adjustmentItems.map((item, index) => {
+                  adjustmentItems.map((item) => {
                     const changeQty = parseInt(item.quantity) || 0
-                    const newQty = item.adjustmentType === "increase" 
+                    const newQty = item.adjustmentType === "increase"
                       ? item.current_qty + changeQty 
                       : item.current_qty - changeQty
 
                     return (
-                      <div key={item.id} className="p-4 border rounded-lg space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-muted-foreground">
-                            Product {index + 1}
-                          </span>
-                          {adjustmentItems.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => removeAdjustmentItem(item.id)}
-                            >
+                      <div key={item.id} className="rounded-lg border p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{item.product_name || "N/A"}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Current {item.current_qty} • {item.adjustmentType === "increase" ? "+" : "-"}{changeQty} • New {newQty}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button type="button" variant="ghost" size="icon" onClick={() => handleEditItem(item)}>
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button type="button" variant="ghost" size="icon" onClick={() => removeAdjustmentItem(item.id)}>
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                          <div className="space-y-2">
-                            <Label>Product *</Label>
-                            <Select 
-                              value={item.product_id}
-                              onValueChange={(value) => updateAdjustmentItem(item.id, "product_id", value)}
-                              required
-                              disabled={loadingProducts}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder={t("common.select_product")} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {filteredProducts.length > 0 ? (
-                                  filteredProducts.map(product => (
-                                    <SelectItem key={product.id} value={product.id}>
-                                      {product.name} {product.sku && `(${product.sku})`}
-                                    </SelectItem>
-                                  ))
-                                ) : (
-                                  <SelectItem value="no-results" disabled>
-                                    No products found
-                                  </SelectItem>
-                                )}
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Current Qty</Label>
-                            <Input
-                              value={item.current_qty}
-                              disabled
-                              className="bg-muted"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>Change *</Label>
-                            <div className="flex items-center gap-2">
-                              <Select 
-                                value={item.adjustmentType}
-                                onValueChange={(value: "increase" | "decrease") => updateAdjustmentItem(item.id, "adjustmentType", value)}
-                                required
-                              >
-                                <SelectTrigger className="w-[100px]">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="increase">+</SelectItem>
-                                  <SelectItem value="decrease">-</SelectItem>
-                                </SelectContent>
-                              </Select>
-                              <Input
-                                type="number"
-                                min="1"
-                                required
-                                value={item.quantity}
-                                onChange={(e) => updateAdjustmentItem(item.id, "quantity", e.target.value)}
-                                placeholder={t("common.qty")}
-                                className="flex-1"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label>New Quantity</Label>
-                            <Input
-                              value={item.product_id ? newQty : "—"}
-                              disabled
-                              className={newQty < 0 ? "bg-red-50 text-red-600 font-semibold" : "bg-muted font-semibold"}
-                            />
                           </div>
                         </div>
                       </div>

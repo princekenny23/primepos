@@ -35,8 +35,6 @@ import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-moda
 import { RefundReturnModal } from "@/components/modals/refund-return-modal"
 import { useI18n } from "@/contexts/i18n-context"
 import type { Sale } from "@/lib/types"
-import { distributionService } from "@/lib/services/distributionService"
-import { useAuthStore } from "@/stores/authStore"
 
 interface SaleDetail extends Sale {
   payment_method?: string
@@ -67,7 +65,6 @@ export default function TransactionsPage() {
   const { currentOutlet: tenantOutlet } = useTenant()
   const { toast } = useToast()
   const { t } = useI18n()
-  const { user } = useAuthStore()
 
   const outlet = tenantOutlet || storeOutlet
 
@@ -81,7 +78,6 @@ export default function TransactionsPage() {
   const [isLoadingSaleDetails, setIsLoadingSaleDetails] = useState(false)
   const [showRefundReturn, setShowRefundReturn] = useState(false)
   const [refundReceiptNumber, setRefundReceiptNumber] = useState("")
-  const hasDistribution = !!(user?.tenant && typeof user.tenant === "object" && (user.tenant as any).has_distribution)
 
   const enrichSale = useCallback((sale: any): SaleDetail => {
     const saleDetail: SaleDetail = { ...sale, _raw: sale._raw || sale }
@@ -136,7 +132,7 @@ export default function TransactionsPage() {
       return
     }
 
-    const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+    const outletId = outlet?.id || null
     if (!outletId) {
       setIsLoading(false)
       return
@@ -187,7 +183,7 @@ export default function TransactionsPage() {
     }
 
     const handleSaleCreated = async (event: Event) => {
-      const outletId = outlet?.id || (typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null)
+      const outletId = outlet?.id || null
       if (!outletId) return
 
       const detail = (event as CustomEvent)?.detail
@@ -293,24 +289,6 @@ export default function TransactionsPage() {
     const receipt = sale._raw?.receipt_number || sale.receipt_number || ""
     setRefundReceiptNumber(String(receipt || ""))
     setShowRefundReturn(true)
-  }
-
-  const handleCreateDelivery = async (sale: SaleDetail) => {
-    try {
-      await distributionService.createFromSale({
-        sale_id: Number(sale.id),
-      })
-      toast({
-        title: "Delivery created",
-        description: `Delivery linked to receipt ${sale._raw?.receipt_number || sale.receipt_number || sale.id}`,
-      })
-    } catch (error: any) {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to create delivery",
-        variant: "destructive",
-      })
-    }
   }
 
   const renderPagination = () => {
@@ -455,11 +433,6 @@ export default function TransactionsPage() {
                             <DropdownMenuItem onClick={() => handleRefundReturn(sale)}>
                               Refund / Return
                             </DropdownMenuItem>
-                            {hasDistribution && (
-                              <DropdownMenuItem onClick={() => handleCreateDelivery(sale)}>
-                                Create Delivery
-                              </DropdownMenuItem>
-                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>

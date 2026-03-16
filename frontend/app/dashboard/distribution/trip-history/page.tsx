@@ -15,6 +15,13 @@ export default function TripHistoryPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [loading, setLoading] = useState(false)
 
+  const resolveGoodsAmount = (row: any) => {
+    const raw = row?.total_goods_amount ?? row?.delivery_order_reference?.total_goods_amount
+    if (raw === null || raw === undefined) return "-"
+    if (typeof raw === "string" && raw.trim() === "") return "-"
+    return String(raw)
+  }
+
   const loadRows = async () => {
     setLoading(true)
     try {
@@ -50,16 +57,15 @@ export default function TripHistoryPage() {
                   <TableHead>Driver</TableHead>
                   <TableHead>Distance (km)</TableHead>
                   <TableHead>Fuel Cost</TableHead>
-                  <TableHead>Total Cost</TableHead>
-                  <TableHead>Profit</TableHead>
+                  <TableHead>Goods Amount</TableHead>
                   <TableHead>Date</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={9}>Loading...</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8}>Loading...</TableCell></TableRow>
                 ) : rows.length === 0 ? (
-                  <TableRow><TableCell colSpan={9}>No trips found.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8}>No trips found.</TableCell></TableRow>
                 ) : currentRows.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell>#{row.id}</TableCell>
@@ -68,8 +74,7 @@ export default function TripHistoryPage() {
                     <TableCell>{row.driver_name || "-"}</TableCell>
                     <TableCell>{row.distance_km ?? "0"}</TableCell>
                     <TableCell>{row.fuel_cost ?? "0.00"}</TableCell>
-                    <TableCell>{row.total_cost ?? "0.00"}</TableCell>
-                    <TableCell>{row.profit ?? "0.00"}</TableCell>
+                    <TableCell>{resolveGoodsAmount(row)}</TableCell>
                     <TableCell>{row.created_at ? new Date(row.created_at).toLocaleString() : "-"}</TableCell>
                   </TableRow>
                 ))}

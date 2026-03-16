@@ -496,17 +496,6 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="image">Product Image (URL)</Label>
-                <Input
-                  id="image"
-                  value={basicForm.image}
-                  onChange={(e) => setBasicForm({ ...basicForm, image: e.target.value })}
-                  placeholder="https://example.com/image.jpg"
-                />
-                <p className="text-xs text-gray-500">Enter image URL or leave empty</p>
-              </div>
-
               <div className="flex items-center space-x-2">
                 <input
                   type="checkbox"

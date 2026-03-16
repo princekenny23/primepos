@@ -12,13 +12,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { RefreshCw } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
@@ -53,7 +46,6 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
   const [isLoadingReceipt, setIsLoadingReceipt] = useState(false)
   const [restock, setRestock] = useState(true)
   const [reason, setReason] = useState("")
-  const [refundMethod, setRefundMethod] = useState<"original" | "cash" | "manual" | "">("")
   const [isProcessing, setIsProcessing] = useState(false)
 
   useEffect(() => {
@@ -65,7 +57,6 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
       setSelectedItems({})
       setRestock(true)
       setReason("")
-      setRefundMethod("")
       setIsLoadingReceipt(false)
       setIsProcessing(false)
       return
@@ -187,14 +178,6 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
 
   const handleConfirmRefund = async () => {
     if (!saleId) return
-    if (!refundMethod) {
-      toast({
-        title: "Refund Method Required",
-        description: "Select a refund method to continue.",
-        variant: "destructive",
-      })
-      return
-    }
 
     setIsProcessing(true)
     try {
@@ -208,7 +191,7 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
       await saleService.refund(String(saleId), {
         reason: reason.trim() || undefined,
         restock,
-        refund_method: refundMethod,
+        refund_method: "cash",
         refund_amount: refundAmount,
         items: itemsPayload,
       })
@@ -374,7 +357,7 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Confirm Refund</DialogTitle>
-            <DialogDescription>Review amount and select refund method.</DialogDescription>
+            <DialogDescription>Review amount and confirm cash refund.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -387,22 +370,13 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
 
             <div className="space-y-2">
               <Label htmlFor="refund-method">Refund Method *</Label>
-              <Select value={refundMethod} onValueChange={(value) => setRefundMethod(value as typeof refundMethod)}>
-                <SelectTrigger id="refund-method">
-                  <SelectValue placeholder="Select refund method" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="original">Original Payment</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="manual">Manual</SelectItem>
-                </SelectContent>
-              </Select>
+              <Input id="refund-method" value="Cash" readOnly />
             </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setStep("restock")}>Back</Button>
-            <Button onClick={handleConfirmRefund} disabled={isProcessing || !refundMethod}>
+            <Button onClick={handleConfirmRefund} disabled={isProcessing}>
               {isProcessing ? "Processing..." : "Issue Refund"}
             </Button>
           </DialogFooter>
