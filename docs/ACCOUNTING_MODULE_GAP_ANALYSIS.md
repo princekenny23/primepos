@@ -49,7 +49,7 @@ To reach full accounting parity with Odoo or Oracle, PrimePOS still needs founda
 
 ## 3. Critical Gaps to Become a Full Accounting Module
 
-## 3.1 Core Ledger Architecture (Not Present)
+### 3.1 Core Ledger Architecture (Not Present)
 - No chart of accounts (COA)
 - No account types hierarchy (assets, liabilities, equity, income, expense)
 - No journal model (sales journal, purchase journal, bank journal, adjustment journal)
@@ -60,7 +60,7 @@ To reach full accounting parity with Odoo or Oracle, PrimePOS still needs founda
 Impact:
 - Financial statements are currently derived analytics, not ledger-backed accounting books.
 
-## 3.2 Subledger to GL Posting (Not Present)
+### 3.2 Subledger to GL Posting (Not Present)
 - Sales, supplier invoices, inventory movements, and expenses are not posted as balanced accounting entries
 - No posting rules engine (event-to-account mapping)
 - No deferred/revenue recognition model
@@ -68,7 +68,7 @@ Impact:
 Impact:
 - Cannot guarantee accounting integrity across modules.
 
-## 3.3 Period Control and Close (Not Present)
+### 3.3 Period Control and Close (Not Present)
 - No fiscal years and accounting periods
 - No period open/close/lock
 - No close checklist and close statuses
@@ -77,7 +77,7 @@ Impact:
 Impact:
 - Month-end close, audit reproducibility, and governance are weak.
 
-## 3.4 Bank/Cash Reconciliation (Not Present)
+### 3.4 Bank/Cash Reconciliation (Not Present)
 - No bank account ledger model
 - No statement import and matching engine
 - No reconciliation status per transaction
@@ -86,7 +86,7 @@ Impact:
 Impact:
 - Cash position and bank balances cannot be certified.
 
-## 3.5 AP/AR Maturity Gaps
+### 3.5 AP/AR Maturity Gaps
 - AP has supplier invoices but no voucher posting, no payment run batches, no withholding logic
 - AR has customer credit logic but no formal AR aging buckets tied to GL control accounts
 - No dunning/collections workflow at accounting-grade depth
@@ -94,7 +94,7 @@ Impact:
 Impact:
 - Useful operationally, but incomplete for statutory finance operations.
 
-## 3.6 Tax Engine and Compliance Depth (Partial)
+### 3.6 Tax Engine and Compliance Depth (Partial)
 - No robust tax rules engine for jurisdictional handling (input vs output tax, reverse charge, exemptions)
 - No tax ledger postings and tax control accounts
 - No filing-ready tax return package generation
@@ -102,7 +102,7 @@ Impact:
 Impact:
 - Tax outputs are informative but not compliance-complete.
 
-## 3.7 Inventory Accounting Integration (Partial)
+### 3.7 Inventory Accounting Integration (Partial)
 - Inventory valuation report exists, but no accounting postings for:
   - Inventory asset movements
   - COGS recognition at sale posting
@@ -112,7 +112,7 @@ Impact:
 Impact:
 - Operational stock tracking exists, but accounting valuation is not fully integrated into GL.
 
-## 3.8 Financial Statements and Audit Trail (Not Present at Ledger Grade)
+### 3.8 Financial Statements and Audit Trail (Not Present at Ledger Grade)
 - No trial balance
 - No balance sheet
 - No cash flow statement (direct/indirect)
@@ -122,7 +122,7 @@ Impact:
 Impact:
 - Cannot produce complete statutory financial statements from books.
 
-## 3.9 Multi-Entity and Enterprise Controls (Not Present)
+### 3.9 Multi-Entity and Enterprise Controls (Not Present)
 - No intercompany accounting
 - No consolidation engine and eliminations
 - No multi-currency revaluation and translation framework
@@ -191,21 +191,21 @@ To be considered accounting-complete, PrimePOS still needs these minimum buildin
 
 ## 6. Recommended Delivery Roadmap
 
-## Phase 1: Accounting Foundation (must-have)
+### Phase 1: Accounting Foundation (must-have)
 - Build COA, journals, journal entries, posting engine
 - Deliver trial balance and ledger inquiry
 - Add period open/close controls
 
-## Phase 2: Subledger Posting Coverage
+### Phase 2: Subledger Posting Coverage
 - Integrate sales, AP invoices, AR receipts, expenses, and inventory movements to GL
 - Add reconciliation stubs and suspense handling
 
-## Phase 3: Statutory Reporting and Controls
+### Phase 3: Statutory Reporting and Controls
 - Balance sheet, income statement, cash flow
 - Bank reconciliation and close checklist
 - Tax ledger reports and compliance exports
 
-## Phase 4: Enterprise Features
+### Phase 4: Enterprise Features
 - Multi-currency revaluation
 - Intercompany and consolidation
 - Fixed assets and depreciation
