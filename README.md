@@ -158,7 +158,7 @@ Request → TenantMiddleware (extract tenant)
 | Priority | Modal/Feature | Issue | Impact | Week | Est. Time | Notes |
 |----------|---------------|-------|--------|------|-----------|-------|
 | 🔴 **P0** | **Payment Processing Modal** | Cash only, card/mobile not functional | Can't accept payments | Wk1 | 40 hrs | Integrate Stripe, M-Pesa, integrate with Payment Service |
-| 🔴 **P0** | **Receipt Printing/PDF** | Preview works, printing/PDF export missing | Customers can't get receipts | Wk1 | 30 hrs | QZ-Tray printing, PDF generation (pdfkit), email receipts |
+| 🔴 **P0** | **Receipt Printing/PDF** | Cloud auto-print (thermal) implemented; PDF download/email not yet available | Customers can't get a PDF copy by email | Wk1 | 15 hrs | PDF generation (pdfkit/reportlab), email receipts via SendGrid |
 | 🔴 **P0** | **Rate Limiting** | No API rate limits (abuse risk) | DDoS/spam vulnerability | Wk1 | 20 hrs | Implement django-ratelimit per tenant |
 | 🟠 **P1** | **Backend RBAC Enforcement** | Permissions defined but not enforced on every view | Security risk (users can access unauthorized endpoints) | Wk1 | 35 hrs | Add `@requires_permission` decorator to all viewsets |
 | 🟠 **P1** | **Centralized Exception Handling** | Inconsistent error responses | Poor API contract, hard debugging | Wk1 | 25 hrs | Create DRF exception handler class, format all errors uniformly |
@@ -186,7 +186,7 @@ Request → TenantMiddleware (extract tenant)
 
 ### Week 1 Action Items (Before First Paying Customer)
 1. Integrate Stripe + M-Pesa payment gateways
-2. Implement receipt PDF/printing
+2. Implement receipt PDF export and email delivery (thermal cloud-print is already working)
 3. Add API rate limiting
 4. Enforce RBAC on all endpoints
 5. Set up Sentry error tracking
@@ -755,7 +755,7 @@ python manage.py migrate
 | Outlet business type selection | ✅ | ✅ | Each outlet can have retail/restaurant/bar/wholesale type with specific settings |
 | Outlet-specific operational modules | ✅ | ✅ | POS, dashboard, inventory operations respect outlet business type |
 | Inventory management | ✅ | ✅ | Location-based stock, movements, transfers, outlet-filtered queries |
-| Receipt generation | ✅ | ⚠️ | Preview done; print/PDF pending |
+| Receipt generation | ✅ | ✅ | Preview modal, ESC/POS thermal printing, cloud auto-print |
 | Customer management | ✅ | ✅ | Profiles, purchase history |
 | Credit sales (accounts receivable) | ✅ | ✅ | Credit limit validation, payment tracking |
 | Shift management & cash reconciliation | ✅ | ✅ | Opening/closing, cash validation |
@@ -772,7 +772,7 @@ python manage.py migrate
 | Feature | Status | What's Done | What's Missing |
 |---------|--------|-------------|-----------------|
 | Payment processing | 60% | Cash payments complete, models exist | Card, mobile money integrations |
-| Receipt system | 50% | Preview modal + number generation | PDF export, thermal printing |
+| Receipt system | ✅ | Preview modal, ESC/POS generation, cloud auto-print via primeposconnector | PDF email delivery |
 | Purchase orders | 40% | Frontend UI exists | Backend API, auto-generation |
 | Loyalty programs | 20% | Database structure ready | API endpoints, frontend UI |
 | Price lists | 20% | Models exist | API endpoints, frontend UI |
@@ -930,7 +930,135 @@ Content-Type: application/json
 
 ---
 
+## 🖨️ Cloud Auto-Print (Receipt Printing)
+
+PrimePOS uses a **cloud-safe receipt printing architecture** so that receipts print automatically on a physical thermal printer at the outlet — even when the frontend is hosted in the cloud (Vercel/Render).
+
+### How It Works
+
+When PrimePOS is deployed with the backend on **Render** and the frontend on **Vercel**, neither service can reach a thermal printer connected to a local Windows PC at the outlet. PrimePOS solves this with a **database-backed print-job queue** so that printing is decoupled from the browser session entirely.
+
+**Step 1 — Frontend enqueues the job.** After a successful sale, `frontend/lib/print.ts` detects it is running from a cloud URL and, instead of contacting a printer directly, calls `POST /api/v1/sales/{id}/enqueue-print/` on the Django backend hosted on Render. The backend responds immediately so the cashier is never kept waiting.
+
+**Step 2 — Backend generates and stores the receipt.** `SaleViewSet.enqueue_print` generates the full ESC/POS receipt content, encodes it as a Base64 string, and persists it in a `PrintJob` database record with `status = "pending"`.
+
+**Step 3 — Connector polls and claims the job.** A lightweight Windows application called **primeposconnector** runs silently on the PC at the outlet. Its `CloudPoller` background loop calls `POST /api/v1/print-jobs/claim-next/` on Render every two seconds. When a pending job is found, the backend atomically marks it as `claimed` and returns the payload.
+
+**Step 4 — Connector prints the receipt.** The connector decodes the Base64 content back into raw ESC/POS bytes and forwards them to the Windows spooler via the `RawPrinterHelper` Win32 P/Invoke (`winspool.Drv`, `RAW` data type), which causes the receipt to print on the configured thermal printer.
+
+**Step 5 — Connector reports completion.** The connector calls `POST /api/v1/print-jobs/{id}/complete/` to mark the job as `completed` (or `failed` if something went wrong), giving the backend a full audit trail. The Render backend acts purely as a message broker — it never needs a direct network path to the printer.
+
+### Architecture Overview
+
+```
+Browser (Vercel / cloud URL)
+        │
+        │  POST /api/v1/sales/{id}/enqueue-print/
+        ▼
+Django Backend (Render)
+  ├── Generates ESC/POS receipt (base64)
+  └── Creates PrintJob record  status="pending"
+        │
+        │  (job waits in database)
+        ▼
+primeposconnector.exe  (Windows PC at the outlet)
+  ├── Polls  POST /api/v1/print-jobs/claim-next/   every 2 s
+  ├── Decodes base64 → raw ESC/POS bytes
+  ├── Sends bytes to Windows spooler (winspool.Drv RAW mode)
+  └── Reports result  POST /api/v1/print-jobs/{id}/complete/
+        │
+        ▼
+     🖨️  Physical receipt printed
+```
+
+### Why the Dashboard Shows "PA Not Connected" on Cloud Deployments
+
+When PrimePOS is accessed from a cloud URL (Render, Vercel, or any domain other than `localhost`), the dashboard header always shows a red **"PA Not Connected"** badge. This is **expected and correct behaviour** — it is not an error in the cloud auto-print system.
+
+The **PA (Print Agent)** badge tracks whether the browser can reach the `primeposconnector.exe` process running on the outlet's local Windows PC at `http://127.0.0.1:7310`. Two fundamental constraints make that impossible from a cloud deployment:
+
+1. **Browser security (mixed-content block).** Cloud frontends are served over HTTPS. Browsers refuse to make unencrypted HTTP requests to `http://127.0.0.1` from a secure origin, so a direct browser-to-agent connection is blocked at the browser level regardless of any application code.
+
+2. **Serverless proxy cannot reach a user's machine.** The Next.js API route `/api/local-print/[...path]` acts as a proxy between the browser and the local agent. On a cloud deployment (Vercel), this proxy runs on Vercel's edge servers — not on the user's PC — so it has no network path to the outlet's `127.0.0.1:7310` either. The proxy explicitly detects cloud hosts and returns `{ connected: false }` without attempting a real connection.
+
+Because of these two constraints, `dashboard-layout.tsx` immediately sets `agentStatus = "disconnected"` (showing the red badge) whenever the browser's hostname is not `localhost` or `127.0.0.1`. This logic is intentional — trying to ping the local agent from a cloud URL would always time out and cause unnecessary errors.
+
+**The red badge does not mean receipts will not print.** Cloud auto-print follows a completely different path: the frontend calls the Render backend (`enqueue-print`), the backend stores a `PrintJob` record, and the `primeposconnector.exe` at the outlet polls for and claims that job over its own outbound HTTPS connection to Render. The connector's polling loop communicates outbound from the outlet PC to Render — the browser is not involved at all, so the "PA Not Connected" indicator is irrelevant to whether printing will succeed.
+
+In summary: on any cloud URL, "PA Not Connected" is a normal status that simply means the browser cannot directly see the local print agent. It does **not** mean the cloud auto-print queue is broken. If receipts are not printing, the thing to check is whether `primeposconnector.exe` is running at the outlet and whether `Cloud:Enabled = true` is set in its `appsettings.json`.
+
+### Print Channel Selection (frontend)
+
+`printReceipt()` in `frontend/lib/print.ts` picks the print path automatically:
+
+| Condition | Path taken |
+|-----------|-----------|
+| Android browser (`navigator.userAgent` contains `android`) | **Bluetooth-USB Thermal Printer+** — shares plain-text receipt via Web Share API or clipboard. |
+| User set channel to `bluetooth_usb_thermal_printer_plus` | Same mobile share path. |
+| Running on `localhost` / `127.0.0.1` | **Direct local agent** — POSTs ESC/POS bytes straight to `http://127.0.0.1:7310/print`. |
+| Cloud URL (production / staging) | **Cloud-queue path** — POSTs to `/api/v1/sales/{id}/enqueue-print/` and returns immediately. The connector claims and prints asynchronously. |
+
+The preference is stored in `localStorage` under the key `printChannel` (`auto` | `agent` | `bluetooth_usb_thermal_printer_plus`).
+
+### Backend: PrintJob model & API
+
+**Model** (`backend/apps/sales/models.py` — `PrintJob`):
+
+| Field | Description |
+|-------|-------------|
+| `tenant` | Tenant isolation key. |
+| `outlet` | Which outlet this job belongs to. |
+| `sale` | The sale that triggered the print. |
+| `channel` | `agent` (local connector) or `mobile`. |
+| `status` | `pending` → `claimed` → `completed` / `failed` / `cancelled`. |
+| `device_id` | Optional device identifier to target a specific connector. |
+| `printer_identifier` | Printer name on the Windows machine. |
+| `payload` | JSON blob: `{ format, content_base64, receipt_number, paper_width, sale_id }`. |
+| `claimed_at` / `completed_at` | Timestamps set by the connector. |
+
+**Key API endpoints** (all under `/api/v1/`):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `sales/{id}/enqueue-print/` | POST | Generates ESC/POS payload and queues a `PrintJob`. |
+| `sales/{id}/escpos-receipt/` | GET | Returns the raw ESC/POS base64 payload for a sale (used by direct-agent path). |
+| `print-jobs/claim-next/` | POST | Atomically claims the next pending job for a channel/device (used by connector). |
+| `print-jobs/{id}/complete/` | POST | Marks a claimed job as `completed` or `failed` (used by connector). |
+
+### Connector: primeposconnector
+
+The `primeposconnector` is a lightweight .NET 8 minimal-API exe that runs on the Windows PC at the outlet.
+
+**Cloud polling loop** (`CloudPoller.RunAsync`):
+1. Sends `POST /print-jobs/claim-next/` with `{ channel, device_id }`.
+2. If `204 No Content` → no jobs; sleeps for `PollIntervalSeconds` (default 2 s).
+3. If a job is returned → decodes `content_base64` to bytes.
+4. Resolves the printer name from the job or falls back to `Cloud:DefaultPrinter`.
+5. Calls `RawPrinterHelper.SendBytesToPrinter()` (Win32 `winspool.Drv` P/Invoke, `RAW` data type).
+6. Sends `POST /print-jobs/{id}/complete/` with `result = "completed"` or `"failed"`.
+
+**Enable cloud auto-print** — edit `primeposconnector/appsettings.json`:
+
+```json
+{
+  "Cloud": {
+    "Enabled": true,
+    "ApiBaseUrl": "https://your-backend.onrender.com/api/v1",
+    "AuthToken": "<JWT access token>",
+    "TenantId": "1",
+    "OutletId": "1",
+    "DefaultPrinter": "EPSON TM-T20",
+    "PollIntervalSeconds": 2
+  }
+}
+```
+
+See [`primeposconnector/README.md`](primeposconnector/README.md) for full setup instructions.
+
+---
+
 ## 📈 Data Models Overview
+
 
 ### **Entity Relationships**
 
@@ -1195,10 +1323,10 @@ See `docker-compose.yml` and `Dockerfile` (if available) for containerized setup
    - Mobile money (M-Pesa/Airtel Money)
    - Files to update: `backend/apps/payments/`, `frontend/components/modals/payment-modal.tsx`
 
-2. **Receipt Printing/PDF** (1-2 weeks)
-   - Backend: Receipt model + PDF generation service
-   - Frontend: Print modal + PDF download
-   - Files to create: `backend/apps/sales/receipts.py`, `frontend/lib/services/receiptService.ts`
+2. **Receipt PDF / Email Delivery** (1 week)
+   - Backend: PDF generation service (pdfkit/reportlab)
+   - Frontend: PDF download button and email-to-customer option
+   - Cloud auto-print (thermal) is already implemented via `primeposconnector`
 
 3. **Database Migrations** (Immediate)
    - Run: `python manage.py migrate`
