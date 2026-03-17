@@ -934,6 +934,10 @@ Content-Type: application/json
 
 PrimePOS uses a **cloud-safe receipt printing architecture** so that receipts print automatically on a physical thermal printer at the outlet — even when the frontend is hosted in the cloud (Vercel/Render).
 
+### How It Works
+
+When PrimePOS is deployed with the backend on **Render** and the frontend on **Vercel**, neither service can reach a thermal printer connected to a local Windows PC at the outlet. To solve this, PrimePOS uses a **database-backed print-job queue**. When a cashier completes a sale, the frontend (`frontend/lib/print.ts`) detects it is running from a cloud URL and, instead of trying to talk to a printer directly, calls `POST /api/v1/sales/{id}/enqueue-print/` on the Django backend hosted on Render. The backend's `SaleViewSet.enqueue_print` view immediately generates the full ESC/POS receipt content, encodes it as a Base64 string, and persists it in a `PrintJob` database record with `status = "pending"` — then returns a success response to the browser so the cashier is never kept waiting. Meanwhile, a lightweight Windows application called **primeposconnector** runs silently on the PC at the outlet. Its `CloudPoller` background loop calls `POST /api/v1/print-jobs/claim-next/` on Render every two seconds; when a pending job is found, the backend atomically marks it as `claimed` and returns the payload. The connector then decodes the Base64 content back into raw ESC/POS bytes and forwards them to the Windows spooler via the `RawPrinterHelper` Win32 P/Invoke (`winspool.Drv`, `RAW` data type), which causes the receipt to print on the configured thermal printer. Finally, the connector calls `POST /api/v1/print-jobs/{id}/complete/` to mark the job as `completed` (or `failed` if something went wrong), giving the backend a full audit trail. This architecture means the cloud-hosted Render backend acts purely as a message broker — it never needs a direct network path to the printer — and the primeposconnector at the outlet handles all physical printing autonomously.
+
 ### Architecture Overview
 
 ```

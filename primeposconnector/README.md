@@ -63,6 +63,10 @@ Edit `appsettings.json`:
 
 The cloud-print feature lets a PrimePOS instance hosted in the cloud (e.g. Render + Vercel) trigger physical printing on a Windows PC at the outlet — without needing the browser to be open.
 
+### How It Works
+
+When PrimePOS is deployed with the Django backend running on **Render** and the Next.js frontend on **Vercel**, neither cloud service can reach a thermal printer attached to a local Windows PC at the outlet. PrimePOS solves this with a **database-backed print-job queue**. When a cashier finishes a sale, the frontend detects it is running from a cloud URL and calls `POST /api/v1/sales/{id}/enqueue-print/` on the Render backend instead of contacting a printer directly. The backend generates the full ESC/POS receipt, Base64-encodes it, and stores it in a `PrintJob` database row with `status = "pending"`, immediately returning a success response so the cashier is never kept waiting. The **primeposconnector** — a lightweight .NET 8 executable running silently on the outlet's Windows PC — runs a background polling loop (`CloudPoller.RunAsync`) that calls `POST /api/v1/print-jobs/claim-next/` on Render every two seconds. When a pending job is found, the backend atomically marks it `claimed` and returns the ESC/POS payload. The connector decodes the Base64 bytes and hands them directly to the Windows print spooler via Win32 P/Invoke (`winspool.Drv`, `RAW` data type), causing the receipt to print immediately on the configured thermal printer. Once printing is done, the connector calls `POST /api/v1/print-jobs/{id}/complete/` so the backend records the final `completed` (or `failed`) status. The Render backend therefore acts purely as a message broker between the cloud frontend and the local hardware — it never needs a direct network path to the printer.
+
 ### How it works end-to-end
 
 ```
