@@ -936,7 +936,17 @@ PrimePOS uses a **cloud-safe receipt printing architecture** so that receipts pr
 
 ### How It Works
 
-When PrimePOS is deployed with the backend on **Render** and the frontend on **Vercel**, neither service can reach a thermal printer connected to a local Windows PC at the outlet. To solve this, PrimePOS uses a **database-backed print-job queue**. When a cashier completes a sale, the frontend (`frontend/lib/print.ts`) detects it is running from a cloud URL and, instead of trying to talk to a printer directly, calls `POST /api/v1/sales/{id}/enqueue-print/` on the Django backend hosted on Render. The backend's `SaleViewSet.enqueue_print` view immediately generates the full ESC/POS receipt content, encodes it as a Base64 string, and persists it in a `PrintJob` database record with `status = "pending"` — then returns a success response to the browser so the cashier is never kept waiting. Meanwhile, a lightweight Windows application called **primeposconnector** runs silently on the PC at the outlet. Its `CloudPoller` background loop calls `POST /api/v1/print-jobs/claim-next/` on Render every two seconds; when a pending job is found, the backend atomically marks it as `claimed` and returns the payload. The connector then decodes the Base64 content back into raw ESC/POS bytes and forwards them to the Windows spooler via the `RawPrinterHelper` Win32 P/Invoke (`winspool.Drv`, `RAW` data type), which causes the receipt to print on the configured thermal printer. Finally, the connector calls `POST /api/v1/print-jobs/{id}/complete/` to mark the job as `completed` (or `failed` if something went wrong), giving the backend a full audit trail. This architecture means the cloud-hosted Render backend acts purely as a message broker — it never needs a direct network path to the printer — and the primeposconnector at the outlet handles all physical printing autonomously.
+When PrimePOS is deployed with the backend on **Render** and the frontend on **Vercel**, neither service can reach a thermal printer connected to a local Windows PC at the outlet. PrimePOS solves this with a **database-backed print-job queue** so that printing is decoupled from the browser session entirely.
+
+**Step 1 — Frontend enqueues the job.** After a successful sale, `frontend/lib/print.ts` detects it is running from a cloud URL and, instead of contacting a printer directly, calls `POST /api/v1/sales/{id}/enqueue-print/` on the Django backend hosted on Render. The backend responds immediately so the cashier is never kept waiting.
+
+**Step 2 — Backend generates and stores the receipt.** `SaleViewSet.enqueue_print` generates the full ESC/POS receipt content, encodes it as a Base64 string, and persists it in a `PrintJob` database record with `status = "pending"`.
+
+**Step 3 — Connector polls and claims the job.** A lightweight Windows application called **primeposconnector** runs silently on the PC at the outlet. Its `CloudPoller` background loop calls `POST /api/v1/print-jobs/claim-next/` on Render every two seconds. When a pending job is found, the backend atomically marks it as `claimed` and returns the payload.
+
+**Step 4 — Connector prints the receipt.** The connector decodes the Base64 content back into raw ESC/POS bytes and forwards them to the Windows spooler via the `RawPrinterHelper` Win32 P/Invoke (`winspool.Drv`, `RAW` data type), which causes the receipt to print on the configured thermal printer.
+
+**Step 5 — Connector reports completion.** The connector calls `POST /api/v1/print-jobs/{id}/complete/` to mark the job as `completed` (or `failed` if something went wrong), giving the backend a full audit trail. The Render backend acts purely as a message broker — it never needs a direct network path to the printer.
 
 ### Architecture Overview
 
@@ -960,6 +970,22 @@ primeposconnector.exe  (Windows PC at the outlet)
         ▼
      🖨️  Physical receipt printed
 ```
+
+### Why the Dashboard Shows "PA Not Connected" on Cloud Deployments
+
+When PrimePOS is accessed from a cloud URL (Render, Vercel, or any domain other than `localhost`), the dashboard header always shows a red **"PA Not Connected"** badge. This is **expected and correct behaviour** — it is not an error in the cloud auto-print system.
+
+The **PA (Print Agent)** badge tracks whether the browser can reach the `primeposconnector.exe` process running on the outlet's local Windows PC at `http://127.0.0.1:7310`. Two fundamental constraints make that impossible from a cloud deployment:
+
+1. **Browser security (mixed-content block).** Cloud frontends are served over HTTPS. Browsers refuse to make unencrypted HTTP requests to `http://127.0.0.1` from a secure origin, so a direct browser-to-agent connection is blocked at the browser level regardless of any application code.
+
+2. **Serverless proxy cannot reach a user's machine.** The Next.js API route `/api/local-print/[...path]` acts as a proxy between the browser and the local agent. On a cloud deployment (Vercel), this proxy runs on Vercel's edge servers — not on the user's PC — so it has no network path to the outlet's `127.0.0.1:7310` either. The proxy explicitly detects cloud hosts and returns `{ connected: false }` without attempting a real connection.
+
+Because of these two constraints, `dashboard-layout.tsx` immediately sets `agentStatus = "disconnected"` (showing the red badge) whenever the browser's hostname is not `localhost` or `127.0.0.1`. This logic is intentional — trying to ping the local agent from a cloud URL would always time out and cause unnecessary errors.
+
+**The red badge does not mean receipts will not print.** Cloud auto-print follows a completely different path: the frontend calls the Render backend (`enqueue-print`), the backend stores a `PrintJob` record, and the `primeposconnector.exe` at the outlet polls for and claims that job over its own outbound HTTPS connection to Render. The connector's polling loop communicates outbound from the outlet PC to Render — the browser is not involved at all, so the "PA Not Connected" indicator is irrelevant to whether printing will succeed.
+
+In summary: on any cloud URL, "PA Not Connected" is a normal status that simply means the browser cannot directly see the local print agent. It does **not** mean the cloud auto-print queue is broken. If receipts are not printing, the thing to check is whether `primeposconnector.exe` is running at the outlet and whether `Cloud:Enabled = true` is set in its `appsettings.json`.
 
 ### Print Channel Selection (frontend)
 
