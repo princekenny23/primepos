@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from decimal import Decimal
+from django.db.utils import ProgrammingError, OperationalError
 from .models import Tenant, TenantPermissions
 from apps.outlets.serializers import OutletSerializer
 
@@ -103,8 +104,12 @@ class TenantSerializer(serializers.ModelSerializer):
         return TenantPermissionsSerializer(permissions_obj).data
 
     def get_total_manual_payments(self, obj):
-        total = sum((payment.amount for payment in obj.payment_records.all()), Decimal('0.00'))
-        return float(total)
+        try:
+            total = sum((payment.amount for payment in obj.payment_records.all()), Decimal('0.00'))
+            return float(total)
+        except (ProgrammingError, OperationalError):
+            # Keep auth/session responses stable during rolling deploys before migrations are applied.
+            return 0.0
 
 
 class TenantPermissionsSerializer(serializers.ModelSerializer):
