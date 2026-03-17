@@ -41,7 +41,7 @@ export function SubscriptionBillingTab() {
             <div>
               <h3 className="text-2xl font-bold">{currentPlan.name}</h3>
               <p className="text-muted-foreground">
-                ${currentPlan.price}/{currentPlan.period}
+                MWK {currentPlan.price}/{currentPlan.period}
               </p>
             </div>
             <Badge variant="default">Active</Badge>
@@ -91,7 +91,7 @@ export function SubscriptionBillingTab() {
                   {plan.current && <Badge>Current</Badge>}
                 </div>
                 <p className="text-2xl font-bold mb-1">
-                  ${plan.price}
+                  MWK {plan.price}
                   <span className="text-sm font-normal text-muted-foreground">
                     /{plan.period}
                   </span>

@@ -67,7 +67,16 @@ function isLocalhostBrowser(): boolean {
 function getPrintDeviceId(): string {
   if (typeof window === "undefined") return ""
   try {
-    return String(localStorage.getItem(PRINT_DEVICE_ID_STORAGE_KEY) || "").trim()
+    const existing = String(localStorage.getItem(PRINT_DEVICE_ID_STORAGE_KEY) || "").trim()
+    if (existing) return existing
+
+    const generated =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? `web-${crypto.randomUUID()}`
+        : `web-${Date.now()}-${Math.floor(Math.random() * 1000000)}`
+
+    localStorage.setItem(PRINT_DEVICE_ID_STORAGE_KEY, generated)
+    return generated
   } catch {
     return ""
   }

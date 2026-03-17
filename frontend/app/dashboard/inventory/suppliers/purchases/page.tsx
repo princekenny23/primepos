@@ -266,7 +266,7 @@ export default function PurchasesPage() {
                                 : "N/A"}
                             </TableCell>
                             <TableCell>
-                              {currentBusiness?.currencySymbol || "$"}{parseFloat(po.total || 0).toFixed(2)}
+                              {currentBusiness?.currencySymbol || "MWK"}{parseFloat(po.total || 0).toFixed(2)}
                             </TableCell>
                             <TableCell>{getStatusBadge(po.status)}</TableCell>
                             <TableCell>
@@ -346,7 +346,7 @@ export default function PurchasesPage() {
                               )}
                             </TableCell>
                             <TableCell>
-                              {currentBusiness?.currencySymbol || "$"}{parseFloat(pr.total || 0).toFixed(2)}
+                              {currentBusiness?.currencySymbol || "MWK"}{parseFloat(pr.total || 0).toFixed(2)}
                             </TableCell>
                             <TableCell>{getStatusBadge(pr.status)}</TableCell>
                             <TableCell>

@@ -90,7 +90,7 @@ export function CostBreakdownModal({ open, onOpenChange, drink }: CostBreakdownM
                 </span>
               </div>
               <span className="font-bold text-lg text-green-600">
-                ${totalProfit.toFixed(2)}
+                MWK {totalProfit.toFixed(2)}
               </span>
             </div>
             <p className="text-xs text-green-700 dark:text-green-300 mt-1">

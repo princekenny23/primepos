@@ -1,23 +1,43 @@
 from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from django.db import transaction
+from django.db import transaction, models
 from django.db.models import Max
 from django.utils import timezone
 from django.template import engines
 import logging
+import secrets
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
-from .models import Sale, SaleItem, Receipt, ReceiptTemplate, PrintJob
-from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer, PrintJobSerializer
+from .models import Sale, SaleItem, Receipt, ReceiptTemplate, PrintJob, PrintDevice, Printer
+from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer, PrintJobSerializer, PrintDeviceSerializer, PrinterSerializer
 from .services import ReceiptService
 from apps.products.models import Product, ProductUnit
 from apps.inventory.models import StockMovement, LocationStock, Batch
 from apps.inventory.stock_helpers import get_available_stock, deduct_stock, add_stock
 from apps.tenants.permissions import TenantFilterMixin
+
+
+def _extract_bearer_token(request):
+    auth_header = str(request.headers.get('Authorization', '') or '').strip()
+    if not auth_header.lower().startswith('bearer '):
+        return ''
+    return auth_header.split(' ', 1)[1].strip()
+
+
+def _authenticate_device_by_api_key(request):
+    token = _extract_bearer_token(request)
+    if not token:
+        return None
+
+    # API keys are hashed, so we verify against active devices.
+    for device in PrintDevice.objects.select_related('tenant', 'outlet').filter(is_active=True):
+        if device.check_api_key(token):
+            return device
+    return None
 
 
 class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
@@ -1169,12 +1189,46 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
         printer_name = str(request.data.get('printer_name', '') or '').strip()
         device_id = str(request.data.get('device_id', '') or '').strip()
+        broadcast = bool(request.data.get('broadcast', False))
         requested_width = str(request.data.get('paper_width', 'auto') or 'auto').strip().lower()
         normalized_width = 'auto'
         if requested_width in ('58', '58mm'):
             normalized_width = '58'
         elif requested_width in ('80', '80mm'):
             normalized_width = '80'
+
+        if not printer_name and device_id:
+            device = PrintDevice.objects.filter(
+                tenant=sale.tenant,
+                device_id=device_id,
+                is_active=True,
+            ).first()
+            if device and device.printer_identifier:
+                printer_name = device.printer_identifier
+
+        # Routing: decide which logical printer type this job should target.
+        if sale.table_id:
+            printer_type = 'kitchen'
+        elif getattr(sale.outlet, 'business_type', '') == 'bar':
+            printer_type = 'bar'
+        else:
+            printer_type = 'receipt'
+
+        routed_qs = Printer.objects.filter(
+            tenant=sale.tenant,
+            outlet=sale.outlet,
+            is_active=True,
+            printer_type=printer_type,
+        ).order_by('-is_default', 'name')
+
+        if printer_name:
+            routed_qs = routed_qs.filter(models.Q(identifier=printer_name) | models.Q(name=printer_name))
+
+        routed_printers = list(routed_qs)
+        routed_printer = routed_printers[0] if routed_printers else None
+
+        if routed_printer and not printer_name:
+            printer_name = routed_printer.identifier or routed_printer.name
 
         try:
             content_base64 = ReceiptService._generate_escpos_receipt(
@@ -1183,27 +1237,44 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 printer_name=printer_name,
             )
 
-            job = PrintJob.objects.create(
-                tenant=sale.tenant,
-                outlet=sale.outlet,
-                sale=sale,
-                requested_by=request.user,
-                channel=channel,
-                device_id=device_id,
-                printer_identifier=printer_name,
-                payload={
-                    'format': 'escpos',
-                    'content_base64': content_base64,
-                    'receipt_number': sale.receipt_number,
-                    'paper_width': normalized_width,
-                    'sale_id': sale.id,
-                },
-            )
+            target_printers = routed_printers if (broadcast and routed_printers) else [routed_printer]
+            if not target_printers:
+                target_printers = [None]
+
+            jobs = []
+            for target in target_printers:
+                resolved_printer_name = printer_name
+                if target and not resolved_printer_name:
+                    resolved_printer_name = target.identifier or target.name
+
+                job = PrintJob.objects.create(
+                    tenant=sale.tenant,
+                    outlet=sale.outlet,
+                    sale=sale,
+                    requested_by=request.user,
+                    channel=channel,
+                    printer=target,
+                    printer_type=printer_type,
+                    device_id=device_id,
+                    printer_identifier=resolved_printer_name or '',
+                    payload={
+                        'format': 'escpos',
+                        'content_base64': content_base64,
+                        'receipt_number': sale.receipt_number,
+                        'paper_width': normalized_width,
+                        'sale_id': sale.id,
+                        'broadcast': broadcast,
+                    },
+                )
+                jobs.append(job)
 
             return Response({
                 'queued': True,
-                'print_job_id': job.id,
-                'status': job.status,
+                'print_job_id': jobs[0].id,
+                'print_job_ids': [job.id for job in jobs],
+                'status': jobs[0].status,
+                'printer_type': printer_type,
+                'broadcast': broadcast,
                 'receipt_number': sale.receipt_number,
             }, status=status.HTTP_201_CREATED)
         except Exception as e:
@@ -1515,15 +1586,44 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
 
     queryset = PrintJob.objects.select_related('tenant', 'outlet', 'sale', 'requested_by').all()
     serializer_class = PrintJobSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'status', 'channel', 'device_id']
     search_fields = ['printer_identifier', 'device_id', 'sale__receipt_number']
     ordering_fields = ['created_at', 'updated_at', 'claimed_at', 'completed_at']
     ordering = ['created_at']
 
+    def _resolve_device(self, tenant, device_id: str):
+        if not tenant or not device_id:
+            return None
+        return PrintDevice.objects.select_related('outlet').filter(
+            tenant=tenant,
+            device_id=device_id,
+            is_active=True,
+        ).first()
+
+    def _request_actor(self, request):
+        user = request.user if getattr(request, 'user', None) and request.user.is_authenticated else None
+        if user:
+            tenant = getattr(request, 'tenant', None) or getattr(user, 'tenant', None)
+            return tenant, user, None
+
+        device = _authenticate_device_by_api_key(request)
+        if device:
+            return device.tenant, None, device
+        return None, None, None
+
     def get_queryset(self):
-        user = self.request.user
+        tenant, user, device = self._request_actor(self.request)
+        if device:
+            qs = PrintJob.objects.select_related('tenant', 'outlet', 'sale', 'requested_by', 'printer').filter(tenant=tenant)
+            if device.outlet:
+                qs = qs.filter(outlet=device.outlet)
+            return qs
+
+        if not user:
+            return PrintJob.objects.none()
+
         if not hasattr(user, '_tenant_loaded'):
             from django.contrib.auth import get_user_model
             User = get_user_model()
@@ -1537,9 +1637,9 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         is_saas_admin = getattr(user, 'is_saas_admin', False)
         request_tenant = getattr(self.request, 'tenant', None)
         user_tenant = getattr(user, 'tenant', None)
-        tenant = request_tenant or user_tenant
+        tenant = request_tenant or user_tenant or tenant
 
-        queryset = PrintJob.objects.select_related('tenant', 'outlet', 'sale', 'requested_by').all()
+        queryset = PrintJob.objects.select_related('tenant', 'outlet', 'sale', 'requested_by', 'printer').all()
         if not is_saas_admin:
             if tenant:
                 queryset = queryset.filter(tenant=tenant)
@@ -1555,23 +1655,47 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
     @action(detail=False, methods=['post'], url_path='claim-next')
     def claim_next(self, request):
         """Atomically claim next pending print job for a device."""
-        user = request.user
-        tenant = getattr(request, 'tenant', None) or user.tenant
+        tenant, user, authenticated_device = self._request_actor(request)
+        if not tenant:
+            return Response({'detail': 'Authentication required (JWT or API key).'}, status=status.HTTP_401_UNAUTHORIZED)
+
         outlet = self.get_outlet_for_request(request)
         channel = str(request.data.get('channel', 'agent') or 'agent').strip().lower()
         if channel not in ['agent', 'mobile']:
             channel = 'agent'
 
         device_id = str(request.data.get('device_id', '') or '').strip()
+        device = authenticated_device or self._resolve_device(tenant, device_id)
+
+        if device:
+            device_id = device.device_id
+            if not outlet and device.outlet:
+                outlet = device.outlet
+            device.last_seen_at = timezone.now()
+            device.save(update_fields=['last_seen_at', 'updated_at'])
+
+        requested_printer_type = str(request.data.get('printer_type', '') or '').strip().lower()
+        if requested_printer_type not in ['receipt', 'kitchen', 'bar']:
+            requested_printer_type = ''
 
         with transaction.atomic():
-            qs = PrintJob.objects.select_for_update().filter(status='pending', channel=channel)
+            qs = PrintJob.objects.select_for_update().filter(
+                status='pending',
+                channel=channel,
+                attempts__lt=models.F('max_attempts'),
+            )
             if tenant:
                 qs = qs.filter(tenant=tenant)
             if outlet:
                 qs = qs.filter(outlet=outlet)
+            if requested_printer_type:
+                qs = qs.filter(printer_type=requested_printer_type)
             if device_id:
                 qs = qs.filter(models.Q(device_id='') | models.Q(device_id=device_id))
+            if device:
+                qs = qs.filter(models.Q(printer__isnull=True) | models.Q(printer__device=device))
+                if device.printer_identifier:
+                    qs = qs.filter(models.Q(printer_identifier='') | models.Q(printer_identifier=device.printer_identifier))
 
             job = qs.order_by('created_at').first()
             if not job:
@@ -1579,32 +1703,209 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
 
             job.status = 'claimed'
             job.claimed_at = timezone.now()
+            job.attempts = (job.attempts or 0) + 1
             if device_id:
                 job.device_id = device_id
-            job.save(update_fields=['status', 'claimed_at', 'device_id', 'updated_at'])
+            if not job.printer_identifier and device and device.printer_identifier:
+                job.printer_identifier = device.printer_identifier
+            job.save(update_fields=['status', 'claimed_at', 'attempts', 'device_id', 'printer_identifier', 'updated_at'])
 
         return Response(PrintJobSerializer(job).data)
+
+    @action(detail=False, methods=['post'], url_path='register-device')
+    def register_device(self, request):
+        """Register/update a print connector device for SaaS-safe routing."""
+        tenant, user, authenticated_device = self._request_actor(request)
+
+        if authenticated_device:
+            tenant = authenticated_device.tenant
+
+        if not tenant and getattr(user, 'is_saas_admin', False):
+            tenant_id = request.data.get('tenant_id') or request.data.get('tenant')
+            if tenant_id:
+                try:
+                    from apps.tenants.models import Tenant
+                    tenant = Tenant.objects.get(id=int(tenant_id))
+                except (ValueError, TypeError, Tenant.DoesNotExist):
+                    return Response({'detail': 'Invalid tenant_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not tenant:
+            return Response({'detail': 'Tenant context is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device_id = str(request.data.get('device_id', '') or '').strip()
+        if not device_id:
+            return Response({'detail': 'device_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if authenticated_device and authenticated_device.device_id != device_id:
+            return Response({'detail': 'API key cannot register a different device_id.'}, status=status.HTTP_403_FORBIDDEN)
+
+        channel = str(request.data.get('channel', 'agent') or 'agent').strip().lower()
+        if channel not in ['agent', 'mobile']:
+            channel = 'agent'
+
+        outlet = None
+        outlet_id = request.data.get('outlet_id')
+        if outlet_id not in (None, ''):
+            try:
+                outlet_id = int(outlet_id)
+                from apps.outlets.models import Outlet
+                outlet = Outlet.objects.get(id=outlet_id, tenant=tenant)
+            except (ValueError, TypeError, Outlet.DoesNotExist):
+                return Response({'detail': 'Invalid outlet_id for current tenant.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_active_raw = str(request.data.get('is_active', 'true')).strip().lower()
+        is_active = is_active_raw not in ['false', '0', 'no', 'off']
+
+        defaults = {
+            'outlet': outlet,
+            'registered_by': user,
+            'name': str(request.data.get('name', '') or '').strip() or device_id,
+            'channel': channel,
+            'printer_identifier': str(request.data.get('printer_identifier', '') or '').strip(),
+            'is_active': is_active,
+            'last_seen_at': timezone.now(),
+        }
+
+        device, created = PrintDevice.objects.update_or_create(
+            tenant=tenant,
+            device_id=device_id,
+            defaults=defaults,
+        )
+
+        rotate_api_key = bool(request.data.get('rotate_api_key', created))
+        raw_api_key = None
+        if rotate_api_key:
+            raw_api_key = secrets.token_urlsafe(48)
+            device.set_api_key(raw_api_key)
+            device.save(update_fields=['api_key_hash', 'updated_at'])
+
+        return Response({
+            'registered': True,
+            'created': created,
+            'api_key': raw_api_key,
+            'device': PrintDeviceSerializer(device).data,
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'], url_path='complete')
     def complete(self, request, pk=None):
         """Mark claimed job as completed/failed."""
+        tenant, user, device = self._request_actor(request)
+        if not tenant:
+            return Response({'detail': 'Authentication required (JWT or API key).'}, status=status.HTTP_401_UNAUTHORIZED)
+
         job = self.get_object()
+        if job.tenant_id != tenant.id:
+            return Response({'detail': 'Unauthorized for this job.'}, status=status.HTTP_403_FORBIDDEN)
+
         result = str(request.data.get('result', 'completed') or 'completed').strip().lower()
         error_message = str(request.data.get('error_message', '') or '').strip()
 
-        if result not in ['completed', 'failed', 'cancelled']:
+        if result not in ['completed', 'failed', 'failed_permanent', 'cancelled']:
             result = 'completed'
 
-        job.status = result
         if result == 'completed':
+            job.status = 'completed'
             job.completed_at = timezone.now()
             job.error_message = ''
             job.save(update_fields=['status', 'completed_at', 'error_message', 'updated_at'])
+        elif result == 'failed':
+            if (job.attempts or 0) >= (job.max_attempts or 3):
+                job.status = 'failed_permanent'
+            else:
+                job.status = 'pending'
+            job.error_message = error_message
+            job.save(update_fields=['status', 'error_message', 'updated_at'])
         else:
+            job.status = result
             job.error_message = error_message
             job.save(update_fields=['status', 'error_message', 'updated_at'])
 
         return Response(PrintJobSerializer(job).data)
+
+
+class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
+    """Read and heartbeat print devices."""
+
+    queryset = PrintDevice.objects.select_related('tenant', 'outlet', 'registered_by').all()
+    serializer_class = PrintDeviceSerializer
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['tenant', 'outlet', 'channel', 'is_active']
+    search_fields = ['device_id', 'name', 'printer_identifier']
+    ordering_fields = ['last_seen_at', 'updated_at', 'created_at']
+    ordering = ['-updated_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if getattr(user, 'is_authenticated', False):
+            tenant = getattr(self.request, 'tenant', None) or getattr(user, 'tenant', None)
+            if getattr(user, 'is_saas_admin', False):
+                return PrintDevice.objects.select_related('tenant', 'outlet', 'registered_by').all()
+            if tenant:
+                return PrintDevice.objects.select_related('tenant', 'outlet', 'registered_by').filter(tenant=tenant)
+            return PrintDevice.objects.none()
+
+        device = _authenticate_device_by_api_key(self.request)
+        if not device:
+            return PrintDevice.objects.none()
+        return PrintDevice.objects.filter(pk=device.pk)
+
+    @action(detail=False, methods=['post'], url_path='heartbeat')
+    def heartbeat(self, request):
+        device = _authenticate_device_by_api_key(request)
+        if not device:
+            return Response({'detail': 'Device API key required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        status_value = str(request.data.get('status', 'online') or 'online').strip().lower()
+        printer_status = request.data.get('printer_status')
+        if not isinstance(printer_status, dict):
+            printer_status = {}
+
+        device.last_seen_at = timezone.now()
+        device.is_active = status_value != 'offline'
+        if printer_status:
+            device.printer_status = printer_status
+        device.save(update_fields=['last_seen_at', 'is_active', 'printer_status', 'updated_at'])
+
+        return Response({'ok': True, 'device_id': device.device_id, 'last_seen_at': device.last_seen_at})
+
+
+class PrinterViewSet(viewsets.ModelViewSet, TenantFilterMixin):
+    """Manage cloud-routed printers per outlet/device."""
+
+    queryset = Printer.objects.select_related('tenant', 'outlet', 'device').all()
+    serializer_class = PrinterSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['tenant', 'outlet', 'device', 'printer_type', 'is_active', 'is_default']
+    search_fields = ['name', 'identifier', 'device__device_id']
+    ordering_fields = ['updated_at', 'created_at', 'name']
+    ordering = ['-is_default', 'name']
+
+    def get_queryset(self):
+        user = self.request.user
+        request_tenant = getattr(self.request, 'tenant', None)
+        tenant = request_tenant or getattr(user, 'tenant', None)
+        qs = Printer.objects.select_related('tenant', 'outlet', 'device').all()
+
+        if getattr(user, 'is_saas_admin', False):
+            return qs
+        if tenant:
+            return qs.filter(tenant=tenant)
+        return qs.none()
+
+    def perform_create(self, serializer):
+        tenant = getattr(self.request, 'tenant', None) or getattr(self.request.user, 'tenant', None)
+        if not tenant:
+            raise serializers.ValidationError({'detail': 'Tenant context is required.'})
+
+        outlet = serializer.validated_data.get('outlet')
+        device = serializer.validated_data.get('device')
+        if outlet and outlet.tenant_id != tenant.id:
+            raise serializers.ValidationError({'outlet': 'Outlet does not belong to current tenant.'})
+        if device and device.tenant_id != tenant.id:
+            raise serializers.ValidationError({'device': 'Device does not belong to current tenant.'})
+
+        serializer.save(tenant=tenant)
 
 
 class ReceiptTemplateViewSet(viewsets.ModelViewSet, TenantFilterMixin):

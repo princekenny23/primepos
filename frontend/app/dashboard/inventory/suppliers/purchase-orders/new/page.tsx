@@ -459,19 +459,19 @@ export default function NewPurchaseOrderPage() {
               <CardContent className="space-y-4">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span className="font-medium">${subtotal.toFixed(2)}</span>
+                  <span className="font-medium">MWK {subtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Tax</span>
-                  <span className="font-medium">${tax.toFixed(2)}</span>
+                  <span className="font-medium">MWK {tax.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Discount</span>
-                  <span className="font-medium">${discount.toFixed(2)}</span>
+                  <span className="font-medium">MWK {discount.toFixed(2)}</span>
                 </div>
                 <div className="border-t pt-4 flex justify-between">
                   <span className="font-bold">Total</span>
-                  <span className="font-bold text-lg">${total.toFixed(2)}</span>
+                  <span className="font-bold text-lg">MWK {total.toFixed(2)}</span>
                 </div>
                 <div className="pt-4 space-y-2">
                   <Button

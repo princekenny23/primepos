@@ -12,6 +12,13 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { 
   Search,
   Menu,
@@ -27,6 +34,8 @@ import {
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { saleService } from "@/lib/services/saleService"
+import { staffService } from "@/lib/services/staffService"
+import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { useToast } from "@/components/ui/use-toast"
 import { format } from "date-fns"
 import { useRouter } from "next/navigation"
@@ -56,6 +65,12 @@ interface SaleDetail extends Sale {
   }
 }
 
+interface CashierOption {
+  id: string
+  name: string
+  email: string
+}
+
 export default function DiscountsPage() {
   const router = useRouter()
   const { currentBusiness, currentOutlet: storeOutlet } = useBusinessStore()
@@ -65,6 +80,9 @@ export default function DiscountsPage() {
   const outlet = tenantOutlet || storeOutlet
 
   const [discountedSales, setDiscountedSales] = useState<SaleDetail[]>([])
+  const [cashiers, setCashiers] = useState<CashierOption[]>([])
+  const [selectedCashier, setSelectedCashier] = useState("all")
+  const [dateRange, setDateRange] = useState<{ start?: Date; end?: Date }>({})
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
@@ -102,6 +120,15 @@ export default function DiscountsPage() {
     try {
       const filters: any = {
         outlet: outletId,
+      }
+      if (selectedCashier !== "all") {
+        filters.user = selectedCashier
+      }
+      if (dateRange.start) {
+        filters.start_date = format(dateRange.start, "yyyy-MM-dd")
+      }
+      if (dateRange.end) {
+        filters.end_date = `${format(dateRange.end, "yyyy-MM-dd")}T23:59:59`
       }
 
       const response = await saleService.list(filters)
@@ -156,7 +183,38 @@ export default function DiscountsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, outlet, toast])
+  }, [currentBusiness, outlet, selectedCashier, dateRange.start, dateRange.end, toast])
+
+  const loadCashiers = useCallback(async () => {
+    const outletId = outlet?.id || null
+    if (!outletId) {
+      setCashiers([])
+      return
+    }
+
+    try {
+      const response = await staffService.list({ outlet: String(outletId), is_active: true })
+      const staffRows = response.results || []
+      const cashierCandidates = staffRows.filter((staff: any) => {
+        const roleName = String(staff?.role?.name || staff?.user?.role || "").toLowerCase()
+        return roleName.includes("cashier")
+      })
+      const sourceRows = cashierCandidates.length > 0 ? cashierCandidates : staffRows
+      const options = sourceRows
+        .map((staff: any) => {
+          const id = String(staff?.user?.id || "")
+          const email = String(staff?.user?.email || "")
+          const name = String(staff?.user?.name || "").trim() || email || "Unknown"
+          return { id, name, email }
+        })
+        .filter((row: CashierOption) => row.id)
+
+      const unique = Array.from(new Map(options.map((row) => [row.id, row])).values())
+      setCashiers(unique)
+    } catch {
+      setCashiers([])
+    }
+  }, [outlet?.id])
 
   const getUserDisplay = (sale: SaleDetail) => {
     const user = sale.user
@@ -191,10 +249,14 @@ export default function DiscountsPage() {
     }
   }, [loadDiscounts])
 
+  useEffect(() => {
+    loadCashiers()
+  }, [loadCashiers])
+
   // Reset page on search
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm])
+  }, [searchTerm, selectedCashier, dateRange.start, dateRange.end])
 
   const filteredDiscounts = useMemo(() => {
     let filtered = discountedSales
@@ -281,7 +343,7 @@ export default function DiscountsPage() {
       </div>
 
         <div className="px-6 py-4 border-b border-gray-300">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
               <Input
@@ -291,6 +353,29 @@ export default function DiscountsPage() {
                 className="pl-10 bg-white border-gray-300"
               />
             </div>
+            <Select value={selectedCashier} onValueChange={setSelectedCashier}>
+              <SelectTrigger className="w-56 bg-white border-gray-300">
+                <SelectValue placeholder="Filter by cashier" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All cashiers</SelectItem>
+                {cashiers.map((cashier) => (
+                  <SelectItem key={cashier.id} value={cashier.id}>
+                    {cashier.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <DateRangeFilter
+              onRangeChange={(range) => {
+                setDateRange({ start: range.start, end: range.end })
+              }}
+            />
+            {(dateRange.start || dateRange.end) && (
+              <Button variant="outline" className="border-gray-300" onClick={() => setDateRange({})}>
+                Clear Dates
+              </Button>
+            )}
           </div>
         </div>
 

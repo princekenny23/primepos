@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from decimal import Decimal, InvalidOperation
-from .models import Sale, SaleItem, Receipt, PrintJob
+from .models import Sale, SaleItem, Receipt, PrintJob, PrintDevice, Printer
 from .models import ReceiptTemplate
 from apps.products.serializers import ProductSerializer
 from apps.tenants.permissions import resolve_tenant_from_request
@@ -300,7 +300,8 @@ class PrintJobSerializer(serializers.ModelSerializer):
         model = PrintJob
         fields = (
             'id', 'tenant', 'outlet', 'sale', 'requested_by',
-            'channel', 'status', 'device_id', 'printer_identifier',
+            'channel', 'status', 'printer', 'printer_type',
+            'device_id', 'printer_identifier', 'attempts', 'max_attempts',
             'payload', 'error_message', 'claimed_at', 'completed_at',
             'created_at', 'updated_at'
         )
@@ -308,6 +309,31 @@ class PrintJobSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'requested_by', 'status', 'claimed_at',
             'completed_at', 'created_at', 'updated_at'
         )
+
+
+class PrintDeviceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PrintDevice
+        fields = (
+            'id', 'tenant', 'outlet', 'registered_by',
+            'device_id', 'name', 'channel', 'printer_identifier',
+            'is_active', 'last_seen_at', 'printer_status',
+            'created_at', 'updated_at'
+        )
+        read_only_fields = (
+            'id', 'tenant', 'registered_by', 'last_seen_at', 'created_at', 'updated_at'
+        )
+
+
+class PrinterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Printer
+        fields = (
+            'id', 'tenant', 'outlet', 'device', 'name',
+            'printer_type', 'connection_type', 'identifier',
+            'is_default', 'is_active', 'created_at', 'updated_at'
+        )
+        read_only_fields = ('id', 'tenant', 'created_at', 'updated_at')
 
 
 class ReceiptSerializer(serializers.ModelSerializer):

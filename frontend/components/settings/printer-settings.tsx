@@ -16,6 +16,7 @@ const LOCAL_PRINT_AGENT_URL =
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
+const PRINT_DEVICE_ID_STORAGE_KEY = "printDeviceId"
 type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
 function encodeTextToBase64(text: string): string {
@@ -25,6 +26,24 @@ function encodeTextToBase64(text: string): string {
     binary += String.fromCharCode(b)
   })
   return btoa(binary)
+}
+
+function getOrCreatePrintDeviceId(): string {
+  if (typeof window === "undefined") return ""
+  try {
+    const existing = String(localStorage.getItem(PRINT_DEVICE_ID_STORAGE_KEY) || "").trim()
+    if (existing) return existing
+
+    const generated =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? `web-${crypto.randomUUID()}`
+        : `web-${Date.now()}-${Math.floor(Math.random() * 1000000)}`
+
+    localStorage.setItem(PRINT_DEVICE_ID_STORAGE_KEY, generated)
+    return generated
+  } catch {
+    return ""
+  }
 }
 
 async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -309,6 +328,17 @@ export function PrinterSettings() {
       }
       if (typeof window !== "undefined") {
         localStorage.setItem(getOutletStorageKey(outletId), selectedPrinter)
+      }
+
+      const deviceId = getOrCreatePrintDeviceId()
+      if (deviceId) {
+        await api.post('/print-jobs/register-device/', {
+          device_id: deviceId,
+          outlet_id: outletId,
+          printer_identifier: selectedPrinter,
+          channel: "agent",
+          is_active: true,
+        })
       }
     } catch (err: any) {
       console.error("Error saving printer", err)

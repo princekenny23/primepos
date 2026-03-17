@@ -127,7 +127,7 @@ export default function ProfitLossReportsPage() {
   }
 
   const formatCurrency = (value: number) => {
-    return `${currentBusiness?.currencySymbol || "MK"} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    return `${currentBusiness?.currencySymbol || "MWK"} ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
   const handleExportXlsx = async () => {

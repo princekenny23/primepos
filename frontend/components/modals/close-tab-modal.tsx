@@ -141,15 +141,15 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
           <div className="p-3 bg-muted rounded-lg space-y-1">
             <div className="flex justify-between text-sm">
               <span>Subtotal:</span>
-              <span>${subtotal.toFixed(2)}</span>
+              <span>MWK {subtotal.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span>Tax (10%):</span>
-              <span>${tax.toFixed(2)}</span>
+              <span>MWK {tax.toFixed(2)}</span>
             </div>
             <div className="flex justify-between font-bold text-lg pt-2 border-t">
               <span>Total:</span>
-              <span>${total.toFixed(2)}</span>
+              <span>MWK {total.toFixed(2)}</span>
             </div>
           </div>
 

@@ -47,15 +47,15 @@ export function ReceiptPreview({ cart, subtotal, discount, tax, total }: Receipt
                   <div className="flex-1">
                     <p>{item.name}</p>
                     <p className="text-muted-foreground">
-                      {item.quantity} x ${item.price.toFixed(2)}
+                      {item.quantity} x MWK {item.price.toFixed(2)}
                       {item.discount > 0 && (
                         <span className="text-green-600 ml-1">
-                          (-${item.discount.toFixed(2)})
+                          (-MWK {item.discount.toFixed(2)})
                         </span>
                       )}
                     </p>
                   </div>
-                  <p className="font-medium">${item.total.toFixed(2)}</p>
+                  <p className="font-medium">MWK {item.total.toFixed(2)}</p>
                 </div>
               ))}
             </div>
@@ -63,23 +63,23 @@ export function ReceiptPreview({ cart, subtotal, discount, tax, total }: Receipt
             <div className="space-y-1 text-xs border-b pb-2">
               <div className="flex justify-between">
                 <span>Subtotal</span>
-                <span>${subtotal.toFixed(2)}</span>
+                <span>MWK {subtotal.toFixed(2)}</span>
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-green-600">
                   <span>Discount</span>
-                  <span>-${discount.toFixed(2)}</span>
+                  <span>-MWK {discount.toFixed(2)}</span>
                 </div>
               )}
               <div className="flex justify-between">
                 <span>Tax</span>
-                <span>${tax.toFixed(2)}</span>
+                <span>MWK {tax.toFixed(2)}</span>
               </div>
             </div>
 
             <div className="flex justify-between font-bold text-base pt-2 border-t">
               <span>TOTAL</span>
-              <span>${total.toFixed(2)}</span>
+              <span>MWK {total.toFixed(2)}</span>
             </div>
 
             <div className="text-center text-xs text-muted-foreground pt-4 border-t">

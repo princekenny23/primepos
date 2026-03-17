@@ -44,20 +44,20 @@ export function PosCartSummary({
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
           <span>Subtotal:</span>
-          <span className="font-medium">${subtotal.toFixed(2)}</span>
+          <span className="font-medium">MWK {subtotal.toFixed(2)}</span>
         </div>
 
         {tax > 0 && (
           <div className="flex justify-between">
             <span>Tax:</span>
-            <span className="font-medium">${tax.toFixed(2)}</span>
+            <span className="font-medium">MWK {tax.toFixed(2)}</span>
           </div>
         )}
 
         {discount > 0 && (
           <div className="flex justify-between text-green-600">
             <span>Discount:</span>
-            <span className="font-medium">-${discount.toFixed(2)}</span>
+            <span className="font-medium">-MWK {discount.toFixed(2)}</span>
           </div>
         )}
 
@@ -65,7 +65,7 @@ export function PosCartSummary({
 
         <div className="flex justify-between text-base font-bold">
           <span>Total:</span>
-          <span>${total.toFixed(2)}</span>
+          <span>MWK {total.toFixed(2)}</span>
         </div>
       </div>
 

@@ -181,7 +181,7 @@ export function separator(width: number = 40, char: string = "-"): string {
  */
 export function formatReceiptAmount(
   amount: number,
-  currencySymbol: string = "MK",
+  currencySymbol: string = "MWK",
   width: number = 12
 ): string {
   const formatted = `${currencySymbol} ${amount.toFixed(2)}`

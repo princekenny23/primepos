@@ -41,7 +41,7 @@ export default function SetupBusinessPage() {
     address: "",
     taxId: "",
     currency: "MWK",
-    currencySymbol: "MK",
+    currencySymbol: "MWK",
   })
 
   useEffect(() => {
@@ -197,7 +197,7 @@ export default function SetupBusinessPage() {
                 value={formData.currency}
                 onValueChange={(value) => {
                   const symbols: Record<string, string> = {
-                    MWK: "MK",
+                    MWK: "MWK",
                     USD: "$",
                     EUR: "€",
                     GBP: "£",
@@ -205,7 +205,7 @@ export default function SetupBusinessPage() {
                   setFormData({
                     ...formData,
                     currency: value,
-                    currencySymbol: symbols[value] || "MK",
+                    currencySymbol: symbols[value] || "MWK",
                   })
                 }}
                 required

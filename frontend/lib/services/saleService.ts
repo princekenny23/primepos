@@ -11,6 +11,7 @@ type SaleWithMetadata = Sale & {
 
 export interface SaleFilters {
   outlet?: string
+  user?: string
   status?: string
   payment_method?: string
   start_date?: string
@@ -122,6 +123,7 @@ export const saleService = {
   async list(filters?: SaleFilters): Promise<{ results: SaleWithMetadata[]; count: number }> {
     const params = new URLSearchParams()
     if (filters?.outlet) params.append("outlet", filters.outlet)
+    if (filters?.user) params.append("user", filters.user)
     if (filters?.status) params.append("status", filters.status)
     if (filters?.payment_method) params.append("payment_method", filters.payment_method)
     if (filters?.start_date) params.append("start_date", filters.start_date)

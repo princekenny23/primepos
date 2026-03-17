@@ -438,7 +438,7 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
                       <span className="flex-1 font-medium truncate">{item.product_name || item.product_id}</span>
                       <span className="text-muted-foreground whitespace-nowrap">
                         Qty: {item.quantity}
-                        {item.unit_price ? ` • MK ${item.unit_price}` : ""}
+                        {item.unit_price ? ` • MWK ${item.unit_price}` : ""}
                       </span>
                       <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEditItem(index)}>
                         <Pencil className="h-3 w-3" />

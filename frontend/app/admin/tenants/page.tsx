@@ -22,6 +22,7 @@ import { ViewTenantDetailsModal } from "@/components/modals/view-tenant-details-
 import { EditTenantModal } from "@/components/modals/edit-tenant-modal"
 import { DeleteTenantModal } from "@/components/modals/delete-tenant-modal"
 import { ManagePermissionsModal } from "@/components/modals/manage-permissions-modal"
+import { RecordTenantPaymentModal } from "@/components/modals/record-tenant-payment-modal"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +38,7 @@ export default function AdminTenantsPage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showPermissionsModal, setShowPermissionsModal] = useState(false)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [selectedTenant, setSelectedTenant] = useState<AdminTenant | null>(null)
   const [activeTab, setActiveTab] = useState("all")
   const [tenants, setTenants] = useState<AdminTenant[]>([])
@@ -251,6 +253,7 @@ export default function AdminTenantsPage() {
                           <TableHead>Users</TableHead>
                           <TableHead>Outlets</TableHead>
                           <TableHead>Revenue</TableHead>
+                          <TableHead>Total Paid</TableHead>
                           <TableHead>Joined</TableHead>
                           <TableHead>Actions</TableHead>
                         </TableRow>
@@ -276,6 +279,9 @@ export default function AdminTenantsPage() {
                             </TableCell>
                             <TableCell className="font-semibold">
                               MWK {(tenant.revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </TableCell>
+                            <TableCell className="font-semibold text-green-700 dark:text-green-300">
+                              MWK {(tenant.total_manual_payments || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                             </TableCell>
                             <TableCell>
                               {new Date(tenant.created_at).toLocaleDateString()}
@@ -305,6 +311,15 @@ export default function AdminTenantsPage() {
                                   >
                                     <Edit className="mr-2 h-4 w-4" />
                                     Edit Tenant
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedTenant(tenant)
+                                      setShowPaymentModal(true)
+                                    }}
+                                  >
+                                    <DollarSign className="mr-2 h-4 w-4" />
+                                    Record Payment
                                   </DropdownMenuItem>
                                   <DropdownMenuItem
                                     onClick={() => {
@@ -382,6 +397,12 @@ export default function AdminTenantsPage() {
             open={showPermissionsModal}
             onOpenChange={setShowPermissionsModal}
             tenant={selectedTenant}
+          />
+          <RecordTenantPaymentModal
+            open={showPaymentModal}
+            onOpenChange={setShowPaymentModal}
+            tenant={selectedTenant}
+            onRecorded={loadTenants}
           />
           <DeleteTenantModal
             open={showDeleteModal}

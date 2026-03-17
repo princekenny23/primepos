@@ -19,7 +19,7 @@ export function formatCurrency(
   }
 ): string {
   const currency = business?.currency || "MWK"
-  const symbol = options?.symbolOverride || business?.currencySymbol || "MK"
+  const symbol = options?.symbolOverride || business?.currencySymbol || "MWK"
   const decimals = options?.decimals ?? 2
   const showSymbol = options?.showSymbol ?? true
 

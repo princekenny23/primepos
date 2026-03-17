@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -167,10 +168,12 @@ sealed class CloudOptions
 {
     public bool Enabled { get; set; } = false;
     public string? ApiBaseUrl { get; set; }
+    public string? DeviceApiKey { get; set; }
     public string? AuthToken { get; set; }
     public string? TenantId { get; set; }
     public string? OutletId { get; set; }
     public string? DeviceId { get; set; }
+    public string? PrinterType { get; set; } = "receipt";
     public string? Channel { get; set; } = "agent";
     public int PollIntervalSeconds { get; set; } = 2;
     public string? DefaultPrinter { get; set; }
@@ -186,16 +189,35 @@ sealed class PrintJob
 
 sealed class CloudPrintJob
 {
+    [JsonPropertyName("id")]
     public int Id { get; set; }
+
+    [JsonPropertyName("status")]
     public string Status { get; set; } = string.Empty;
-    public string Printer_Identifier { get; set; } = string.Empty;
+
+    [JsonPropertyName("printer_identifier")]
+    public string PrinterIdentifier { get; set; } = string.Empty;
+
+    [JsonPropertyName("payload")]
     public CloudPrintPayload? Payload { get; set; }
 }
 
 sealed class CloudPrintPayload
 {
-    public string Content_Base64 { get; set; } = string.Empty;
-    public string Receipt_Number { get; set; } = string.Empty;
+    [JsonPropertyName("content_base64")]
+    public string ContentBase64 { get; set; } = string.Empty;
+
+    [JsonPropertyName("receipt_number")]
+    public string ReceiptNumber { get; set; } = string.Empty;
+}
+
+sealed class CloudDeviceRegistrationResponse
+{
+    [JsonPropertyName("registered")]
+    public bool Registered { get; set; }
+
+    [JsonPropertyName("api_key")]
+    public string? ApiKey { get; set; }
 }
 
 static class CloudPoller
@@ -209,20 +231,21 @@ static class CloudPoller
         }
 
         var apiBase = (cloud.ApiBaseUrl ?? string.Empty).Trim().TrimEnd('/');
-        var authToken = (cloud.AuthToken ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(apiBase) || string.IsNullOrWhiteSpace(authToken))
+        if (string.IsNullOrWhiteSpace(apiBase))
         {
-            Console.WriteLine("[CloudPoller] Cloud enabled but ApiBaseUrl/AuthToken is missing.");
+            Console.WriteLine("[CloudPoller] Cloud enabled but ApiBaseUrl is missing.");
             return;
         }
 
+        var bootstrapToken = (cloud.AuthToken ?? string.Empty).Trim();
+        var deviceApiKey = (cloud.DeviceApiKey ?? string.Empty).Trim();
         var channel = string.IsNullOrWhiteSpace(cloud.Channel) ? "agent" : cloud.Channel.Trim().ToLowerInvariant();
         var deviceId = string.IsNullOrWhiteSpace(cloud.DeviceId) ? Environment.MachineName : cloud.DeviceId.Trim();
+        var printerType = NormalizePrinterType(cloud.PrinterType);
         var pollSeconds = cloud.PollIntervalSeconds <= 0 ? 2 : cloud.PollIntervalSeconds;
 
         using var http = new HttpClient();
         http.Timeout = TimeSpan.FromSeconds(20);
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authToken);
         if (!string.IsNullOrWhiteSpace(cloud.TenantId))
         {
             http.DefaultRequestHeaders.Add("X-Tenant-ID", cloud.TenantId.Trim());
@@ -232,21 +255,58 @@ static class CloudPoller
             http.DefaultRequestHeaders.Add("X-Outlet-ID", cloud.OutletId.Trim());
         }
 
-        Console.WriteLine($"[CloudPoller] Running. api={apiBase} channel={channel} device={deviceId}");
+        Console.WriteLine($"[CloudPoller] Running. api={apiBase} channel={channel} device={deviceId} printerType={printerType}");
+
+        try
+        {
+            var registration = await RegisterDeviceAsync(http, apiBase, cloud, channel, deviceId, bootstrapToken, ct: stoppingToken);
+            if (!string.IsNullOrWhiteSpace(registration.ApiKey))
+            {
+                deviceApiKey = registration.ApiKey.Trim();
+                Console.WriteLine("[CloudPoller] Device API key received from registration.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[CloudPoller] Device registration warning: {ex.Message}");
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceApiKey))
+        {
+            Console.WriteLine("[CloudPoller] Missing DeviceApiKey. Set Cloud:DeviceApiKey or provide bootstrap AuthToken for registration.");
+            return;
+        }
+
+        SetBearer(http, deviceApiKey);
+
+        var lastHeartbeatAt = DateTime.UtcNow;
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var claimed = await ClaimNextAsync(http, apiBase, channel, deviceId, stoppingToken);
+                if ((DateTime.UtcNow - lastHeartbeatAt).TotalSeconds >= 30)
+                {
+                    try
+                    {
+                        await HeartbeatAsync(http, apiBase, stoppingToken);
+                        lastHeartbeatAt = DateTime.UtcNow;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[CloudPoller] Device heartbeat warning: {ex.Message}");
+                    }
+                }
+
+                var claimed = await ClaimNextAsync(http, apiBase, channel, deviceId, printerType, stoppingToken);
                 if (claimed is null)
                 {
                     await Task.Delay(TimeSpan.FromSeconds(pollSeconds), stoppingToken);
                     continue;
                 }
 
-                var contentBase64 = (claimed.Payload?.Content_Base64 ?? string.Empty).Trim();
-                var printerName = (claimed.Printer_Identifier ?? string.Empty).Trim();
+                var contentBase64 = (claimed.Payload?.ContentBase64 ?? string.Empty).Trim();
+                var printerName = (claimed.PrinterIdentifier ?? string.Empty).Trim();
                 if (string.IsNullOrWhiteSpace(printerName))
                 {
                     printerName = (cloud.DefaultPrinter ?? string.Empty).Trim();
@@ -274,9 +334,9 @@ static class CloudPoller
                     continue;
                 }
 
-                var jobName = string.IsNullOrWhiteSpace(claimed.Payload?.Receipt_Number)
+                var jobName = string.IsNullOrWhiteSpace(claimed.Payload?.ReceiptNumber)
                     ? "PrimePOS Receipt"
-                    : $"PrimePOS Receipt {claimed.Payload.Receipt_Number}";
+                    : $"PrimePOS Receipt {claimed.Payload.ReceiptNumber}";
 
                 var sent = RawPrinterHelper.SendBytesToPrinter(printerName, jobName, payload);
                 if (!sent)
@@ -312,10 +372,11 @@ static class CloudPoller
         string apiBase,
         string channel,
         string deviceId,
+        string printerType,
         CancellationToken ct)
     {
         var endpoint = $"{apiBase}/print-jobs/claim-next/";
-        var payload = new { channel, device_id = deviceId };
+        var payload = new { channel, device_id = deviceId, printer_type = printerType };
         using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
 
         if ((int)response.StatusCode == 204)
@@ -331,6 +392,81 @@ static class CloudPoller
 
         var claimed = await response.Content.ReadFromJsonAsync<CloudPrintJob>(cancellationToken: ct);
         return claimed;
+    }
+
+    private static async Task<CloudDeviceRegistrationResponse> RegisterDeviceAsync(
+        HttpClient http,
+        string apiBase,
+        CloudOptions cloud,
+        string channel,
+        string deviceId,
+        string bootstrapToken,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(bootstrapToken))
+        {
+            throw new InvalidOperationException("Bootstrap AuthToken is required for first-time registration.");
+        }
+
+        SetBearer(http, bootstrapToken);
+
+        int? outletId = null;
+        if (int.TryParse((cloud.OutletId ?? string.Empty).Trim(), out var parsedOutletId))
+        {
+            outletId = parsedOutletId;
+        }
+
+        int? tenantId = null;
+        if (int.TryParse((cloud.TenantId ?? string.Empty).Trim(), out var parsedTenantId))
+        {
+            tenantId = parsedTenantId;
+        }
+
+        var endpoint = $"{apiBase}/print-jobs/register-device/";
+        var payload = new
+        {
+            device_id = deviceId,
+            channel,
+            tenant_id = tenantId,
+            outlet_id = outletId,
+            printer_identifier = (cloud.DefaultPrinter ?? string.Empty).Trim(),
+            name = Environment.MachineName,
+            is_active = true,
+        };
+
+        using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Register device failed {(int)response.StatusCode}: {body}");
+        }
+
+        var result = await response.Content.ReadFromJsonAsync<CloudDeviceRegistrationResponse>(cancellationToken: ct);
+        return result ?? new CloudDeviceRegistrationResponse { Registered = true };
+    }
+
+    private static async Task HeartbeatAsync(
+        HttpClient http,
+        string apiBase,
+        CancellationToken ct)
+    {
+        var endpoint = $"{apiBase}/devices/heartbeat/";
+        var payload = new
+        {
+            status = "online",
+            printer_status = new
+            {
+                os = "windows",
+                at = DateTime.UtcNow,
+            }
+        };
+
+        using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Heartbeat failed {(int)response.StatusCode}: {body}");
+        }
     }
 
     private static async Task CompleteAsync(
@@ -349,6 +485,17 @@ static class CloudPoller
             var body = await response.Content.ReadAsStringAsync(ct);
             throw new InvalidOperationException($"Complete failed {(int)response.StatusCode}: {body}");
         }
+    }
+
+    private static string NormalizePrinterType(string? value)
+    {
+        var normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized is "receipt" or "kitchen" or "bar" ? normalized : "receipt";
+    }
+
+    private static void SetBearer(HttpClient http, string token)
+    {
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
 }
 

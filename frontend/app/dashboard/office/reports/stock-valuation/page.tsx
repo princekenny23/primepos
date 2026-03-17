@@ -71,7 +71,7 @@ export default function StockValuationReportPage() {
 
   const formatCurrency = useCallback(
     (value: number) => {
-      const symbol = currentBusiness?.currencySymbol || "MK"
+      const symbol = currentBusiness?.currencySymbol || "MWK"
       return `${symbol} ${value.toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,

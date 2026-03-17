@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
+from django.contrib.auth.hashers import make_password, check_password
 from decimal import Decimal
 from apps.tenants.models import Tenant
 from apps.outlets.models import Outlet
@@ -439,9 +440,16 @@ class PrintJob(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('claimed', 'Claimed'),
+        ('printing', 'Printing'),
         ('completed', 'Completed'),
         ('failed', 'Failed'),
-        ('cancelled', 'Cancelled'),
+        ('failed_permanent', 'Failed Permanent'),
+    ]
+
+    PRINTER_TYPES = [
+        ('receipt', 'Receipt'),
+        ('kitchen', 'Kitchen'),
+        ('bar', 'Bar'),
     ]
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='print_jobs')
@@ -451,8 +459,12 @@ class PrintJob(models.Model):
 
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default='agent')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    printer = models.ForeignKey('Printer', on_delete=models.SET_NULL, null=True, blank=True, related_name='print_jobs')
+    printer_type = models.CharField(max_length=20, choices=PRINTER_TYPES, default='receipt')
     device_id = models.CharField(max_length=100, blank=True, default='')
     printer_identifier = models.CharField(max_length=255, blank=True, default='')
+    attempts = models.PositiveIntegerField(default=0)
+    max_attempts = models.PositiveIntegerField(default=3)
     payload = models.JSONField(default=dict, blank=True)
     error_message = models.TextField(blank=True, default='')
 
@@ -469,10 +481,110 @@ class PrintJob(models.Model):
         indexes = [
             models.Index(fields=['tenant', 'status']),
             models.Index(fields=['tenant', 'device_id', 'status']),
+            models.Index(fields=['tenant', 'outlet', 'printer_type', 'status']),
             models.Index(fields=['outlet', 'status']),
             models.Index(fields=['created_at']),
         ]
 
     def __str__(self):
         return f"PrintJob #{self.pk} ({self.status})"
+
+
+class PrintDevice(models.Model):
+    """Registered connector/browser print device bound to tenant/outlet."""
+
+    CHANNEL_CHOICES = [
+        ('agent', 'Local Print Agent'),
+        ('mobile', 'Mobile Share'),
+    ]
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='print_devices')
+    outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, null=True, blank=True, related_name='print_devices')
+    registered_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='registered_print_devices')
+
+    device_id = models.CharField(max_length=100)
+    name = models.CharField(max_length=120, blank=True, default='')
+    api_key_hash = models.CharField(max_length=255, blank=True, default='')
+    channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default='agent')
+    printer_identifier = models.CharField(max_length=255, blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    printer_status = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_printdevice'
+        verbose_name = 'Print Device'
+        verbose_name_plural = 'Print Devices'
+        ordering = ['-updated_at']
+        unique_together = (('tenant', 'device_id'),)
+        indexes = [
+            models.Index(fields=['tenant', 'device_id']),
+            models.Index(fields=['tenant', 'outlet', 'is_active']),
+            models.Index(fields=['is_active']),
+            models.Index(fields=['last_seen_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.device_id} ({self.channel})"
+
+    def set_api_key(self, raw_key: str):
+        if not raw_key:
+            raise ValueError('raw_key is required')
+        self.api_key_hash = make_password(raw_key)
+
+    def check_api_key(self, raw_key: str) -> bool:
+        if not raw_key or not self.api_key_hash:
+            return False
+        return check_password(raw_key, self.api_key_hash)
+
+
+class Printer(models.Model):
+    """Physical/local printer endpoint attached to a print device and outlet."""
+
+    PRINTER_TYPES = [
+        ('receipt', 'Receipt'),
+        ('kitchen', 'Kitchen'),
+        ('bar', 'Bar'),
+    ]
+
+    CONNECTION_TYPES = [
+        ('usb', 'USB'),
+        ('network', 'Network'),
+    ]
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='cloud_printers')
+    outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='cloud_printers')
+    device = models.ForeignKey(PrintDevice, on_delete=models.CASCADE, related_name='printers')
+    name = models.CharField(max_length=255)
+    printer_type = models.CharField(max_length=20, choices=PRINTER_TYPES, default='receipt')
+    connection_type = models.CharField(max_length=20, choices=CONNECTION_TYPES, default='usb')
+    identifier = models.CharField(max_length=255, blank=True, default='')
+    is_default = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_printer'
+        verbose_name = 'Cloud Printer'
+        verbose_name_plural = 'Cloud Printers'
+        ordering = ['-is_default', 'name']
+        unique_together = (('outlet', 'device', 'name'),)
+        indexes = [
+            models.Index(fields=['tenant', 'outlet', 'printer_type', 'is_active']),
+            models.Index(fields=['device', 'is_active']),
+        ]
+
+    def __str__(self):
+        return f"{self.outlet_id}:{self.name} ({self.printer_type})"
+
+    def save(self, *args, **kwargs):
+        if self.is_default:
+            Printer.objects.filter(
+                outlet=self.outlet,
+                printer_type=self.printer_type,
+            ).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
 

@@ -51,7 +51,7 @@ export function BusinessInfoTab() {
     phone: "",
     address: "",
     currency: "MWK",
-    currencySymbol: "MK",
+    currencySymbol: "MWK",
     taxId: "",
     timezone: "Africa/Blantyre",
   })
@@ -74,7 +74,7 @@ export function BusinessInfoTab() {
           phone: tenant.phone || "",
           address: tenant.address || "",
           currency: tenant.currency || "MWK",
-          currencySymbol: tenant.currencySymbol || "MK",
+          currencySymbol: tenant.currencySymbol || "MWK",
           taxId: (tenant.settings as any)?.taxId || "",
           timezone: (tenant.settings as any)?.timezone || "Africa/Blantyre",
         })
@@ -252,7 +252,7 @@ export function BusinessInfoTab() {
                   value={formData.currency} 
                   onValueChange={(value) => {
                     const symbols: Record<string, string> = {
-                      MWK: "MK",
+                      MWK: "MWK",
                       USD: "$",
                       EUR: "€",
                       GBP: "£",
@@ -264,7 +264,7 @@ export function BusinessInfoTab() {
                     setFormData({ 
                       ...formData, 
                       currency: value,
-                      currencySymbol: symbols[value] || "MK"
+                      currencySymbol: symbols[value] || "MWK"
                     })
                   }}
                 >
@@ -272,7 +272,7 @@ export function BusinessInfoTab() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="MWK">MWK (MK)</SelectItem>
+                    <SelectItem value="MWK">MWK (MWK)</SelectItem>
                     <SelectItem value="USD">USD ($)</SelectItem>
                     <SelectItem value="EUR">EUR (€)</SelectItem>
                     <SelectItem value="GBP">GBP (£)</SelectItem>
@@ -290,7 +290,7 @@ export function BusinessInfoTab() {
                   id="currency-symbol" 
                   value={formData.currencySymbol}
                   onChange={(e) => setFormData({ ...formData, currencySymbol: e.target.value })}
-                  placeholder="MK"
+                  placeholder="MWK"
                 />
               </div>
             </div>

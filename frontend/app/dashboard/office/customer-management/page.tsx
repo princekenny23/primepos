@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Plus, Search, Mail, Phone, Award, Calendar, Edit, Trash2, Merge, Menu } from "lucide-react"
+import { Plus, Search, Mail, Award, Calendar, Edit, Trash2, Merge, Menu, Eye } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,9 +29,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import Link from "next/link"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { AddEditCustomerModal } from "@/components/modals/add-edit-customer-modal"
+import { CustomerDetailsModal } from "@/components/modals/customer-details-modal"
 import { LoyaltyPointsAdjustModal } from "@/components/modals/loyalty-points-adjust-modal"
 import { MergeCustomerModal } from "@/components/modals/merge-customer-modal"
 import {
@@ -46,7 +46,6 @@ import {
 } from "@/components/ui/alert-dialog"
 import { customerService, type Customer } from "@/lib/services/customerService"
 import { useBusinessStore } from "@/stores/businessStore"
-import { useRealAPI } from "@/lib/utils/api-config"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 import { useI18n } from "@/contexts/i18n-context"
@@ -58,6 +57,7 @@ export default function CustomerManagementPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [outletFilter, setOutletFilter] = useState<string>("all")
   const [showAddCustomer, setShowAddCustomer] = useState(false)
+  const [showCustomerDetails, setShowCustomerDetails] = useState(false)
   const [showLoyaltyAdjust, setShowLoyaltyAdjust] = useState(false)
   const [showMerge, setShowMerge] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
@@ -65,7 +65,6 @@ export default function CustomerManagementPage() {
   const [customerToDelete, setCustomerToDelete] = useState<string | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const useReal = useRealAPI()
 
   const loadCustomers = useCallback(async () => {
     if (!currentBusiness) {
@@ -100,10 +99,6 @@ export default function CustomerManagementPage() {
     loadCustomers()
   }, [loadCustomers])
 
-  const handleDeleteCustomer = useCallback(async (customerId: string) => {
-    loadCustomers()
-  }, [loadCustomers])
-
   // Filter customers based on search and outlet
   const filteredCustomers = useMemo(() => {
     // Apply search filter
@@ -124,21 +119,6 @@ export default function CustomerManagementPage() {
 
     return outletFiltered
   }, [customers, searchTerm, outletFilter])
-
-  // Calculate statistics
-  const stats = useMemo(() => {
-    const allCustomers = customers
-    const creditCustomers = customers.filter(c => c.credit_enabled === true)
-    
-    return {
-      totalCustomers: allCustomers.length,
-      creditEnabled: creditCustomers.length,
-      totalOutstanding: creditCustomers.reduce((sum, c) => {
-        const balance = Number(c.outstanding_balance) || 0
-        return sum + balance
-      }, 0),
-    }
-  }, [customers])
 
   const handleDelete = (customerId: string) => {
     setCustomerToDelete(customerId)
@@ -223,15 +203,13 @@ export default function CustomerManagementPage() {
               <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow className="bg-gray-50">
-                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Name</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Email</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[9%] whitespace-normal">Phone</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Address</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[8%] whitespace-normal">Outlet</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[8%] whitespace-normal">Loyalty</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[9%] whitespace-normal">Spent</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[10%] whitespace-normal">Credit</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[10%] whitespace-normal">Outstanding</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[16%] whitespace-normal">Name</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[18%] whitespace-normal">Email</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[11%] whitespace-normal">Outlet</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[10%] whitespace-normal">Loyalty</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[11%] whitespace-normal">Spent</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Credit</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Outstanding</TableHead>
                     <TableHead className="text-gray-900 font-semibold w-[7%] whitespace-normal">Last Visit</TableHead>
                     <TableHead className="text-gray-900 font-semibold w-[3%] whitespace-normal">Actions</TableHead>
                   </TableRow>
@@ -239,13 +217,13 @@ export default function CustomerManagementPage() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={11} className="text-center py-8">
+                      <TableCell colSpan={9} className="text-center py-8">
                         <p className="text-gray-600">Loading customers...</p>
                       </TableCell>
                     </TableRow>
                   ) : filteredCustomers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={11} className="text-center py-8">
+                      <TableCell colSpan={9} className="text-center py-8">
                         <p className="text-gray-600">No customers found</p>
                       </TableCell>
                     </TableRow>
@@ -266,12 +244,12 @@ export default function CustomerManagementPage() {
                       return (
                         <TableRow key={customer.id} className="border-gray-300">
                           <TableCell className="break-words">
-                            <Link 
-                              href={`/dashboard/office/customer-management/${customer.id}`}
-                              className="font-medium hover:text-primary"
-                            >
-                              {customer.name}
-                            </Link>
+                            <div className="space-y-1">
+                              <p className="font-medium">{customer.name}</p>
+                              {customer.phone ? (
+                                <p className="text-xs text-muted-foreground">{customer.phone}</p>
+                              ) : null}
+                            </div>
                           </TableCell>
                           <TableCell className="break-words">
                             {customer.email ? (
@@ -282,21 +260,6 @@ export default function CustomerManagementPage() {
                             ) : (
                               <span className="text-xs text-muted-foreground">-</span>
                             )}
-                          </TableCell>
-                          <TableCell className="break-words">
-                            {customer.phone ? (
-                              <div className="flex items-center gap-2 text-sm">
-                                <Phone className="h-3 w-3 text-muted-foreground" />
-                                <span className="text-muted-foreground">{customer.phone}</span>
-                              </div>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">-</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="break-words">
-                            <span className="text-sm text-muted-foreground">
-                              {customer.address || "-"}
-                            </span>
                           </TableCell>
                           <TableCell className="break-words">
                             <span className="font-medium">{outletName}</span>
@@ -357,6 +320,15 @@ export default function CustomerManagementPage() {
                                 <DropdownMenuItem
                                   onClick={() => {
                                     setSelectedCustomer(customer)
+                                    setShowCustomerDetails(true)
+                                  }}
+                                >
+                                  <Eye className="mr-2 h-4 w-4" />
+                                  View Details
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    setSelectedCustomer(customer)
                                     setShowAddCustomer(true)
                                   }}
                                 >
@@ -412,6 +384,14 @@ export default function CustomerManagementPage() {
         }}
         customer={selectedCustomer}
         onSuccess={loadCustomers}
+      />
+      <CustomerDetailsModal
+        open={showCustomerDetails}
+        onOpenChange={(open) => {
+          setShowCustomerDetails(open)
+          if (!open) setSelectedCustomer(null)
+        }}
+        customer={selectedCustomer}
       />
       <LoyaltyPointsAdjustModal
         open={showLoyaltyAdjust}

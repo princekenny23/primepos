@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from decimal import Decimal
 from .models import Tenant, TenantPermissions
 from apps.outlets.serializers import OutletSerializer
 
@@ -9,12 +10,13 @@ class TenantSerializer(serializers.ModelSerializer):
     # Users will be serialized separately to avoid circular import
     users = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
+    total_manual_payments = serializers.SerializerMethodField()
     
     class Meta:
         model = Tenant
         fields = ('id', 'name', 'type', 'pos_type', 'currency', 'currency_symbol', 'phone', 'email', 
                   'address', 'logo', 'settings', 'has_distribution', 'is_active', 'created_at', 'updated_at', 
-                  'outlets', 'users', 'permissions')
+                  'outlets', 'users', 'permissions', 'total_manual_payments')
         read_only_fields = ('id', 'created_at', 'updated_at')
     
     def validate_name(self, value):
@@ -99,6 +101,10 @@ class TenantSerializer(serializers.ModelSerializer):
         if not permissions_obj:
             permissions_obj, _ = TenantPermissions.objects.get_or_create(tenant=obj)
         return TenantPermissionsSerializer(permissions_obj).data
+
+    def get_total_manual_payments(self, obj):
+        total = sum((payment.amount for payment in obj.payment_records.all()), Decimal('0.00'))
+        return float(total)
 
 
 class TenantPermissionsSerializer(serializers.ModelSerializer):

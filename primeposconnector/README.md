@@ -29,9 +29,11 @@ Edit `appsettings.json`:
 - `Security:Token` can be set to a shared secret. If set, clients must send `X-Primepos-Token`.
 - `Cloud:Enabled` set to `true` to enable auto-print polling from backend.
 - `Cloud:ApiBaseUrl` set to your API base, e.g. `https://your-backend-domain/api/v1`
-- `Cloud:AuthToken` set to a valid JWT access token.
+- `Cloud:DeviceApiKey` set to the device API key returned by `register-device`.
+- `Cloud:AuthToken` optional bootstrap JWT for first-time `register-device` only.
 - `Cloud:TenantId` and `Cloud:OutletId` should match the outlet this connector prints for.
 - `Cloud:DeviceId` optional (defaults to machine name).
+- `Cloud:PrinterType` should be `receipt`, `kitchen`, or `bar`.
 - `Cloud:DefaultPrinter` optional fallback if job has no printer identifier.
 
 ## API
@@ -43,9 +45,10 @@ Edit `appsettings.json`:
 ## Cloud Auto-Print Flow
 
 1. Frontend enqueues print jobs to backend.
-2. Connector claims jobs from `POST /print-jobs/claim-next/`.
-3. Connector prints RAW bytes locally.
-4. Connector marks result with `POST /print-jobs/{id}/complete/`.
+2. Connector registers device at `POST /print-jobs/register-device/` (bootstrap only).
+3. Connector claims jobs from `POST /print-jobs/claim-next/` using Device API key.
+4. Connector sends heartbeat to `POST /devices/heartbeat/`.
+5. Connector prints RAW bytes locally and marks result with `POST /print-jobs/{id}/complete/`.
 
 Print payload example:
 

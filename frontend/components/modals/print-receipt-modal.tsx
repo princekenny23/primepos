@@ -66,7 +66,7 @@ export function PrintReceiptModal({ open, onOpenChange, cart, total }: PrintRece
         <div className="py-4 space-y-3">
           <div className="p-4 bg-muted rounded-lg text-center">
             <p className="text-sm text-muted-foreground">Sale Total</p>
-            <p className="text-2xl font-bold">${total.toFixed(2)}</p>
+            <p className="text-2xl font-bold">MWK {total.toFixed(2)}</p>
             <p className="text-xs text-muted-foreground mt-1">
               {cart.length} item{cart.length !== 1 ? "s" : ""}
             </p>

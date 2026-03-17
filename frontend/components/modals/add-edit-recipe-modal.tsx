@@ -244,7 +244,7 @@ export function AddEditRecipeModal({ open, onOpenChange, recipe }: AddEditRecipe
                 <div className="pt-2 border-t">
                   <div className="flex justify-between font-semibold">
                     <span>Total Cost:</span>
-                    <span>${totalCost.toFixed(2)}</span>
+                    <span>MWK {totalCost.toFixed(2)}</span>
                   </div>
                 </div>
               )}

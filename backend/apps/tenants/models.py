@@ -1,6 +1,10 @@
 from django.db import models
+from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.utils import timezone
+from decimal import Decimal
 
 
 class Tenant(models.Model):
@@ -20,7 +24,7 @@ class Tenant(models.Model):
     type = models.CharField(max_length=20, choices=BUSINESS_TYPES, default='retail')
     pos_type = models.CharField(max_length=20, choices=POS_TYPES, default='standard')
     currency = models.CharField(max_length=3, default='MWK')
-    currency_symbol = models.CharField(max_length=10, default='MK')  # MWK symbol
+    currency_symbol = models.CharField(max_length=10, default='MWK')  # MWK symbol
     phone = models.CharField(max_length=20, blank=True)
     email = models.EmailField(blank=True)
     address = models.TextField(blank=True)
@@ -39,6 +43,44 @@ class Tenant(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class TenantPaymentRecord(models.Model):
+    """Manual subscription payment records for tenants."""
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name='payment_records'
+    )
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.01'))]
+    )
+    reason = models.CharField(max_length=255)
+    notes = models.TextField(blank=True)
+    payment_date = models.DateTimeField(default=timezone.now)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tenant_payment_records'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tenant_payment_records'
+        verbose_name = 'Tenant Payment Record'
+        verbose_name_plural = 'Tenant Payment Records'
+        ordering = ['-payment_date', '-created_at']
+        indexes = [
+            models.Index(fields=['tenant']),
+            models.Index(fields=['payment_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant.name} - {self.amount} on {self.payment_date.date()}"
 
 
 # Signal to create default roles when a tenant is created

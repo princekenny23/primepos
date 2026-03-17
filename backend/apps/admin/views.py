@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -6,8 +6,10 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db.models import Count, Sum, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from datetime import timedelta
-from apps.tenants.models import Tenant
+from decimal import Decimal, InvalidOperation
+from apps.tenants.models import Tenant, TenantPaymentRecord
 from apps.tenants.serializers import TenantSerializer, TenantPermissionsSerializer
 from apps.tenants.permissions import IsSaaSAdmin
 from apps.outlets.models import Outlet
@@ -15,9 +17,39 @@ from apps.accounts.models import User
 from apps.sales.models import Sale
 
 
+class TenantPaymentRecordSerializer(serializers.ModelSerializer):
+    recorded_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TenantPaymentRecord
+        fields = (
+            'id',
+            'tenant',
+            'amount',
+            'reason',
+            'notes',
+            'payment_date',
+            'recorded_by',
+            'recorded_by_name',
+            'created_at',
+        )
+        read_only_fields = (
+            'id',
+            'tenant',
+            'recorded_by',
+            'recorded_by_name',
+            'created_at',
+        )
+
+    def get_recorded_by_name(self, obj):
+        if not obj.recorded_by:
+            return None
+        return obj.recorded_by.name or obj.recorded_by.email
+
+
 class AdminTenantViewSet(viewsets.ModelViewSet):
     """Admin ViewSet for tenant management (SaaS admin only)"""
-    queryset = Tenant.objects.prefetch_related('outlets', 'users').all()
+    queryset = Tenant.objects.prefetch_related('outlets', 'users', 'payment_records').all()
     serializer_class = TenantSerializer
     permission_classes = [IsAuthenticated, IsSaaSAdmin]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
@@ -89,6 +121,70 @@ class AdminTenantViewSet(viewsets.ModelViewSet):
                 response_data['has_distribution'] = tenant.has_distribution
                 return Response(response_data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['get', 'post'], url_path='payments')
+    def payments(self, request, pk=None):
+        """Get tenant payment history or record a new manual payment."""
+        tenant = self.get_object()
+
+        if request.method == 'GET':
+            payment_qs = tenant.payment_records.select_related('recorded_by').all()
+            total_paid = payment_qs.aggregate(total=Sum('amount')).get('total') or 0
+
+            return Response({
+                'tenant_id': str(tenant.id),
+                'tenant_name': tenant.name,
+                'total_paid': float(total_paid),
+                'payment_count': payment_qs.count(),
+                'payments': TenantPaymentRecordSerializer(payment_qs, many=True).data,
+            })
+
+        amount_raw = request.data.get('amount')
+        reason = (request.data.get('reason') or '').strip()
+        notes = (request.data.get('notes') or '').strip()
+
+        if not amount_raw:
+            return Response({'detail': 'Amount is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not reason:
+            return Response({'detail': 'Reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = Decimal(str(amount_raw))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({'detail': 'Amount must be a valid number.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount <= 0:
+            return Response({'detail': 'Amount must be greater than zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_date_raw = request.data.get('payment_date')
+        payment_date = timezone.now()
+        if payment_date_raw:
+            parsed_payment_date = parse_datetime(str(payment_date_raw))
+            if not parsed_payment_date:
+                return Response({'detail': 'payment_date must be a valid ISO datetime.'}, status=status.HTTP_400_BAD_REQUEST)
+            if parsed_payment_date.tzinfo is None:
+                parsed_payment_date = timezone.make_aware(parsed_payment_date, timezone.get_current_timezone())
+            payment_date = parsed_payment_date
+
+        payment = TenantPaymentRecord.objects.create(
+            tenant=tenant,
+            amount=amount,
+            reason=reason,
+            notes=notes,
+            payment_date=payment_date,
+            recorded_by=request.user,
+        )
+
+        payment_qs = tenant.payment_records.all()
+        total_paid = payment_qs.aggregate(total=Sum('amount')).get('total') or 0
+
+        return Response({
+            'message': 'Payment recorded successfully.',
+            'total_paid': float(total_paid),
+            'payment_count': payment_qs.count(),
+            'payment': TenantPaymentRecordSerializer(payment).data,
+        }, status=status.HTTP_201_CREATED)
 
 
 @api_view(['GET'])

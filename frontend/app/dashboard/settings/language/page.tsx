@@ -159,7 +159,7 @@ export default function LanguageSettingsPage() {
                   <span className="text-muted-foreground">
                     {selectedLocale === "en" ? "Total" : "Zonse"}:
                   </span>
-                  <span>MK 0.00</span>
+                  <span>MWK 0.00</span>
                 </div>
               </div>
             </div>

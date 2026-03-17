@@ -14,6 +14,25 @@ export interface AdminTenant {
   users?: number | any[]  // Can be array from backend or number from analytics
   outlets?: number | any[]  // Can be array from backend or number from analytics
   revenue?: number
+  total_manual_payments?: number
+}
+
+export interface TenantPaymentRecord {
+  id: string
+  amount: number
+  reason: string
+  notes?: string
+  payment_date: string
+  recorded_by_name?: string | null
+  created_at: string
+}
+
+export interface TenantPaymentSummary {
+  tenant_id: string
+  tenant_name: string
+  total_paid: number
+  payment_count: number
+  payments: TenantPaymentRecord[]
 }
 
 export interface PlatformAnalytics {
@@ -38,6 +57,7 @@ export const adminService = {
       // If outlets/users are arrays, convert to counts
       outlets: Array.isArray(tenant.outlets) ? tenant.outlets.length : (tenant.outlets || 0),
       users: Array.isArray(tenant.users) ? tenant.users.length : (tenant.users || 0),
+      total_manual_payments: Number((tenant as any).total_manual_payments || 0),
     }))
   },
 
@@ -72,6 +92,25 @@ export const adminService = {
 
   async updateTenantPermissions(tenantId: string, permissions: any): Promise<any> {
     return api.put(`${apiEndpoints.admin.tenants}${tenantId}/permissions/`, permissions)
+  },
+
+  async getTenantPayments(tenantId: string): Promise<TenantPaymentSummary> {
+    const response = await api.get<any>(`${apiEndpoints.admin.tenants}${tenantId}/payments/`)
+    return {
+      ...response,
+      total_paid: Number(response.total_paid || 0),
+      payment_count: Number(response.payment_count || 0),
+      payments: Array.isArray(response.payments)
+        ? response.payments.map((payment: any) => ({
+            ...payment,
+            amount: Number(payment.amount || 0),
+          }))
+        : [],
+    }
+  },
+
+  async recordTenantPayment(tenantId: string, payload: { amount: number; reason: string; notes?: string; payment_date?: string }): Promise<any> {
+    return api.post(`${apiEndpoints.admin.tenants}${tenantId}/payments/`, payload)
   },
 }
 

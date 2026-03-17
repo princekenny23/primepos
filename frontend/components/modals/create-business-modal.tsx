@@ -40,7 +40,7 @@ export function CreateBusinessModal({
     businessType: "" as BusinessType | "",
     posType: "standard" as POSType,
     currency: "MWK",
-    currencySymbol: "MK",
+    currencySymbol: "MWK",
     phone: "",
     email: "",
     address: "",
@@ -117,7 +117,7 @@ export function CreateBusinessModal({
         businessType: "" as BusinessType | "",
         posType: "standard" as POSType,
         currency: "MWK",
-        currencySymbol: "MK",
+        currencySymbol: "MWK",
         phone: "",
         email: "",
         address: "",
@@ -219,7 +219,7 @@ export function CreateBusinessModal({
                   value={formData.currency}
                   onValueChange={(value) => {
                     const symbols: Record<string, string> = {
-                      MWK: "MK",
+                      MWK: "MWK",
                       USD: "$",
                       EUR: "€",
                       GBP: "£",
@@ -227,7 +227,7 @@ export function CreateBusinessModal({
                     setFormData({
                       ...formData,
                       currency: value,
-                      currencySymbol: symbols[value] || "MK",
+                      currencySymbol: symbols[value] || "MWK",
                     })
                   }}
                 >
