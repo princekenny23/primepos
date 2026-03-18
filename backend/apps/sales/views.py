@@ -1,5 +1,6 @@
 from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
+from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
@@ -28,8 +29,16 @@ def _extract_bearer_token(request):
     return auth_header.split(' ', 1)[1].strip()
 
 
+def _extract_device_api_key(request):
+    # Use a dedicated header so DRF JWT auth does not reject non-JWT device keys.
+    header_token = str(request.headers.get('X-Device-API-Key', '') or '').strip()
+    if header_token:
+        return header_token
+    return _extract_bearer_token(request)
+
+
 def _authenticate_device_by_api_key(request):
-    token = _extract_bearer_token(request)
+    token = _extract_device_api_key(request)
     if not token:
         return None
 
@@ -1654,7 +1663,12 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
 
         return queryset
 
-    @action(detail=False, methods=['post'], url_path='claim-next')
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='claim-next',
+        authentication_classes=[SessionAuthentication, BasicAuthentication],
+    )
     def claim_next(self, request):
         """Atomically claim next pending print job for a device."""
         tenant, user, authenticated_device = self._request_actor(request)
@@ -1800,7 +1814,12 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             'device': PrintDeviceSerializer(device).data,
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'], url_path='complete')
+    @action(
+        detail=True,
+        methods=['post'],
+        url_path='complete',
+        authentication_classes=[SessionAuthentication, BasicAuthentication],
+    )
     def complete(self, request, pk=None):
         """Mark claimed job as completed/failed."""
         tenant, user, device = self._request_actor(request)
@@ -2073,7 +2092,12 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         device.save(update_fields=['api_key_hash', 'api_key_revoked', 'api_key_revoked_at', 'updated_at'])
         return Response({'revoked': True, 'device': PrintDeviceSerializer(device).data})
 
-    @action(detail=False, methods=['post'], url_path='heartbeat')
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='heartbeat',
+        authentication_classes=[SessionAuthentication, BasicAuthentication],
+    )
     def heartbeat(self, request):
         device = _authenticate_device_by_api_key(request)
         if not device:

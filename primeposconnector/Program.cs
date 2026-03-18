@@ -459,7 +459,7 @@ static class CloudPoller
             }
         }
 
-        SetBearer(http, deviceApiKey);
+        SetDeviceApiKey(http, deviceApiKey);
 
         var lastHeartbeatAt = DateTime.UtcNow;
 
@@ -755,7 +755,15 @@ static class CloudPoller
 
     private static void SetBearer(HttpClient http, string token)
     {
+        http.DefaultRequestHeaders.Remove("X-Device-API-Key");
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+
+    private static void SetDeviceApiKey(HttpClient http, string apiKey)
+    {
+        http.DefaultRequestHeaders.Authorization = null;
+        http.DefaultRequestHeaders.Remove("X-Device-API-Key");
+        http.DefaultRequestHeaders.Add("X-Device-API-Key", apiKey);
     }
 }
 
