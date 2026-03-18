@@ -99,6 +99,62 @@ app.MapPost("/print", (HttpRequest request, PrintJob job) =>
     return Results.Ok(new { status = "printed", printer = job.PrinterName, copies });
 });
 
+app.MapPost("/cloud/pair/start", async (LocalPairingStartRequest request, CancellationToken cancellationToken) =>
+{
+    var cloud = options.Cloud;
+    if (cloud?.Enabled != true)
+    {
+        return Results.BadRequest(new { error = "Cloud mode is disabled in connector configuration." });
+    }
+
+    var apiBase = (cloud.ApiBaseUrl ?? string.Empty).Trim().TrimEnd('/');
+    if (string.IsNullOrWhiteSpace(apiBase))
+    {
+        return Results.BadRequest(new { error = "Cloud.ApiBaseUrl is required." });
+    }
+
+    var effectiveCloud = CloudPairingBridge.WithOverrides(cloud, request);
+    var channel = string.IsNullOrWhiteSpace(effectiveCloud.Channel) ? "agent" : effectiveCloud.Channel.Trim().ToLowerInvariant();
+    var deviceId = string.IsNullOrWhiteSpace(effectiveCloud.DeviceId) ? Environment.MachineName : effectiveCloud.DeviceId.Trim();
+
+    using var http = CloudPairingBridge.CreateHttpClient(effectiveCloud);
+
+    try
+    {
+        var pairing = await CloudPairingBridge.RequestPairingCodeAsync(http, apiBase, effectiveCloud, channel, deviceId, cancellationToken);
+        RuntimeCloudState.SetPairing(pairing.DeviceId, pairing.PairingCode, pairing.ExpiresAt);
+
+        return Results.Ok(new
+        {
+            paired = false,
+            device_id = pairing.DeviceId,
+            pairing_code = pairing.PairingCode,
+            expires_at = pairing.ExpiresAt,
+            outlet_id = effectiveCloud.OutletId,
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Failed to start connector pairing: {ex.Message}", statusCode: 500);
+    }
+});
+
+app.MapPost("/cloud/pair/activate", (LocalPairingActivateRequest request) =>
+{
+    if (string.IsNullOrWhiteSpace(request.ApiKey))
+    {
+        return Results.BadRequest(new { error = "api_key is required." });
+    }
+
+    RuntimeCloudState.SetDeviceApiKey(request.ApiKey);
+    return Results.Ok(new { activated = true });
+});
+
+app.MapGet("/cloud/pair/state", () =>
+{
+    return Results.Ok(RuntimeCloudState.GetSnapshot());
+});
+
 if (options.Cloud?.Enabled == true)
 {
     app.Lifetime.ApplicationStarted.Register(() =>
@@ -187,6 +243,30 @@ sealed class PrintJob
     public string? JobName { get; set; }
 }
 
+sealed class LocalPairingStartRequest
+{
+    [JsonPropertyName("tenant_id")]
+    public string? TenantId { get; set; }
+
+    [JsonPropertyName("outlet_id")]
+    public string? OutletId { get; set; }
+
+    [JsonPropertyName("device_id")]
+    public string? DeviceId { get; set; }
+
+    [JsonPropertyName("channel")]
+    public string? Channel { get; set; }
+
+    [JsonPropertyName("printer_identifier")]
+    public string? PrinterIdentifier { get; set; }
+}
+
+sealed class LocalPairingActivateRequest
+{
+    [JsonPropertyName("api_key")]
+    public string ApiKey { get; set; } = string.Empty;
+}
+
 sealed class CloudPrintJob
 {
     [JsonPropertyName("id")]
@@ -263,6 +343,10 @@ static class CloudPoller
 
         var bootstrapToken = (cloud.AuthToken ?? string.Empty).Trim();
         var deviceApiKey = (cloud.DeviceApiKey ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(deviceApiKey))
+        {
+            deviceApiKey = RuntimeCloudState.GetDeviceApiKey();
+        }
         var channel = string.IsNullOrWhiteSpace(cloud.Channel) ? "agent" : cloud.Channel.Trim().ToLowerInvariant();
         var deviceId = string.IsNullOrWhiteSpace(cloud.DeviceId) ? Environment.MachineName : cloud.DeviceId.Trim();
         var printerType = NormalizePrinterType(cloud.PrinterType);
@@ -289,6 +373,7 @@ static class CloudPoller
                 if (!string.IsNullOrWhiteSpace(registration.ApiKey))
                 {
                     deviceApiKey = registration.ApiKey.Trim();
+                    RuntimeCloudState.SetDeviceApiKey(deviceApiKey);
                     Console.WriteLine("[CloudPoller] Device API key received from registration.");
                 }
             }
@@ -314,7 +399,16 @@ static class CloudPoller
                     if (pairingStatus?.Paired == true && !string.IsNullOrWhiteSpace(pairingStatus.ApiKey))
                     {
                         deviceApiKey = pairingStatus.ApiKey.Trim();
+                        RuntimeCloudState.SetDeviceApiKey(deviceApiKey);
                         Console.WriteLine("[CloudPoller] Device paired and API key received.");
+                        break;
+                    }
+
+                    var runtimeKey = RuntimeCloudState.GetDeviceApiKey();
+                    if (!string.IsNullOrWhiteSpace(runtimeKey))
+                    {
+                        deviceApiKey = runtimeKey;
+                        Console.WriteLine("[CloudPoller] Using runtime API key provided by local pairing flow.");
                         break;
                     }
 
@@ -631,6 +725,157 @@ static class CloudPoller
     private static void SetBearer(HttpClient http, string token)
     {
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    }
+}
+
+static class CloudPairingBridge
+{
+    public static HttpClient CreateHttpClient(CloudOptions cloud)
+    {
+        var http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(20),
+        };
+
+        if (!string.IsNullOrWhiteSpace(cloud.TenantId))
+        {
+            http.DefaultRequestHeaders.Add("X-Tenant-ID", cloud.TenantId.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(cloud.OutletId))
+        {
+            http.DefaultRequestHeaders.Add("X-Outlet-ID", cloud.OutletId.Trim());
+        }
+
+        return http;
+    }
+
+    public static CloudOptions WithOverrides(CloudOptions source, LocalPairingStartRequest request)
+    {
+        return new CloudOptions
+        {
+            Enabled = source.Enabled,
+            ApiBaseUrl = source.ApiBaseUrl,
+            DeviceApiKey = source.DeviceApiKey,
+            AuthToken = source.AuthToken,
+            TenantId = string.IsNullOrWhiteSpace(request.TenantId) ? source.TenantId : request.TenantId,
+            OutletId = string.IsNullOrWhiteSpace(request.OutletId) ? source.OutletId : request.OutletId,
+            DeviceId = string.IsNullOrWhiteSpace(request.DeviceId) ? source.DeviceId : request.DeviceId,
+            PrinterType = source.PrinterType,
+            Channel = string.IsNullOrWhiteSpace(request.Channel) ? source.Channel : request.Channel,
+            PollIntervalSeconds = source.PollIntervalSeconds,
+            DefaultPrinter = string.IsNullOrWhiteSpace(request.PrinterIdentifier) ? source.DefaultPrinter : request.PrinterIdentifier,
+        };
+    }
+
+    public static Task<DevicePairingRequestResponse> RequestPairingCodeAsync(
+        HttpClient http,
+        string apiBase,
+        CloudOptions cloud,
+        string channel,
+        string deviceId,
+        CancellationToken ct)
+    {
+        return CloudPollerRequestPairingCode(http, apiBase, cloud, channel, deviceId, ct);
+    }
+
+    private static async Task<DevicePairingRequestResponse> CloudPollerRequestPairingCode(
+        HttpClient http,
+        string apiBase,
+        CloudOptions cloud,
+        string channel,
+        string deviceId,
+        CancellationToken ct)
+    {
+        int? outletId = null;
+        if (int.TryParse((cloud.OutletId ?? string.Empty).Trim(), out var parsedOutletId))
+        {
+            outletId = parsedOutletId;
+        }
+
+        int? tenantId = null;
+        if (int.TryParse((cloud.TenantId ?? string.Empty).Trim(), out var parsedTenantId))
+        {
+            tenantId = parsedTenantId;
+        }
+
+        var endpoint = $"{apiBase}/devices/pairing/request/";
+        var payload = new
+        {
+            device_id = deviceId,
+            name = Environment.MachineName,
+            channel,
+            outlet_id = outletId,
+            tenant_id = tenantId,
+            printer_identifier = (cloud.DefaultPrinter ?? string.Empty).Trim(),
+        };
+
+        using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Pairing request failed {(int)response.StatusCode}: {body}");
+        }
+
+        var result = await response.Content.ReadFromJsonAsync<DevicePairingRequestResponse>(cancellationToken: ct);
+        if (result is null || string.IsNullOrWhiteSpace(result.PairingCode))
+        {
+            throw new InvalidOperationException("Pairing request did not return a valid pairing code.");
+        }
+        return result;
+    }
+}
+
+static class RuntimeCloudState
+{
+    private static readonly object Sync = new();
+    private static string _deviceApiKey = string.Empty;
+    private static string _deviceId = string.Empty;
+    private static string _pairingCode = string.Empty;
+    private static DateTime? _expiresAt;
+
+    public static string GetDeviceApiKey()
+    {
+        lock (Sync)
+        {
+            return _deviceApiKey;
+        }
+    }
+
+    public static void SetDeviceApiKey(string apiKey)
+    {
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return;
+        }
+
+        lock (Sync)
+        {
+            _deviceApiKey = apiKey.Trim();
+        }
+    }
+
+    public static void SetPairing(string deviceId, string pairingCode, DateTime? expiresAt)
+    {
+        lock (Sync)
+        {
+            _deviceId = deviceId;
+            _pairingCode = pairingCode;
+            _expiresAt = expiresAt;
+        }
+    }
+
+    public static object GetSnapshot()
+    {
+        lock (Sync)
+        {
+            return new
+            {
+                has_api_key = !string.IsNullOrWhiteSpace(_deviceApiKey),
+                device_id = _deviceId,
+                pairing_code = _pairingCode,
+                expires_at = _expiresAt,
+            };
+        }
     }
 }
 

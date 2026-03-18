@@ -81,6 +81,7 @@ export function PrinterSettings() {
   const [deviceApiKey, setDeviceApiKey] = useState("")
   const [pairedDevicePk, setPairedDevicePk] = useState<string>("")
   const [pairingCode, setPairingCode] = useState("")
+  const [isAutoPairing, setIsAutoPairing] = useState(false)
   const [rawOutputVisible, setRawOutputVisible] = useState(false)
   const [rawPrinters, setRawPrinters] = useState<any>(null)
   const [extraPrinters, setExtraPrinters] = useState<string[]>([])
@@ -366,6 +367,83 @@ export function PrinterSettings() {
     }
   }
 
+  const autoPairCurrentConnector = async () => {
+    if (!isLocalHost) {
+      toast({
+        title: "Auto-pair requires localhost",
+        description: "Open this settings page on the machine running PrimePOS connector.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!currentOutlet) {
+      toast({ title: "No outlet", description: "Select an outlet before pairing device." })
+      return
+    }
+
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    if (!outletId) {
+      toast({ title: "Invalid outlet", description: "Select a valid outlet first." })
+      return
+    }
+
+    setIsAutoPairing(true)
+    try {
+      const localStartResponse = await agentFetch("/cloud/pair/start", {
+        method: "POST",
+        body: JSON.stringify({
+          outlet_id: String(outletId),
+          printer_identifier: selectedPrinter || "",
+        }),
+      })
+      const localStart = await localStartResponse.json().catch(() => ({}))
+      const generatedPairingCode = String(localStart?.pairing_code || "").trim()
+
+      if (!generatedPairingCode) {
+        throw new Error("Connector did not return a pairing code.")
+      }
+
+      const claimPayload: any = {
+        pairing_code: generatedPairingCode,
+        outlet_id: outletId,
+        printer_identifier: selectedPrinter || "",
+      }
+
+      const claimResult: any = await api.post("/devices/pairing/claim/", claimPayload)
+      const apiKey = String(claimResult?.api_key || "").trim()
+      const devicePk = String(claimResult?.device?.id || "").trim()
+
+      if (!apiKey) {
+        throw new Error("Pairing succeeded but no device API key was returned.")
+      }
+
+      await agentFetch("/cloud/pair/activate", {
+        method: "POST",
+        body: JSON.stringify({ api_key: apiKey }),
+      })
+
+      setDeviceApiKey(apiKey)
+      if (typeof window !== "undefined") {
+        localStorage.setItem(getDeviceApiKeyStorageKey(outletId), apiKey)
+      }
+
+      if (devicePk) {
+        setPairedDevicePk(devicePk)
+        if (typeof window !== "undefined") {
+          localStorage.setItem(getDevicePkStorageKey(outletId), devicePk)
+        }
+      }
+
+      setPairingCode("")
+      toast({ title: "Connector paired", description: "This machine is now paired without manual code entry." })
+    } catch (err: any) {
+      toast({ title: "Auto-pair failed", description: err?.message || "Unable to pair connector.", variant: "destructive" })
+    } finally {
+      setIsAutoPairing(false)
+    }
+  }
+
   const rotateDeviceApiKey = async () => {
     if (!pairedDevicePk) {
       toast({ title: "No paired device", description: "Pair this device first." })
@@ -517,8 +595,13 @@ export function PrinterSettings() {
         <div className="rounded border p-3 text-sm space-y-2">
           <div className="font-medium">Device Pairing</div>
           <p className="text-xs text-muted-foreground">
-            Start connector without API key, copy the 6-digit pairing code from connector logs, and enter it here.
+            Pair this connector from frontend in one click, or enter code manually if needed.
           </p>
+          <div className="flex gap-2">
+            <Button onClick={autoPairCurrentConnector} disabled={isAutoPairing || !isLocalHost}>
+              {isAutoPairing ? "Pairing..." : "Pair This Connector"}
+            </Button>
+          </div>
           <div className="flex gap-2">
             <Input
               value={pairingCode}
