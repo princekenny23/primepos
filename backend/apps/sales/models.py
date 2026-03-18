@@ -2,6 +2,8 @@ from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
 from django.contrib.auth.hashers import make_password, check_password
+from datetime import timedelta
+import secrets
 from decimal import Decimal
 from apps.tenants.models import Tenant
 from apps.outlets.models import Outlet
@@ -505,6 +507,14 @@ class PrintDevice(models.Model):
     device_id = models.CharField(max_length=100)
     name = models.CharField(max_length=120, blank=True, default='')
     api_key_hash = models.CharField(max_length=255, blank=True, default='')
+    api_key_pending = models.CharField(max_length=255, blank=True, default='')
+    api_key_created_at = models.DateTimeField(null=True, blank=True)
+    api_key_last_used_at = models.DateTimeField(null=True, blank=True)
+    api_key_revoked = models.BooleanField(default=False)
+    api_key_revoked_at = models.DateTimeField(null=True, blank=True)
+    pairing_code = models.CharField(max_length=6, blank=True, default='')
+    pairing_expires_at = models.DateTimeField(null=True, blank=True)
+    paired_at = models.DateTimeField(null=True, blank=True)
     channel = models.CharField(max_length=20, choices=CHANNEL_CHOICES, default='agent')
     printer_identifier = models.CharField(max_length=255, blank=True, default='')
     is_active = models.BooleanField(default=True)
@@ -533,11 +543,33 @@ class PrintDevice(models.Model):
         if not raw_key:
             raise ValueError('raw_key is required')
         self.api_key_hash = make_password(raw_key)
+        self.api_key_pending = ''
+        self.api_key_created_at = timezone.now()
+        self.api_key_last_used_at = None
+        self.api_key_revoked = False
+        self.api_key_revoked_at = None
 
     def check_api_key(self, raw_key: str) -> bool:
+        if self.api_key_revoked:
+            return False
         if not raw_key or not self.api_key_hash:
             return False
         return check_password(raw_key, self.api_key_hash)
+
+    def issue_pairing_code(self, ttl_minutes: int = 10) -> str:
+        self.pairing_code = f"{secrets.randbelow(1_000_000):06d}"
+        self.pairing_expires_at = timezone.now() + timedelta(minutes=max(1, ttl_minutes))
+        return self.pairing_code
+
+    def clear_pairing_code(self):
+        self.pairing_code = ''
+        self.pairing_expires_at = None
+
+    def revoke_api_key(self):
+        self.api_key_hash = ''
+        self.api_key_pending = ''
+        self.api_key_revoked = True
+        self.api_key_revoked_at = timezone.now()
 
 
 class Printer(models.Model):

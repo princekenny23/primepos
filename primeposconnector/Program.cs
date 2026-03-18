@@ -220,6 +220,30 @@ sealed class CloudDeviceRegistrationResponse
     public string? ApiKey { get; set; }
 }
 
+sealed class DevicePairingRequestResponse
+{
+    [JsonPropertyName("device_id")]
+    public string DeviceId { get; set; } = string.Empty;
+
+    [JsonPropertyName("pairing_code")]
+    public string PairingCode { get; set; } = string.Empty;
+
+    [JsonPropertyName("expires_at")]
+    public DateTime? ExpiresAt { get; set; }
+}
+
+sealed class DevicePairingStatusResponse
+{
+    [JsonPropertyName("paired")]
+    public bool Paired { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = string.Empty;
+
+    [JsonPropertyName("api_key")]
+    public string? ApiKey { get; set; }
+}
+
 static class CloudPoller
 {
     public static async Task RunAsync(AgentOptions options, CancellationToken stoppingToken)
@@ -257,23 +281,56 @@ static class CloudPoller
 
         Console.WriteLine($"[CloudPoller] Running. api={apiBase} channel={channel} device={deviceId} printerType={printerType}");
 
-        try
+        if (string.IsNullOrWhiteSpace(deviceApiKey) && !string.IsNullOrWhiteSpace(bootstrapToken))
         {
-            var registration = await RegisterDeviceAsync(http, apiBase, cloud, channel, deviceId, bootstrapToken, ct: stoppingToken);
-            if (!string.IsNullOrWhiteSpace(registration.ApiKey))
+            try
             {
-                deviceApiKey = registration.ApiKey.Trim();
-                Console.WriteLine("[CloudPoller] Device API key received from registration.");
+                var registration = await RegisterDeviceAsync(http, apiBase, cloud, channel, deviceId, bootstrapToken, ct: stoppingToken);
+                if (!string.IsNullOrWhiteSpace(registration.ApiKey))
+                {
+                    deviceApiKey = registration.ApiKey.Trim();
+                    Console.WriteLine("[CloudPoller] Device API key received from registration.");
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[CloudPoller] Device registration warning: {ex.Message}");
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CloudPoller] Device registration warning: {ex.Message}");
+            }
         }
 
         if (string.IsNullOrWhiteSpace(deviceApiKey))
         {
-            Console.WriteLine("[CloudPoller] Missing DeviceApiKey. Set Cloud:DeviceApiKey or provide bootstrap AuthToken for registration.");
+            try
+            {
+                var pairing = await RequestPairingCodeAsync(http, apiBase, cloud, channel, deviceId, stoppingToken);
+                if (!string.IsNullOrWhiteSpace(pairing.PairingCode))
+                {
+                    Console.WriteLine($"[CloudPoller] Enter pairing code in frontend: {pairing.PairingCode}");
+                }
+
+                while (!stoppingToken.IsCancellationRequested && string.IsNullOrWhiteSpace(deviceApiKey))
+                {
+                    var pairingStatus = await PollPairingStatusAsync(http, apiBase, cloud, deviceId, pairing.PairingCode, stoppingToken);
+                    if (pairingStatus?.Paired == true && !string.IsNullOrWhiteSpace(pairingStatus.ApiKey))
+                    {
+                        deviceApiKey = pairingStatus.ApiKey.Trim();
+                        Console.WriteLine("[CloudPoller] Device paired and API key received.");
+                        break;
+                    }
+
+                    Console.WriteLine("[CloudPoller] Waiting for frontend pairing confirmation...");
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Max(3, pollSeconds)), stoppingToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CloudPoller] Pairing bootstrap warning: {ex.Message}");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(deviceApiKey))
+        {
+            Console.WriteLine("[CloudPoller] Missing DeviceApiKey. Pair device in frontend or provide bootstrap AuthToken.");
             return;
         }
 
@@ -467,6 +524,84 @@ static class CloudPoller
             var body = await response.Content.ReadAsStringAsync(ct);
             throw new InvalidOperationException($"Heartbeat failed {(int)response.StatusCode}: {body}");
         }
+    }
+
+    private static async Task<DevicePairingRequestResponse> RequestPairingCodeAsync(
+        HttpClient http,
+        string apiBase,
+        CloudOptions cloud,
+        string channel,
+        string deviceId,
+        CancellationToken ct)
+    {
+        int? outletId = null;
+        if (int.TryParse((cloud.OutletId ?? string.Empty).Trim(), out var parsedOutletId))
+        {
+            outletId = parsedOutletId;
+        }
+
+        int? tenantId = null;
+        if (int.TryParse((cloud.TenantId ?? string.Empty).Trim(), out var parsedTenantId))
+        {
+            tenantId = parsedTenantId;
+        }
+
+        var endpoint = $"{apiBase}/devices/pairing/request/";
+        var payload = new
+        {
+            device_id = deviceId,
+            name = Environment.MachineName,
+            channel,
+            outlet_id = outletId,
+            tenant_id = tenantId,
+            printer_identifier = (cloud.DefaultPrinter ?? string.Empty).Trim(),
+        };
+
+        using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Pairing request failed {(int)response.StatusCode}: {body}");
+        }
+
+        var result = await response.Content.ReadFromJsonAsync<DevicePairingRequestResponse>(cancellationToken: ct);
+        if (result is null || string.IsNullOrWhiteSpace(result.PairingCode))
+        {
+            throw new InvalidOperationException("Pairing request did not return a valid pairing code.");
+        }
+        return result;
+    }
+
+    private static async Task<DevicePairingStatusResponse?> PollPairingStatusAsync(
+        HttpClient http,
+        string apiBase,
+        CloudOptions cloud,
+        string deviceId,
+        string pairingCode,
+        CancellationToken ct)
+    {
+        int? tenantId = null;
+        if (int.TryParse((cloud.TenantId ?? string.Empty).Trim(), out var parsedTenantId))
+        {
+            tenantId = parsedTenantId;
+        }
+
+        var endpoint = $"{apiBase}/devices/pairing/status/";
+        var payload = new
+        {
+            device_id = deviceId,
+            pairing_code = pairingCode,
+            tenant_id = tenantId,
+        };
+
+        using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Pairing status failed {(int)response.StatusCode}: {body}");
+        }
+
+        return await response.Content.ReadFromJsonAsync<DevicePairingStatusResponse>(cancellationToken: ct);
     }
 
     private static async Task CompleteAsync(

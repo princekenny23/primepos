@@ -17,6 +17,8 @@ const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
 const PRINT_DEVICE_ID_STORAGE_KEY = "printDeviceId"
+const PRINT_DEVICE_API_KEY_STORAGE_PREFIX = "printDeviceApiKey"
+const PRINT_DEVICE_PK_STORAGE_PREFIX = "printDevicePk"
 type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
 function encodeTextToBase64(text: string): string {
@@ -76,6 +78,9 @@ export function PrinterSettings() {
   const [selectedPrinter, setSelectedPrinter] = useState<string>("")
   const [isScanning, setIsScanning] = useState(false)
   const [manualPrinter, setManualPrinter] = useState("")
+  const [deviceApiKey, setDeviceApiKey] = useState("")
+  const [pairedDevicePk, setPairedDevicePk] = useState<string>("")
+  const [pairingCode, setPairingCode] = useState("")
   const [rawOutputVisible, setRawOutputVisible] = useState(false)
   const [rawPrinters, setRawPrinters] = useState<any>(null)
   const [extraPrinters, setExtraPrinters] = useState<string[]>([])
@@ -262,6 +267,12 @@ export function PrinterSettings() {
   const getOutletStorageKey = (outletId?: number | string | null) =>
     outletId ? `defaultPrinter:${outletId}` : "defaultPrinter"
 
+  const getDeviceApiKeyStorageKey = (outletId?: number | string | null) =>
+    outletId ? `${PRINT_DEVICE_API_KEY_STORAGE_PREFIX}:${outletId}` : PRINT_DEVICE_API_KEY_STORAGE_PREFIX
+
+  const getDevicePkStorageKey = (outletId?: number | string | null) =>
+    outletId ? `${PRINT_DEVICE_PK_STORAGE_PREFIX}:${outletId}` : PRINT_DEVICE_PK_STORAGE_PREFIX
+
   const loadDefaultPrinter = async () => {
     if (!currentOutlet) return
     const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
@@ -292,6 +303,111 @@ export function PrinterSettings() {
   useEffect(() => {
     loadDefaultPrinter()
   }, [currentOutlet])
+
+  useEffect(() => {
+    if (!currentOutlet || typeof window === "undefined") {
+      setDeviceApiKey("")
+      return
+    }
+
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    if (!outletId) {
+      setDeviceApiKey("")
+      return
+    }
+
+    const stored = localStorage.getItem(getDeviceApiKeyStorageKey(outletId)) || ""
+    setDeviceApiKey(stored)
+
+    const storedPk = localStorage.getItem(getDevicePkStorageKey(outletId)) || ""
+    setPairedDevicePk(storedPk)
+  }, [currentOutlet])
+
+  const pairDeviceWithCode = async () => {
+    if (!currentOutlet) {
+      toast({ title: "No outlet", description: "Select an outlet before pairing device." })
+      return
+    }
+    if (!pairingCode.trim()) {
+      toast({ title: "Pairing code required", description: "Enter the 6-digit code shown by connector." })
+      return
+    }
+
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    try {
+      const payload: any = {
+        pairing_code: pairingCode.trim(),
+        outlet_id: outletId,
+        printer_identifier: selectedPrinter || "",
+      }
+
+      const result: any = await api.post("/devices/pairing/claim/", payload)
+      const apiKey = String(result?.api_key || "").trim()
+      const devicePk = String(result?.device?.id || "").trim()
+
+      if (apiKey) {
+        setDeviceApiKey(apiKey)
+        if (typeof window !== "undefined") {
+          localStorage.setItem(getDeviceApiKeyStorageKey(outletId), apiKey)
+        }
+      }
+
+      if (devicePk) {
+        setPairedDevicePk(devicePk)
+        if (typeof window !== "undefined") {
+          localStorage.setItem(getDevicePkStorageKey(outletId), devicePk)
+        }
+      }
+
+      setPairingCode("")
+      toast({ title: "Device paired", description: "Connector API key has been issued for this outlet." })
+    } catch (err: any) {
+      toast({ title: "Pairing failed", description: err?.message || "Invalid/expired pairing code.", variant: "destructive" })
+    }
+  }
+
+  const rotateDeviceApiKey = async () => {
+    if (!pairedDevicePk) {
+      toast({ title: "No paired device", description: "Pair this device first." })
+      return
+    }
+    if (!currentOutlet) return
+
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    try {
+      const result: any = await api.post(`/devices/${pairedDevicePk}/rotate-api-key/`, {})
+      const apiKey = String(result?.api_key || "").trim()
+      if (apiKey) {
+        setDeviceApiKey(apiKey)
+        if (typeof window !== "undefined") {
+          localStorage.setItem(getDeviceApiKeyStorageKey(outletId), apiKey)
+        }
+      }
+      toast({ title: "API key rotated", description: "Update connector Cloud.DeviceApiKey with the new key." })
+    } catch (err: any) {
+      toast({ title: "Rotation failed", description: err?.message || "Unable to rotate API key.", variant: "destructive" })
+    }
+  }
+
+  const revokeDeviceApiKey = async () => {
+    if (!pairedDevicePk) {
+      toast({ title: "No paired device", description: "Pair this device first." })
+      return
+    }
+    if (!currentOutlet) return
+
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    try {
+      await api.post(`/devices/${pairedDevicePk}/revoke-api-key/`, {})
+      setDeviceApiKey("")
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(getDeviceApiKeyStorageKey(outletId))
+      }
+      toast({ title: "API key revoked", description: "Compromised key disabled. Pair or rotate to issue a new one." })
+    } catch (err: any) {
+      toast({ title: "Revoke failed", description: err?.message || "Unable to revoke API key.", variant: "destructive" })
+    }
+  }
 
   const saveSelection = async () => {
     if (!selectedPrinter) {
@@ -330,16 +446,41 @@ export function PrinterSettings() {
         localStorage.setItem(getOutletStorageKey(outletId), selectedPrinter)
       }
 
-      const deviceId = getOrCreatePrintDeviceId()
-      if (deviceId) {
-        await api.post('/print-jobs/register-device/', {
-          device_id: deviceId,
-          outlet_id: outletId,
-          printer_identifier: selectedPrinter,
-          channel: "agent",
-          is_active: true,
-        })
+      if (pairedDevicePk) {
+        try {
+          const cloudPrinters: any = await api.get(`/cloud-printers/?outlet=${outletId}&device=${pairedDevicePk}`)
+          const list = Array.isArray(cloudPrinters) ? cloudPrinters : (cloudPrinters.results || [])
+          const existingCloud = list.find((p: any) => String(p.identifier || p.name) === String(selectedPrinter))
+
+          if (existingCloud) {
+            await api.patch(`/cloud-printers/${existingCloud.id}/`, {
+              name: selectedPrinter,
+              identifier: selectedPrinter,
+              printer_type: "receipt",
+              is_default: true,
+              is_active: true,
+            })
+          } else {
+            await api.post('/cloud-printers/', {
+              outlet: outletId,
+              device: Number(pairedDevicePk),
+              name: selectedPrinter,
+              identifier: selectedPrinter,
+              printer_type: "receipt",
+              connection_type: "usb",
+              is_default: true,
+              is_active: true,
+            })
+          }
+          toast({ title: "Cloud printer assigned", description: `Assigned ${selectedPrinter} to paired connector device.` })
+        } catch (assignmentErr: any) {
+          toast({ title: "Device assignment warning", description: assignmentErr?.message || "Printer saved, but device assignment failed.", variant: "destructive" })
+        }
+      } else {
+        toast({ title: "Pair device required", description: "Printer saved for outlet, but no connector device is paired yet." })
       }
+
+      // Printer configuration intentionally stays separate from device pairing.
     } catch (err: any) {
       console.error("Error saving printer", err)
       toast({ title: "Save failed", description: err?.message || "Failed to save printer settings." })
@@ -371,6 +512,61 @@ export function PrinterSettings() {
           <p className="text-xs text-muted-foreground">
             Set NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL and NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN in your frontend environment.
           </p>
+        </div>
+
+        <div className="rounded border p-3 text-sm space-y-2">
+          <div className="font-medium">Device Pairing</div>
+          <p className="text-xs text-muted-foreground">
+            Start connector without API key, copy the 6-digit pairing code from connector logs, and enter it here.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              value={pairingCode}
+              onChange={(e) => setPairingCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="Enter 6-digit pairing code"
+            />
+            <Button onClick={pairDeviceWithCode}>Pair Device</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Pairing links this connector device to your outlet and issues a secure API key.
+          </p>
+        </div>
+
+        <div className="rounded border p-3 text-sm space-y-2">
+          <div className="font-medium">Cloud Connector API Key</div>
+          <p className="text-xs text-muted-foreground">
+            Use this value in Windows connector appsettings under Cloud.DeviceApiKey.
+          </p>
+          <Input
+            value={deviceApiKey || "No API key issued yet. Save default printer to register this device."}
+            readOnly
+          />
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                if (!deviceApiKey) {
+                  toast({ title: "No key", description: "Save default printer first to obtain API key." })
+                  return
+                }
+                try {
+                  await navigator.clipboard.writeText(deviceApiKey)
+                  toast({ title: "Copied", description: "Device API key copied to clipboard." })
+                } catch {
+                  toast({ title: "Copy failed", description: "Unable to copy API key.", variant: "destructive" })
+                }
+              }}
+            >
+              Copy Key
+            </Button>
+            <Button variant="outline" size="sm" onClick={rotateDeviceApiKey}>
+              Rotate Key
+            </Button>
+            <Button variant="outline" size="sm" onClick={revokeDeviceApiKey}>
+              Revoke Key
+            </Button>
+          </div>
         </div>
 
         <div className="rounded border p-3 text-sm space-y-3">

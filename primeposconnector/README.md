@@ -29,8 +29,8 @@ Edit `appsettings.json`:
 - `Security:Token` can be set to a shared secret. If set, clients must send `X-Primepos-Token`.
 - `Cloud:Enabled` set to `true` to enable auto-print polling from backend.
 - `Cloud:ApiBaseUrl` set to your API base, e.g. `https://your-backend-domain/api/v1`
-- `Cloud:DeviceApiKey` set to the device API key returned by `register-device`.
-- `Cloud:AuthToken` optional bootstrap JWT for first-time `register-device` only.
+- `Cloud:DeviceApiKey` can be left empty on first run. Connector will request a pairing code.
+- `Cloud:AuthToken` optional bootstrap JWT for legacy first-time `register-device` only.
 - `Cloud:TenantId` and `Cloud:OutletId` should match the outlet this connector prints for.
 - `Cloud:DeviceId` optional (defaults to machine name).
 - `Cloud:PrinterType` should be `receipt`, `kitchen`, or `bar`.
@@ -45,10 +45,17 @@ Edit `appsettings.json`:
 ## Cloud Auto-Print Flow
 
 1. Frontend enqueues print jobs to backend.
-2. Connector registers device at `POST /print-jobs/register-device/` (bootstrap only).
-3. Connector claims jobs from `POST /print-jobs/claim-next/` using Device API key.
-4. Connector sends heartbeat to `POST /devices/heartbeat/`.
-5. Connector prints RAW bytes locally and marks result with `POST /print-jobs/{id}/complete/`.
+2. Connector (without API key) requests pairing code from `POST /devices/pairing/request/`.
+3. User enters code in frontend settings; frontend confirms pairing with `POST /devices/pairing/claim/`.
+4. Connector polls `POST /devices/pairing/status/` and auto-receives API key.
+5. Frontend separately assigns printers to the paired device via `/cloud-printers/`.
+6. Connector claims jobs from `POST /print-jobs/claim-next/`, sends `POST /devices/heartbeat/`, and completes jobs.
+
+## API Key Lifecycle
+
+- Metadata tracked server-side: `api_key_created_at`, `api_key_last_used_at`, `api_key_revoked`, `api_key_revoked_at`.
+- Manual rotation endpoint: `POST /devices/{id}/rotate-api-key/`.
+- Compromise recovery endpoint: `POST /devices/{id}/revoke-api-key/`.
 
 Print payload example:
 

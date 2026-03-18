@@ -318,10 +318,15 @@ class PrintDeviceSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'outlet', 'registered_by',
             'device_id', 'name', 'channel', 'printer_identifier',
             'is_active', 'last_seen_at', 'printer_status',
+            'api_key_created_at', 'api_key_last_used_at', 'api_key_revoked', 'api_key_revoked_at',
+            'pairing_code', 'pairing_expires_at', 'paired_at',
             'created_at', 'updated_at'
         )
         read_only_fields = (
-            'id', 'tenant', 'registered_by', 'last_seen_at', 'created_at', 'updated_at'
+            'id', 'tenant', 'registered_by', 'last_seen_at',
+            'api_key_created_at', 'api_key_last_used_at', 'api_key_revoked', 'api_key_revoked_at',
+            'pairing_code', 'pairing_expires_at', 'paired_at',
+            'created_at', 'updated_at'
         )
 
 

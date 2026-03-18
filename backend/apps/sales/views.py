@@ -36,6 +36,8 @@ def _authenticate_device_by_api_key(request):
     # API keys are hashed, so we verify against active devices.
     for device in PrintDevice.objects.select_related('tenant', 'outlet').filter(is_active=True):
         if device.check_api_key(token):
+            device.api_key_last_used_at = timezone.now()
+            device.save(update_fields=['api_key_last_used_at', 'updated_at'])
             return device
     return None
 
@@ -1776,7 +1778,20 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         if rotate_api_key:
             raw_api_key = secrets.token_urlsafe(48)
             device.set_api_key(raw_api_key)
-            device.save(update_fields=['api_key_hash', 'updated_at'])
+            device.paired_at = timezone.now()
+            device.clear_pairing_code()
+            device.save(update_fields=[
+                'api_key_hash',
+                'api_key_pending',
+                'api_key_created_at',
+                'api_key_last_used_at',
+                'api_key_revoked',
+                'api_key_revoked_at',
+                'paired_at',
+                'pairing_code',
+                'pairing_expires_at',
+                'updated_at',
+            ])
 
         return Response({
             'registered': True,
@@ -1848,6 +1863,215 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         if not device:
             return PrintDevice.objects.none()
         return PrintDevice.objects.filter(pk=device.pk)
+
+    def _resolve_authenticated_user_tenant(self, request):
+        user = request.user
+        if not getattr(user, 'is_authenticated', False):
+            return None, None
+        tenant = getattr(request, 'tenant', None) or getattr(user, 'tenant', None)
+        return user, tenant
+
+    @action(detail=False, methods=['post'], url_path='pairing/request')
+    def pairing_request(self, request):
+        """Connector requests short-lived pairing code without API key."""
+        device_id = str(request.data.get('device_id', '') or '').strip()
+        if not device_id:
+            return Response({'detail': 'device_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        channel = str(request.data.get('channel', 'agent') or 'agent').strip().lower()
+        if channel not in ['agent', 'mobile']:
+            channel = 'agent'
+
+        outlet = None
+        outlet_id = request.data.get('outlet_id')
+        if outlet_id not in (None, ''):
+            try:
+                outlet_id = int(outlet_id)
+                from apps.outlets.models import Outlet
+                outlet = Outlet.objects.filter(id=outlet_id).first()
+            except (ValueError, TypeError):
+                outlet = None
+
+        tenant = getattr(outlet, 'tenant', None)
+        if not tenant:
+            fallback_tenant = str(request.data.get('tenant_id', '') or '').strip()
+            if fallback_tenant:
+                try:
+                    from apps.tenants.models import Tenant
+                    tenant = Tenant.objects.get(id=int(fallback_tenant))
+                except Exception:
+                    tenant = None
+        if not tenant:
+            return Response({'detail': 'tenant_id or valid outlet_id is required for pairing.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device, _ = PrintDevice.objects.update_or_create(
+            tenant=tenant,
+            device_id=device_id,
+            defaults={
+                'name': str(request.data.get('name', '') or '').strip() or device_id,
+                'channel': channel,
+                'outlet': outlet,
+                'printer_identifier': str(request.data.get('printer_identifier', '') or '').strip(),
+                'is_active': True,
+                'last_seen_at': timezone.now(),
+            },
+        )
+
+        code = device.issue_pairing_code(ttl_minutes=10)
+        device.save(update_fields=['pairing_code', 'pairing_expires_at', 'updated_at'])
+
+        return Response({
+            'device_id': device.device_id,
+            'pairing_code': code,
+            'expires_at': device.pairing_expires_at,
+            'message': 'Enter this pairing code in frontend device pairing screen.',
+        })
+
+    @action(detail=False, methods=['post'], url_path='pairing/claim', permission_classes=[IsAuthenticated])
+    def pairing_claim(self, request):
+        """Frontend claims pairing code and issues API key to connector device."""
+        user, tenant = self._resolve_authenticated_user_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant context is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        code = str(request.data.get('pairing_code', '') or '').strip()
+        if not code:
+            return Response({'detail': 'pairing_code is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        requested_device_id = str(request.data.get('device_id', '') or '').strip()
+
+        now = timezone.now()
+        device = PrintDevice.objects.filter(
+            tenant=tenant,
+            pairing_code=code,
+            pairing_expires_at__gt=now,
+            is_active=True,
+        ).first()
+        if not device:
+            return Response({'detail': 'Invalid or expired pairing code.'}, status=status.HTTP_404_NOT_FOUND)
+        if requested_device_id and device.device_id != requested_device_id:
+            return Response({'detail': 'Pairing code does not match device_id.'}, status=status.HTTP_403_FORBIDDEN)
+
+        outlet = None
+        outlet_id = request.data.get('outlet_id')
+        if outlet_id not in (None, ''):
+            try:
+                from apps.outlets.models import Outlet
+                outlet = Outlet.objects.get(id=int(outlet_id), tenant=tenant)
+            except Exception:
+                return Response({'detail': 'Invalid outlet_id for current tenant.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_api_key = secrets.token_urlsafe(48)
+        device.set_api_key(raw_api_key)
+        device.api_key_pending = raw_api_key
+        device.paired_at = now
+        device.registered_by = user
+        if outlet:
+            device.outlet = outlet
+        printer_identifier = str(request.data.get('printer_identifier', '') or '').strip()
+        if printer_identifier:
+            device.printer_identifier = printer_identifier
+        device.clear_pairing_code()
+        device.save(update_fields=[
+            'api_key_hash',
+            'api_key_pending',
+            'api_key_created_at',
+            'api_key_last_used_at',
+            'api_key_revoked',
+            'api_key_revoked_at',
+            'paired_at',
+            'registered_by',
+            'outlet',
+            'printer_identifier',
+            'pairing_code',
+            'pairing_expires_at',
+            'updated_at',
+        ])
+
+        return Response({
+            'paired': True,
+            'device': PrintDeviceSerializer(device).data,
+            'api_key': raw_api_key,
+        })
+
+    @action(detail=False, methods=['post'], url_path='pairing/status')
+    def pairing_status(self, request):
+        """Connector polls pairing status to auto-receive API key."""
+        device_id = str(request.data.get('device_id', '') or '').strip()
+        code = str(request.data.get('pairing_code', '') or '').strip()
+        tenant_id = str(request.data.get('tenant_id', '') or '').strip()
+        if not device_id or not code:
+            return Response({'detail': 'device_id and pairing_code are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = PrintDevice.objects.filter(device_id=device_id, is_active=True)
+        if tenant_id:
+            try:
+                qs = qs.filter(tenant_id=int(tenant_id))
+            except (TypeError, ValueError):
+                return Response({'detail': 'Invalid tenant_id.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device = qs.order_by('-updated_at').first()
+        if not device:
+            return Response({'detail': 'Device not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        now = timezone.now()
+        pending = device.pairing_code == code and device.pairing_expires_at and device.pairing_expires_at > now
+        if pending:
+            return Response({'paired': False, 'status': 'pending'})
+
+        if device.api_key_hash and device.paired_at and device.api_key_pending:
+            pending_api_key = device.api_key_pending
+            device.api_key_pending = ''
+            device.save(update_fields=['api_key_pending', 'updated_at'])
+            return Response({
+                'paired': True,
+                'status': 'paired',
+                'api_key': pending_api_key,
+                'device': {
+                    'device_id': device.device_id,
+                    'tenant_id': device.tenant_id,
+                    'outlet_id': device.outlet_id,
+                    'paired_at': device.paired_at,
+                    'api_key_created_at': device.api_key_created_at,
+                    'api_key_revoked': device.api_key_revoked,
+                }
+            })
+
+        return Response({'paired': False, 'status': 'not_paired'})
+
+    @action(detail=True, methods=['post'], url_path='rotate-api-key', permission_classes=[IsAuthenticated])
+    def rotate_api_key(self, request, pk=None):
+        user, tenant = self._resolve_authenticated_user_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant context is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device = self.get_object()
+        if device.tenant_id != tenant.id and not getattr(user, 'is_saas_admin', False):
+            return Response({'detail': 'Unauthorized for this device.'}, status=status.HTTP_403_FORBIDDEN)
+
+        raw_api_key = secrets.token_urlsafe(48)
+        device.set_api_key(raw_api_key)
+        device.api_key_pending = ''
+        device.save(update_fields=['api_key_hash', 'api_key_pending', 'api_key_created_at', 'api_key_last_used_at', 'api_key_revoked', 'api_key_revoked_at', 'updated_at'])
+
+        return Response({
+            'rotated': True,
+            'api_key': raw_api_key,
+            'device': PrintDeviceSerializer(device).data,
+        })
+
+    @action(detail=True, methods=['post'], url_path='revoke-api-key', permission_classes=[IsAuthenticated])
+    def revoke_api_key(self, request, pk=None):
+        user, tenant = self._resolve_authenticated_user_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant context is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device = self.get_object()
+        if device.tenant_id != tenant.id and not getattr(user, 'is_saas_admin', False):
+            return Response({'detail': 'Unauthorized for this device.'}, status=status.HTTP_403_FORBIDDEN)
+
+        device.revoke_api_key()
+        device.save(update_fields=['api_key_hash', 'api_key_revoked', 'api_key_revoked_at', 'updated_at'])
+        return Response({'revoked': True, 'device': PrintDeviceSerializer(device).data})
 
     @action(detail=False, methods=['post'], url_path='heartbeat')
     def heartbeat(self, request):
