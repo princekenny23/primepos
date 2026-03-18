@@ -351,6 +351,9 @@ static class CloudPoller
         var deviceId = string.IsNullOrWhiteSpace(cloud.DeviceId) ? Environment.MachineName : cloud.DeviceId.Trim();
         var printerType = NormalizePrinterType(cloud.PrinterType);
         var pollSeconds = cloud.PollIntervalSeconds <= 0 ? 2 : cloud.PollIntervalSeconds;
+        var hasTenantContext = !string.IsNullOrWhiteSpace(cloud.TenantId);
+        var hasOutletContext = !string.IsNullOrWhiteSpace(cloud.OutletId);
+        var hasPairingContext = hasTenantContext || hasOutletContext;
 
         using var http = new HttpClient();
         http.Timeout = TimeSpan.FromSeconds(20);
@@ -383,7 +386,7 @@ static class CloudPoller
             }
         }
 
-        if (string.IsNullOrWhiteSpace(deviceApiKey))
+        if (string.IsNullOrWhiteSpace(deviceApiKey) && hasPairingContext)
         {
             try
             {
@@ -420,6 +423,10 @@ static class CloudPoller
             {
                 Console.WriteLine($"[CloudPoller] Pairing bootstrap warning: {ex.Message}");
             }
+        }
+        else if (string.IsNullOrWhiteSpace(deviceApiKey))
+        {
+            Console.WriteLine("[CloudPoller] Skipping bootstrap pairing (TenantId/OutletId not configured). Waiting for frontend Connect flow...");
         }
 
         if (string.IsNullOrWhiteSpace(deviceApiKey))

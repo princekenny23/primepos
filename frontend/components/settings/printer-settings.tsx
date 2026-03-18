@@ -21,6 +21,8 @@ const PRINT_DEVICE_API_KEY_STORAGE_PREFIX = "printDeviceApiKey"
 const PRINT_DEVICE_PK_STORAGE_PREFIX = "printDevicePk"
 type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
+type WizardStep = 1 | 2 | 3
+
 function encodeTextToBase64(text: string): string {
   const bytes = new TextEncoder().encode(text)
   let binary = ""
@@ -67,13 +69,47 @@ async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
   return response
 }
 
+async function directAgentFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (LOCAL_PRINT_AGENT_TOKEN) {
+    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
+  }
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`
+  const url = `${LOCAL_PRINT_AGENT_URL.replace(/\/$/, "")}${normalizedPath}`
+  const response = await fetch(url, {
+    ...init,
+    headers: { ...headers, ...(init?.headers || {}) },
+  })
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    throw new Error(`Direct agent error (${response.status}): ${body || response.statusText}`)
+  }
+
+  return response
+}
+
+async function localAgentFetch(path: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await agentFetch(path, init)
+  } catch (proxyErr: any) {
+    try {
+      return await directAgentFetch(path, init)
+    } catch (directErr: any) {
+      const proxyMsg = proxyErr?.message || "proxy failed"
+      const directMsg = directErr?.message || "direct failed"
+      throw new Error(`Unable to reach local connector. ${proxyMsg}. ${directMsg}.`)
+    }
+  }
+}
+
 export function PrinterSettings() {
   const { toast } = useToast()
-  const isLocalHost = typeof window !== "undefined"
-    ? ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)
-    : false
   const [printChannel, setPrintChannel] = useState<PrintChannel>("auto")
   const [connected, setConnected] = useState(false)
+  const [step, setStep] = useState<WizardStep>(1)
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [printers, setPrinters] = useState<string[]>([])
   const [selectedPrinter, setSelectedPrinter] = useState<string>("")
   const [isScanning, setIsScanning] = useState(false)
@@ -85,9 +121,16 @@ export function PrinterSettings() {
   const [rawOutputVisible, setRawOutputVisible] = useState(false)
   const [rawPrinters, setRawPrinters] = useState<any>(null)
   const [extraPrinters, setExtraPrinters] = useState<string[]>([])
+  const [lastAssignedOutletName, setLastAssignedOutletName] = useState("")
   const mergedPrinters = useMemo(
     () => Array.from(new Set([...(printers || []), ...extraPrinters])),
     [printers, extraPrinters]
+  )
+
+  const { currentOutlet, outlets, setCurrentOutlet } = useBusinessStore()
+  const activeOutlets = useMemo(
+    () => (outlets || []).filter((o) => o.isActive !== false),
+    [outlets]
   )
 
   useEffect(() => {
@@ -120,15 +163,11 @@ export function PrinterSettings() {
   }
 
   useEffect(() => {
-    if (!isLocalHost) {
-      setConnected(false)
-      return
-    }
-
     const ping = async () => {
       try {
-        await agentFetch("/health", { method: "GET" })
+        await localAgentFetch("/health", { method: "GET" })
         setConnected(true)
+        setStep((prev) => (prev < 2 ? 2 : prev))
       } catch {
         setConnected(false)
       }
@@ -137,22 +176,19 @@ export function PrinterSettings() {
   }, [])
 
   const connectAgent = async () => {
-    if (!isLocalHost) {
-      setConnected(false)
-      toast({
-        title: "Local agent unavailable on cloud",
-        description: "Use the PrimePOS connector on your local machine for cloud auto-printing.",
-      })
-      return
-    }
-
+    setIsConnecting(true)
     try {
-      await agentFetch("/health", { method: "GET" })
+      await localAgentFetch("/health", { method: "GET" })
       setConnected(true)
-      toast({ title: "Local agent connected", description: "Local Print Agent is running on this machine." })
+      setStep((prev) => (prev < 2 ? 2 : prev))
+      await autoPairCurrentConnector(true)
+      await scanPrinters(true)
+      toast({ title: "Connected", description: "Connector is online and ready for printer selection." })
     } catch (err: any) {
       setConnected(false)
-      toast({ title: "Agent not reachable", description: err?.message || "Unable to reach Local Print Agent." , variant: "destructive"})
+      toast({ title: "Connection failed", description: err?.message || "Unable to reach local PrimePOS connector.", variant: "destructive" })
+    } finally {
+      setIsConnecting(false)
     }
   }
 
@@ -161,23 +197,16 @@ export function PrinterSettings() {
     toast({ title: "Disconnected", description: "Disconnected from Local Print Agent." })
   }
 
-  const scanPrinters = async () => {
-    if (!isLocalHost) {
-      toast({
-        title: "Printer scan unavailable on cloud",
-        description: "Run this screen on localhost to scan local printers.",
-      })
-      return
-    }
-
+  const scanPrinters = async (silent = false) => {
     setIsScanning(true)
     try {
-      const response = await agentFetch("/printers", { method: "GET" })
+      const response = await localAgentFetch("/printers", { method: "GET" })
       const data = await response.json().catch(() => ({}))
       const discovered: string[] = Array.isArray(data?.printers) ? data.printers : []
       setPrinters(discovered)
       const combined = Array.from(new Set([...(discovered || []), ...extraPrinters]))
       setRawPrinters(combined)
+      setStep((prev) => (prev < 3 ? 3 : prev))
       if (data?.default && !selectedPrinter) {
         const next = String(data.default)
         setSelectedPrinter(next)
@@ -186,9 +215,11 @@ export function PrinterSettings() {
           if (outletId) localStorage.setItem(getOutletStorageKey(outletId), next)
         }
       }
-      toast({ title: "Printers discovered", description: `${combined.length} printers found` })
+      if (!silent) {
+        toast({ title: "Printers found", description: `${combined.length} printer(s) discovered.` })
+      }
     } catch (err: any) {
-      toast({ title: "Scan failed", description: (err && err.message) || String(err) })
+      toast({ title: "Search failed", description: (err && err.message) || String(err), variant: "destructive" })
     } finally {
       setIsScanning(false)
     }
@@ -210,7 +241,7 @@ export function PrinterSettings() {
     try {
       const text = `TEST PRINT\n${new Date().toLocaleString()}\n\n`
       const contentBase64 = encodeTextToBase64(text)
-      await agentFetch("/print", {
+      await localAgentFetch("/print", {
         method: "POST",
         body: JSON.stringify({
           printerName: selectedPrinter,
@@ -262,8 +293,6 @@ export function PrinterSettings() {
     setManualPrinter("")
     toast({ title: "Printer added", description: `${normalized}` })
   }
-
-  const { currentOutlet } = useBusinessStore()
 
   const getOutletStorageKey = (outletId?: number | string | null) =>
     outletId ? `defaultPrinter:${outletId}` : "defaultPrinter"
@@ -367,18 +396,11 @@ export function PrinterSettings() {
     }
   }
 
-  const autoPairCurrentConnector = async () => {
-    if (!isLocalHost) {
-      toast({
-        title: "Auto-pair requires localhost",
-        description: "Open this settings page on the machine running PrimePOS connector.",
-        variant: "destructive",
-      })
-      return
-    }
-
+  const autoPairCurrentConnector = async (silent = false) => {
     if (!currentOutlet) {
-      toast({ title: "No outlet", description: "Select an outlet before pairing device." })
+      if (!silent) {
+        toast({ title: "No outlet", description: "Select an outlet before pairing device." })
+      }
       return
     }
 
@@ -390,7 +412,7 @@ export function PrinterSettings() {
 
     setIsAutoPairing(true)
     try {
-      const localStartResponse = await agentFetch("/cloud/pair/start", {
+      const localStartResponse = await localAgentFetch("/cloud/pair/start", {
         method: "POST",
         body: JSON.stringify({
           outlet_id: String(outletId),
@@ -418,7 +440,7 @@ export function PrinterSettings() {
         throw new Error("Pairing succeeded but no device API key was returned.")
       }
 
-      await agentFetch("/cloud/pair/activate", {
+      await localAgentFetch("/cloud/pair/activate", {
         method: "POST",
         body: JSON.stringify({ api_key: apiKey }),
       })
@@ -436,9 +458,13 @@ export function PrinterSettings() {
       }
 
       setPairingCode("")
-      toast({ title: "Connector paired", description: "This machine is now paired without manual code entry." })
+      if (!silent) {
+        toast({ title: "Connector paired", description: "This connector is now paired to the current outlet." })
+      }
     } catch (err: any) {
-      toast({ title: "Auto-pair failed", description: err?.message || "Unable to pair connector.", variant: "destructive" })
+      if (!silent) {
+        toast({ title: "Auto-pair failed", description: err?.message || "Unable to pair connector.", variant: "destructive" })
+      }
     } finally {
       setIsAutoPairing(false)
     }
@@ -499,6 +525,7 @@ export function PrinterSettings() {
     }
 
     try {
+      setIsSaving(true)
       // Check existing printers for this outlet
       const outletId = typeof currentOutlet.id === 'string' ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
       const existing: any = await api.get(`${apiEndpoints.printers.list}?outlet=${outletId}`)
@@ -508,7 +535,6 @@ export function PrinterSettings() {
       if (match) {
         // Update existing printer to be default
         await api.patch(apiEndpoints.printers.update(String(match.id)), { is_default: true })
-        toast({ title: "Printer updated", description: `Set ${selectedPrinter} as default for this outlet.` })
       } else {
         // Create new printer record
         await api.post(apiEndpoints.printers.create, {
@@ -518,7 +544,6 @@ export function PrinterSettings() {
           driver: "other",
           is_default: true,
         })
-        toast({ title: "Printer saved", description: `Saved ${selectedPrinter} for this outlet.` })
       }
       if (typeof window !== "undefined") {
         localStorage.setItem(getOutletStorageKey(outletId), selectedPrinter)
@@ -550,133 +575,89 @@ export function PrinterSettings() {
               is_active: true,
             })
           }
-          toast({ title: "Cloud printer assigned", description: `Assigned ${selectedPrinter} to paired connector device.` })
         } catch (assignmentErr: any) {
           toast({ title: "Device assignment warning", description: assignmentErr?.message || "Printer saved, but device assignment failed.", variant: "destructive" })
         }
       } else {
-        toast({ title: "Pair device required", description: "Printer saved for outlet, but no connector device is paired yet." })
+        toast({ title: "Pairing missing", description: "Printer saved for outlet, but connector is not paired yet.", variant: "destructive" })
       }
+
+      setLastAssignedOutletName(currentOutlet.name)
+      toast({ title: "Assigned", description: `${selectedPrinter} is now default for ${currentOutlet.name}.` })
 
       // Printer configuration intentionally stays separate from device pairing.
     } catch (err: any) {
       console.error("Error saving printer", err)
       toast({ title: "Save failed", description: err?.message || "Failed to save printer settings." })
+    } finally {
+      setIsSaving(false)
     }
+  }
+
+  const moveToNextOutlet = () => {
+    if (!currentOutlet || activeOutlets.length <= 1) {
+      return
+    }
+
+    const currentIndex = activeOutlets.findIndex((outlet) => String(outlet.id) === String(currentOutlet.id))
+    if (currentIndex === -1) {
+      return
+    }
+
+    const nextOutlet = activeOutlets[(currentIndex + 1) % activeOutlets.length]
+    if (String(nextOutlet.id) === String(currentOutlet.id)) {
+      return
+    }
+
+    setCurrentOutlet(String(nextOutlet.id))
+    setSelectedPrinter("")
+    setPrinters([])
+    setExtraPrinters([])
+    setRawPrinters(null)
+    setStep(connected ? 2 : 1)
+    toast({ title: "Outlet switched", description: `Now configuring ${nextOutlet.name}. Click Search Printers.` })
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Printer Setup (Local Print Agent)</CardTitle>
-        <CardDescription>Connect to the Local Print Agent to discover local printers and select a default receipt printer.</CardDescription>
+        <CardTitle>Cloud Printing Setup</CardTitle>
+        <CardDescription>Simple setup: Connect connector, search printers, assign selected printer to this outlet.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="rounded border p-3 text-sm space-y-2">
-          <div className="font-medium">Local Agent Configuration</div>
-          <div className="grid gap-2">
-            <div className="space-y-1">
-              <Label>Agent URL</Label>
-              <Input value={LOCAL_PRINT_AGENT_URL} readOnly />
-            </div>
-            <div className="space-y-1">
-              <Label>Agent Token</Label>
-              <Input
-                value={LOCAL_PRINT_AGENT_TOKEN ? "••••••••" : "Not set"}
-                readOnly
-              />
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Set NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL and NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN in your frontend environment.
-          </p>
-        </div>
-
-        <div className="rounded border p-3 text-sm space-y-2">
-          <div className="font-medium">Device Pairing</div>
-          <p className="text-xs text-muted-foreground">
-            Pair this connector from frontend in one click, or enter code manually if needed.
-          </p>
-          <div className="flex gap-2">
-            <Button onClick={autoPairCurrentConnector} disabled={isAutoPairing || !isLocalHost}>
-              {isAutoPairing ? "Pairing..." : "Pair This Connector"}
-            </Button>
-          </div>
-          <div className="flex gap-2">
-            <Input
-              value={pairingCode}
-              onChange={(e) => setPairingCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              placeholder="Enter 6-digit pairing code"
-            />
-            <Button onClick={pairDeviceWithCode}>Pair Device</Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Pairing links this connector device to your outlet and issues a secure API key.
-          </p>
-        </div>
-
-        <div className="rounded border p-3 text-sm space-y-2">
-          <div className="font-medium">Cloud Connector API Key</div>
-          <p className="text-xs text-muted-foreground">
-            Use this value in Windows connector appsettings under Cloud.DeviceApiKey.
-          </p>
-          <Input
-            value={deviceApiKey || "No API key issued yet. Save default printer to register this device."}
-            readOnly
-          />
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={async () => {
-                if (!deviceApiKey) {
-                  toast({ title: "No key", description: "Save default printer first to obtain API key." })
-                  return
-                }
-                try {
-                  await navigator.clipboard.writeText(deviceApiKey)
-                  toast({ title: "Copied", description: "Device API key copied to clipboard." })
-                } catch {
-                  toast({ title: "Copy failed", description: "Unable to copy API key.", variant: "destructive" })
-                }
-              }}
-            >
-              Copy Key
-            </Button>
-            <Button variant="outline" size="sm" onClick={rotateDeviceApiKey}>
-              Rotate Key
-            </Button>
-            <Button variant="outline" size="sm" onClick={revokeDeviceApiKey}>
-              Revoke Key
-            </Button>
-          </div>
-        </div>
-
         <div className="rounded border p-3 text-sm space-y-3">
-          <div className="font-medium">Print Mode</div>
+          <div className="font-medium">Current outlet</div>
+          <div className="text-sm">{currentOutlet?.name || "No outlet selected"}</div>
+          <div className="text-xs text-muted-foreground">Agent URL: {LOCAL_PRINT_AGENT_URL}</div>
+          <div className="text-xs text-muted-foreground">Connector status: {connected ? "Connected" : "Disconnected"}</div>
+        </div>
+
+        <div className="rounded border p-3 space-y-3">
+          <div className="font-medium">Step 1: Connect</div>
           <p className="text-xs text-muted-foreground">
-            Auto mode uses Bluetooth-USB Thermal Printer+ on Android mobile and Local Print Agent on desktop.
+            Click Connect once. The system checks connector health, auto-pairs to this outlet, and loads printers.
           </p>
-          <div className="flex flex-wrap gap-2">
-            <Button variant={printChannel === "auto" ? "default" : "outline"} onClick={() => savePrintChannel("auto")}>Auto</Button>
-            <Button variant={printChannel === "agent" ? "default" : "outline"} onClick={() => savePrintChannel("agent")}>Agent Only</Button>
-            <Button variant={printChannel === "bluetooth_usb_thermal_printer_plus" ? "default" : "outline"} onClick={() => savePrintChannel("bluetooth_usb_thermal_printer_plus")}>Bluetooth-USB Thermal Printer+</Button>
+          <div className="flex gap-2">
+            <Button onClick={connectAgent} disabled={isConnecting || isAutoPairing}>
+              {isConnecting || isAutoPairing ? "Connecting..." : "Connect"}
+            </Button>
+            <Button variant="outline" onClick={disconnectAgent} disabled={!connected}>Disconnect</Button>
           </div>
+        </div>
+
+        <div className="rounded border p-3 space-y-3">
+          <div className="font-medium">Step 2: Search printers</div>
           <p className="text-xs text-muted-foreground">
-            For mobile mode, install Bluetooth-USB Thermal Printer+ on Android and use it from the share sheet.
+            Search printers connected to this machine, then select one.
           </p>
-        </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => scanPrinters(false)} disabled={!connected || isScanning}>
+              {isScanning ? "Searching..." : "Search Printers"}
+            </Button>
+          </div>
 
-        <div className="flex gap-2">
-          <Button onClick={connectAgent} disabled={connected || !isLocalHost}>Connect Agent</Button>
-          <Button variant="outline" onClick={disconnectAgent} disabled={!connected || !isLocalHost}>Disconnect</Button>
-          <Button variant="ghost" onClick={scanPrinters} disabled={!connected || isScanning || !isLocalHost}>{isScanning ? "Scanning..." : "Scan Printers"}</Button>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Discovered Printers</Label>
-          {printers.length === 0 && <p className="text-sm text-muted-foreground">No printers discovered yet.</p>}
           <div className="space-y-1">
+            {mergedPrinters.length === 0 && <p className="text-sm text-muted-foreground">No printers discovered yet.</p>}
             {mergedPrinters.map((p) => (
               <label key={p} className="flex items-center gap-3 cursor-pointer">
                 <input
@@ -691,26 +672,51 @@ export function PrinterSettings() {
               </label>
             ))}
           </div>
-          <div className="mt-2">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={rawOutputVisible} onChange={(e) => setRawOutputVisible(e.target.checked)} />
-              <span className="text-sm">Show raw discovery output</span>
-            </label>
-            {rawOutputVisible && (
-              <div className="mt-2 border rounded p-2 bg-muted">
-                <pre className="text-xs max-h-40 overflow-auto">{JSON.stringify(rawPrinters, null, 2) || "[]"}</pre>
-                <div className="flex justify-end mt-2">
-                  <Button size="sm" variant="outline" onClick={() => {
-                    try {
-                      navigator.clipboard.writeText(JSON.stringify(rawPrinters || [], null, 2))
-                      toast({ title: "Copied", description: "Raw discovery output copied to clipboard." })
-                    } catch (e) {
-                      toast({ title: "Copy failed", description: "Unable to copy to clipboard." })
-                    }
-                  }}>Copy</Button>
-                </div>
-              </div>
-            )}
+        </div>
+
+        <div className="rounded border p-3 space-y-3">
+          <div className="font-medium">Step 3: Assign printer to outlet</div>
+          <p className="text-xs text-muted-foreground">
+            Save selected printer as default for this outlet. Then repeat for next outlet.
+          </p>
+          <div className="flex gap-2">
+            <Button onClick={saveSelection} disabled={!connected || !selectedPrinter || isSaving}>
+              {isSaving ? "Saving..." : "Assign to This Outlet"}
+            </Button>
+            <Button variant="outline" onClick={moveToNextOutlet} disabled={activeOutlets.length <= 1}>
+              Configure Next Outlet
+            </Button>
+          </div>
+          {lastAssignedOutletName && (
+            <div className="text-xs text-muted-foreground">
+              Last assigned outlet: {lastAssignedOutletName}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded border p-3 text-sm space-y-3">
+          <div className="font-medium">Optional: print mode and tests</div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant={printChannel === "auto" ? "default" : "outline"} onClick={() => savePrintChannel("auto")}>Auto</Button>
+            <Button variant={printChannel === "agent" ? "default" : "outline"} onClick={() => savePrintChannel("agent")}>Agent Only</Button>
+            <Button variant={printChannel === "bluetooth_usb_thermal_printer_plus" ? "default" : "outline"} onClick={() => savePrintChannel("bluetooth_usb_thermal_printer_plus")}>Bluetooth-USB Thermal Printer+</Button>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={testPrint} disabled={!selectedPrinter || !connected}>Test Agent Print</Button>
+            <Button variant="outline" onClick={testBluetoothUsbThermalPrinterPlus}>Test Bluetooth-USB Thermal Printer+</Button>
+          </div>
+          <div className="text-xs text-muted-foreground">Step progress: {step}/3</div>
+        </div>
+
+        <div className="rounded border p-3 text-sm space-y-2">
+          <div className="font-medium">Manual pairing fallback</div>
+          <div className="flex gap-2">
+            <Input
+              value={pairingCode}
+              onChange={(e) => setPairingCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              placeholder="Enter 6-digit pairing code"
+            />
+            <Button onClick={pairDeviceWithCode}>Pair Device</Button>
           </div>
         </div>
 
@@ -720,12 +726,6 @@ export function PrinterSettings() {
             <Input id="manual-printer" value={manualPrinter} onChange={(e) => setManualPrinter(e.target.value)} />
             <Button onClick={addManualPrinter}>Add</Button>
           </div>
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={testPrint} disabled={!selectedPrinter || !connected}>Test Agent Print</Button>
-          <Button variant="outline" onClick={testBluetoothUsbThermalPrinterPlus}>Test Bluetooth-USB Thermal Printer+</Button>
-          <Button onClick={saveSelection}>Save Default Printer</Button>
         </div>
       </CardContent>
     </Card>
