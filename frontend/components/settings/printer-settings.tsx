@@ -102,6 +102,19 @@ async function localAgentFetch(path: string, init?: RequestInit): Promise<Respon
   }
 }
 
+async function getLocalPairState(): Promise<{ hasApiKey: boolean; deviceId: string }> {
+  try {
+    const response = await localAgentFetch("/cloud/pair/state", { method: "GET" })
+    const state = await response.json().catch(() => ({}))
+    return {
+      hasApiKey: Boolean(state?.has_api_key),
+      deviceId: String(state?.device_id || "").trim(),
+    }
+  } catch {
+    return { hasApiKey: false, deviceId: "" }
+  }
+}
+
 export function PrinterSettings() {
   const { toast } = useToast()
   const [printChannel, setPrintChannel] = useState<PrintChannel>("auto")
@@ -352,6 +365,14 @@ export function PrinterSettings() {
 
     setIsAutoPairing(true)
     try {
+      const pairState = await getLocalPairState()
+      if (pairState.hasApiKey) {
+        if (!silent) {
+          toast({ title: "Connector already paired", description: "Using active connector key. Skipping re-pair to avoid key reset." })
+        }
+        return
+      }
+
       const localStartResponse = await localAgentFetch("/cloud/pair/start", {
         method: "POST",
         body: JSON.stringify({
