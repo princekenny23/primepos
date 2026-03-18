@@ -424,8 +424,32 @@ static class CloudPoller
 
         if (string.IsNullOrWhiteSpace(deviceApiKey))
         {
-            Console.WriteLine("[CloudPoller] Missing DeviceApiKey. Pair device in frontend or provide bootstrap AuthToken.");
-            return;
+            Console.WriteLine("[CloudPoller] Missing DeviceApiKey. Waiting for frontend pairing activation...");
+
+            while (!stoppingToken.IsCancellationRequested && string.IsNullOrWhiteSpace(deviceApiKey))
+            {
+                var runtimeKey = RuntimeCloudState.GetDeviceApiKey();
+                if (!string.IsNullOrWhiteSpace(runtimeKey))
+                {
+                    deviceApiKey = runtimeKey;
+                    Console.WriteLine("[CloudPoller] Runtime API key activated from frontend pairing.");
+                    break;
+                }
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Max(3, pollSeconds)), stoppingToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    return;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(deviceApiKey))
+            {
+                return;
+            }
         }
 
         SetBearer(http, deviceApiKey);
