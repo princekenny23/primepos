@@ -1668,6 +1668,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         methods=['post'],
         url_path='claim-next',
         authentication_classes=[SessionAuthentication, BasicAuthentication],
+        throttle_classes=[],
     )
     def claim_next(self, request):
         """Atomically claim next pending print job for a device."""
@@ -1695,7 +1696,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             requested_printer_type = ''
 
         with transaction.atomic():
-            qs = PrintJob.objects.select_for_update().filter(
+            qs = PrintJob.objects.select_for_update(of=('self',)).filter(
                 status='pending',
                 channel=channel,
                 attempts__lt=models.F('max_attempts'),
@@ -1728,7 +1729,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
 
         return Response(PrintJobSerializer(job).data)
 
-    @action(detail=False, methods=['post'], url_path='register-device')
+    @action(detail=False, methods=['post'], url_path='register-device', throttle_classes=[])
     def register_device(self, request):
         """Register/update a print connector device for SaaS-safe routing."""
         tenant, user, authenticated_device = self._request_actor(request)
@@ -1819,6 +1820,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         methods=['post'],
         url_path='complete',
         authentication_classes=[SessionAuthentication, BasicAuthentication],
+        throttle_classes=[],
     )
     def complete(self, request, pk=None):
         """Mark claimed job as completed/failed."""
@@ -1890,7 +1892,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         tenant = getattr(request, 'tenant', None) or getattr(user, 'tenant', None)
         return user, tenant
 
-    @action(detail=False, methods=['post'], url_path='pairing/request')
+    @action(detail=False, methods=['post'], url_path='pairing/request', throttle_classes=[])
     def pairing_request(self, request):
         """Connector requests short-lived pairing code without API key."""
         device_id = str(request.data.get('device_id', '') or '').strip()
@@ -2012,7 +2014,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             'api_key': raw_api_key,
         })
 
-    @action(detail=False, methods=['post'], url_path='pairing/status')
+    @action(detail=False, methods=['post'], url_path='pairing/status', throttle_classes=[])
     def pairing_status(self, request):
         """Connector polls pairing status to auto-receive API key."""
         device_id = str(request.data.get('device_id', '') or '').strip()
@@ -2097,6 +2099,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         methods=['post'],
         url_path='heartbeat',
         authentication_classes=[SessionAuthentication, BasicAuthentication],
+        throttle_classes=[],
     )
     def heartbeat(self, request):
         device = _authenticate_device_by_api_key(request)
