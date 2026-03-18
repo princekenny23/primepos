@@ -163,11 +163,14 @@ class TenantFilterMixin:
         Raises:
             ValidationError if tenant is required but missing (for non-SaaS admins)
         """
-        if request.user.is_saas_admin:
+        user = getattr(request, 'user', None)
+        if not getattr(user, 'is_authenticated', False):
+            return getattr(request, 'tenant', None)
+
+        if user.is_saas_admin:
             return resolve_tenant_from_request(request)
         
         # Refresh user to ensure tenant is loaded (important during onboarding)
-        user = request.user
         if not hasattr(user, '_tenant_loaded'):
             from django.contrib.auth import get_user_model
             User = get_user_model()
@@ -244,8 +247,10 @@ class TenantFilterMixin:
         
         try:
             from apps.outlets.models import Outlet
+            user = getattr(request, 'user', None)
+            is_saas_admin = bool(getattr(user, 'is_authenticated', False) and getattr(user, 'is_saas_admin', False))
             # SaaS admins can access outlets from any tenant
-            if request.user.is_saas_admin:
+            if is_saas_admin:
                 return Outlet.objects.get(id=outlet_id)
             else:
                 tenant = self.get_tenant_for_request(request)
