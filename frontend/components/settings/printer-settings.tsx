@@ -223,14 +223,6 @@ export function PrinterSettings() {
   }
 
   const testPrint = async () => {
-    if (!isLocalHost) {
-      toast({
-        title: "Local test print unavailable on cloud",
-        description: "Cloud mode prints through connector queue, not /api/local-print.",
-      })
-      return
-    }
-
     if (!selectedPrinter) {
       toast({ title: "No printer selected", description: "Select a printer to test-print." })
       return
