@@ -382,6 +382,15 @@ static class CloudPoller
 
         Console.WriteLine($"[CloudPoller] Running. api={apiBase} channel={channel} device={deviceId} printerType={printerType}");
 
+        if (string.IsNullOrWhiteSpace(cloud.OutletId))
+        {
+            Console.WriteLine("[CloudPoller] WARNING: OutletId is not set in appsettings.json. Print jobs will match based on the outlet stored in the backend for this device. If jobs are not being claimed, set OutletId to the correct outlet primary key.");
+        }
+        if (string.IsNullOrWhiteSpace(cloud.TenantId))
+        {
+            Console.WriteLine("[CloudPoller] WARNING: TenantId is not set in appsettings.json. Tenant will be resolved from device API key.");
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var deviceApiKey = (cloud.DeviceApiKey ?? string.Empty).Trim();
@@ -497,7 +506,21 @@ static class CloudPoller
             }
 
             SetDeviceApiKey(http, deviceApiKey);
+            Console.WriteLine($"[CloudPoller] Device ready. Polling every {pollSeconds}s for jobs on channel='{channel}' printerType='{printerType}'.");
+
+            // Send heartbeat immediately so is_active becomes true right away
+            try
+            {
+                await HeartbeatAsync(http, apiBase, stoppingToken);
+                Console.WriteLine($"[CloudPoller] Heartbeat OK — device marked online.");
+            }
+            catch (Exception hbEx)
+            {
+                Console.WriteLine($"[CloudPoller] Initial heartbeat warning: {hbEx.Message}");
+            }
+
             var lastHeartbeatAt = DateTime.UtcNow;
+            var pollCount = 0;
 
             try
             {
@@ -505,13 +528,31 @@ static class CloudPoller
                 {
                     if ((DateTime.UtcNow - lastHeartbeatAt).TotalSeconds >= 30)
                     {
-                        await HeartbeatAsync(http, apiBase, stoppingToken);
+                        try
+                        {
+                            await HeartbeatAsync(http, apiBase, stoppingToken);
+                            Console.WriteLine($"[CloudPoller] Heartbeat OK.");
+                        }
+                        catch (DeviceUnauthorizedException)
+                        {
+                            throw;
+                        }
+                        catch (Exception hbEx)
+                        {
+                            Console.WriteLine($"[CloudPoller] Heartbeat warning: {hbEx.Message}");
+                        }
                         lastHeartbeatAt = DateTime.UtcNow;
                     }
 
+                    pollCount++;
                     var claimed = await ClaimNextAsync(http, apiBase, channel, deviceId, printerType, stoppingToken);
                     if (claimed is null)
                     {
+                        // Log every 60 polls (~5 min at 5s interval) so operator knows it's alive
+                        if (pollCount % 60 == 0)
+                        {
+                            Console.WriteLine($"[CloudPoller] Waiting for jobs... (polls: {pollCount})");
+                        }
                         await Task.Delay(TimeSpan.FromSeconds(pollSeconds), stoppingToken);
                         continue;
                     }
@@ -698,6 +739,26 @@ static class CloudPoller
             var body = await response.Content.ReadAsStringAsync(ct);
             throw new InvalidOperationException($"Heartbeat failed {(int)response.StatusCode}: {body}");
         }
+
+        // Log device_id returned by backend so operator can confirm the right device is active
+        try
+        {
+            var result = await response.Content.ReadFromJsonAsync<HeartbeatResult>(cancellationToken: ct);
+            if (result?.DeviceId is not null)
+            {
+                RuntimeCloudState.SetDeviceId(result.DeviceId);
+            }
+        }
+        catch { /* ignore JSON parse errors on heartbeat result */ }
+    }
+
+    private sealed class HeartbeatResult
+    {
+        [JsonPropertyName("device_id")]
+        public string? DeviceId { get; set; }
+
+        [JsonPropertyName("last_seen_at")]
+        public string? LastSeenAt { get; set; }
     }
 
     private static async Task<DevicePairingRequestResponse> RequestPairingCodeAsync(
