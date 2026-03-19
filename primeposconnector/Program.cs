@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
+using System.Windows.Forms;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -297,6 +298,9 @@ sealed class CloudDeviceRegistrationResponse
     [JsonPropertyName("registered")]
     public bool Registered { get; set; }
 
+    [JsonPropertyName("device_id")]
+    public string? DeviceId { get; set; }
+
     [JsonPropertyName("api_key")]
     public string? ApiKey { get; set; }
 }
@@ -344,7 +348,24 @@ static class CloudPoller
 
         var bootstrapToken = (cloud.AuthToken ?? string.Empty).Trim();
         var channel = string.IsNullOrWhiteSpace(cloud.Channel) ? "agent" : cloud.Channel.Trim().ToLowerInvariant();
-        var deviceId = string.IsNullOrWhiteSpace(cloud.DeviceId) ? Environment.MachineName : cloud.DeviceId.Trim();
+        var deviceId = string.IsNullOrWhiteSpace(cloud.DeviceId) ? string.Empty : cloud.DeviceId.Trim();
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            deviceId = RuntimeCloudState.GetDeviceId();
+        }
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            deviceId = (DeviceIdentityStore.Load() ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(deviceId))
+            {
+                RuntimeCloudState.SetDeviceId(deviceId);
+                Console.WriteLine("[CloudPoller] Loaded device ID from local store.");
+            }
+        }
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            deviceId = Environment.MachineName;
+        }
         var printerType = NormalizePrinterType(cloud.PrinterType);
         var pollSeconds = cloud.PollIntervalSeconds <= 0 ? 5 : Math.Max(3, cloud.PollIntervalSeconds);
 
@@ -383,6 +404,13 @@ static class CloudPoller
                 try
                 {
                     var registration = await RegisterDeviceAsync(http, apiBase, cloud, channel, deviceId, bootstrapToken, ct: stoppingToken);
+                    if (!string.IsNullOrWhiteSpace(registration.DeviceId))
+                    {
+                        deviceId = registration.DeviceId.Trim();
+                        RuntimeCloudState.SetDeviceId(deviceId);
+                        DeviceIdentityStore.Save(deviceId);
+                        Console.WriteLine($"[CloudPoller] Device registered as '{deviceId}'.");
+                    }
                     if (!string.IsNullOrWhiteSpace(registration.ApiKey))
                     {
                         deviceApiKey = registration.ApiKey.Trim();
@@ -402,9 +430,16 @@ static class CloudPoller
                 try
                 {
                     var pairing = await RequestPairingCodeAsync(http, apiBase, cloud, channel, deviceId, stoppingToken);
+                    if (!string.IsNullOrWhiteSpace(pairing.DeviceId))
+                    {
+                        deviceId = pairing.DeviceId.Trim();
+                        RuntimeCloudState.SetDeviceId(deviceId);
+                        DeviceIdentityStore.Save(deviceId);
+                    }
                     if (!string.IsNullOrWhiteSpace(pairing.PairingCode))
                     {
                         Console.WriteLine($"[CloudPoller] Enter pairing code in frontend: {pairing.PairingCode}");
+                        PairingDialogHelper.ShowPairingCodeDialog(pairing.PairingCode);
                     }
 
                     while (!stoppingToken.IsCancellationRequested && string.IsNullOrWhiteSpace(deviceApiKey))
@@ -615,21 +650,14 @@ static class CloudPoller
             outletId = parsedOutletId;
         }
 
-        int? tenantId = null;
-        if (int.TryParse((cloud.TenantId ?? string.Empty).Trim(), out var parsedTenantId))
-        {
-            tenantId = parsedTenantId;
-        }
-
         var endpoint = $"{apiBase}/print-jobs/register-device/";
         var payload = new
         {
-            device_id = deviceId,
+            device_id = string.IsNullOrWhiteSpace(deviceId) ? null : deviceId,
+            device_name = Environment.MachineName,
             channel,
-            tenant_id = tenantId,
             outlet_id = outletId,
             printer_identifier = (cloud.DefaultPrinter ?? string.Empty).Trim(),
-            name = Environment.MachineName,
             is_active = true,
         };
 
@@ -909,6 +937,27 @@ static class RuntimeCloudState
         }
     }
 
+    public static string GetDeviceId()
+    {
+        lock (Sync)
+        {
+            return _deviceId;
+        }
+    }
+
+    public static void SetDeviceId(string deviceId)
+    {
+        if (string.IsNullOrWhiteSpace(deviceId))
+        {
+            return;
+        }
+
+        lock (Sync)
+        {
+            _deviceId = deviceId.Trim();
+        }
+    }
+
     public static void ClearApiKey()
     {
         lock (Sync)
@@ -989,11 +1038,154 @@ static class ApiKeyStore
     }
 }
 
+/// <summary>
+/// Persists the connector device ID so the same identity survives restarts.
+/// Stored in %USERPROFILE%\.primepos\connector_device_id.dat (or ~/.primepos/ on Linux).
+/// </summary>
+static class DeviceIdentityStore
+{
+    private static string StorePath()
+    {
+        var folder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".primepos");
+        Directory.CreateDirectory(folder);
+        return Path.Combine(folder, "connector_device_id.dat");
+    }
+
+    public static string? Load()
+    {
+        try
+        {
+            var path = StorePath();
+            if (!File.Exists(path)) return null;
+            var deviceId = File.ReadAllText(path).Trim();
+            return string.IsNullOrWhiteSpace(deviceId) ? null : deviceId;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DeviceIdentityStore] Load warning: {ex.Message}");
+            return null;
+        }
+    }
+
+    public static void Save(string deviceId)
+    {
+        try
+        {
+            File.WriteAllText(StorePath(), deviceId.Trim());
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DeviceIdentityStore] Save warning: {ex.Message}");
+        }
+    }
+}
+
 /// <summary>Thrown when the backend responds with 401 — device must re-pair.</summary>
 sealed class DeviceUnauthorizedException : Exception
 {
     public DeviceUnauthorizedException()
         : base("Device API key rejected (401). Connector will re-initiate pairing.") { }
+}
+
+/// <summary>Helper to display pairing code in a Windows GUI dialog.</summary>
+static class PairingDialogHelper
+{
+    private static bool _dialogShown = false;
+    
+    public static void ShowPairingCodeDialog(string pairingCode)
+    {
+        try
+        {
+            // Prevent multiple dialogs from stacking up
+            if (_dialogShown)
+                return;
+
+            _dialogShown = true;
+
+            // Create a form for the pairing code display
+            var form = new Form
+            {
+                Text = "PrimePOS Connector - Pairing Code",
+                Width = 450,
+                Height = 250,
+                StartPosition = FormStartPosition.CenterScreen,
+                TopMost = true,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false
+            };
+
+            // Title label
+            var titleLabel = new Label
+            {
+                Text = "Cloud Pairing Code Ready",
+                Font = new Font("Segoe UI", 14, FontStyle.Bold),
+                Location = new Point(15, 15),
+                Size = new Size(410, 30),
+                AutoSize = false
+            };
+            form.Controls.Add(titleLabel);
+
+            // Instructions label
+            var instructLabel = new Label
+            {
+                Text = "Enter this code in your cloud frontend to pair this connector:",
+                Font = new Font("Segoe UI", 10),
+                Location = new Point(15, 50),
+                Size = new Size(410, 40),
+                AutoSize = false
+            };
+            form.Controls.Add(instructLabel);
+
+            // Code display (large, bold, centered)
+            var codeLabel = new Label
+            {
+                Text = pairingCode,
+                Font = new Font("Courier New", 24, FontStyle.Bold),
+                Location = new Point(15, 95),
+                Size = new Size(410, 50),
+                TextAlign = ContentAlignment.MiddleCenter,
+                BackColor = Color.LightGray,
+                BorderStyle = BorderStyle.FixedSingle
+            };
+            form.Controls.Add(codeLabel);
+
+            // Expiry info label
+            var expiryLabel = new Label
+            {
+                Text = "Code expires in 15 minutes. Keep this connector running.",
+                Font = new Font("Segoe UI", 9, FontStyle.Italic),
+                Location = new Point(15, 155),
+                Size = new Size(410, 30),
+                AutoSize = false,
+                ForeColor = Color.DarkGray
+            };
+            form.Controls.Add(expiryLabel);
+
+            // Close button
+            var closeButton = new Button
+            {
+                Text = "Got It",
+                Location = new Point(175, 190),
+                Size = new Size(100, 40),
+                DialogResult = DialogResult.OK
+            };
+            form.Controls.Add(closeButton);
+            form.AcceptButton = closeButton;
+
+            // Show the dialog
+            form.ShowDialog();
+
+            _dialogShown = false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PairingDialog] Failed to show dialog: {ex.Message}");
+            _dialogShown = false;
+        }
+    }
 }
 
 static class RawPrinterHelper

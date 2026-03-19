@@ -1772,11 +1772,23 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         if not tenant:
             return Response({'detail': 'Tenant context is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        device_id = str(request.data.get('device_id', '') or '').strip()
-        if not device_id:
-            return Response({'detail': 'device_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if authenticated_device and authenticated_device.device_id != device_id:
+        requested_device_id = str(request.data.get('device_id', '') or '').strip()
+        if authenticated_device and requested_device_id and authenticated_device.device_id != requested_device_id:
             return Response({'detail': 'API key cannot register a different device_id.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if authenticated_device:
+            device_id = authenticated_device.device_id
+        elif requested_device_id:
+            device_id = requested_device_id
+        else:
+            # Generate a tenant-scoped device identifier when connector does not have one yet.
+            for _ in range(5):
+                candidate = f"DEVICE_{secrets.token_hex(4).upper()}"
+                if not PrintDevice.objects.filter(tenant=tenant, device_id=candidate).exists():
+                    device_id = candidate
+                    break
+            else:
+                return Response({'detail': 'Unable to allocate a unique device_id.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         channel = str(request.data.get('channel', 'agent') or 'agent').strip().lower()
         if channel not in ['agent', 'mobile']:
@@ -1795,10 +1807,12 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         is_active_raw = str(request.data.get('is_active', 'true')).strip().lower()
         is_active = is_active_raw not in ['false', '0', 'no', 'off']
 
+        device_name = str(request.data.get('device_name', '') or request.data.get('name', '') or '').strip()
+
         defaults = {
             'outlet': outlet,
             'registered_by': user,
-            'name': str(request.data.get('name', '') or '').strip() or device_id,
+            'name': device_name or device_id,
             'channel': channel,
             'printer_identifier': str(request.data.get('printer_identifier', '') or '').strip(),
             'is_active': is_active,
@@ -1811,7 +1825,8 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             defaults=defaults,
         )
 
-        rotate_api_key = bool(request.data.get('rotate_api_key', created))
+        has_existing_api_key = bool(device.api_key_hash)
+        rotate_api_key = bool(request.data.get('rotate_api_key', created or not has_existing_api_key))
         raw_api_key = None
         if rotate_api_key:
             raw_api_key = secrets.token_urlsafe(48)
@@ -1834,6 +1849,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         return Response({
             'registered': True,
             'created': created,
+            'device_id': device.device_id,
             'api_key': raw_api_key,
             'device': PrintDeviceSerializer(device).data,
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)

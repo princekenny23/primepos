@@ -89,6 +89,29 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const redirectedRef = useRef(false)
   const permissionRedirectRef = useRef(false)
 
+  const isLocalhostBrowser = () => {
+    if (typeof window === "undefined") return false
+    const host = String(window.location.hostname || "").toLowerCase()
+    return host === "localhost" || host === "127.0.0.1" || host === "::1"
+  }
+
+  const checkConnectorStatus = async () => {
+    try {
+      if (isLocalhostBrowser()) {
+        const response = await fetch("/api/local-print/health", { method: "GET" })
+        if (!response.ok) {
+          throw new Error("Local connector not reachable")
+        }
+        setAgentStatus("connected")
+        return
+      }
+
+      setAgentStatus("disconnected")
+    } catch {
+      setAgentStatus("disconnected")
+    }
+  }
+
   const requestOutletSwitch = (outletId: string) => {
     if (!outletId || outletId === String(currentOutlet?.id || "")) return
     setPendingOutletId(outletId)
@@ -140,9 +163,15 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   }
 
   useEffect(() => {
-    // Frontend no longer talks to localhost or local proxy endpoints.
-    // Connector health is reflected server-side through device heartbeat.
-    setAgentStatus("disconnected")
+    checkConnectorStatus()
+
+    const timer = window.setInterval(() => {
+      checkConnectorStatus()
+    }, 15000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
   }, [])
   
   // Helper to translate navigation item names

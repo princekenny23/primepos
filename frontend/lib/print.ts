@@ -1,7 +1,8 @@
 // Lightweight client-side print helper.
 // Responsibilities:
 // - Resolve printer for an outlet
-// - Queue print jobs through backend for connector delivery
+// - Print directly through the local connector when browser is on localhost
+// - Queue print jobs through backend when running from cloud hosts
 // - Use mobile share flow on Android when selected
 
 import { api, apiEndpoints } from "./api"
@@ -17,8 +18,28 @@ type ReceiptPayload = {
 
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
 const PRINT_DEVICE_ID_STORAGE_KEY = "printDeviceId"
+const LOCAL_PRINT_AGENT_URL =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
+const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
+const LOCAL_PRINT_AGENT_TOKEN =
+  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 
 type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
+
+type EscposPrintJob = {
+  printerName: string
+  contentBase64: string
+  copies?: number
+  jobName?: string
+}
+
+function buildAgentHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" }
+  if (LOCAL_PRINT_AGENT_TOKEN) {
+    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
+  }
+  return headers
+}
 
 function isAndroidMobileDevice(): boolean {
   if (typeof navigator === "undefined") return false
@@ -45,6 +66,12 @@ function shouldUseBluetoothUsbThermalPrinterPlus(channel: PrintChannel): boolean
   return isAndroidMobileDevice()
 }
 
+function isLocalhostBrowser(): boolean {
+  if (typeof window === "undefined") return false
+  const host = String(window.location.hostname || "").toLowerCase()
+  return host === "localhost" || host === "127.0.0.1" || host === "::1"
+}
+
 function getPrintDeviceId(): string {
   if (typeof window === "undefined") return ""
   try {
@@ -61,6 +88,30 @@ function getPrintDeviceId(): string {
   } catch {
     return ""
   }
+}
+
+async function resolveDeviceIdForOutlet(outletId: number | string): Promise<string> {
+  try {
+    const devicesRaw: any = await api.get(`/devices/?outlet=${outletId}&is_active=true`)
+    const devices = Array.isArray(devicesRaw) ? devicesRaw : (devicesRaw.results || [])
+    const firstActive = devices[0]
+    const resolvedDeviceId = String(firstActive?.device_id || "").trim()
+    return resolvedDeviceId
+  } catch {
+    return ""
+  }
+}
+
+async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
+  const url = `${LOCAL_PRINT_PROXY_BASE}${path}`
+  const headers = { ...buildAgentHeaders(), ...(init?.headers || {}) }
+  const response = await fetch(url, { ...init, headers })
+  if (!response.ok) {
+    const body = await response.text().catch(() => "")
+    console.error(`[Print Agent] ${path} failed:`, { status: response.status, body, url, headers })
+    throw new Error(`Local Print Agent error (${response.status}): ${body || response.statusText}`)
+  }
+  return response
 }
 
 function escposBase64ToPrintableText(contentBase64: string): string {
@@ -129,6 +180,29 @@ async function printViaBluetoothUsbThermalPrinterPlus(plainTextReceipt: string):
  */
 export async function scanPrinters(persistDefault = true): Promise<string[]> {
   if (typeof window === "undefined") return []
+
+  if (isLocalhostBrowser()) {
+    try {
+      console.log("[Print] Scanning printers from:", LOCAL_PRINT_AGENT_URL)
+      const response = await agentFetch("/printers", { method: "GET" })
+      const data = await response.json().catch(() => ({}))
+      const printers: string[] = Array.isArray(data?.printers) ? data.printers : []
+      const defaultPrinter = data?.default
+      console.log("[Print] Found printers:", printers, "default:", defaultPrinter)
+      if (Array.isArray(printers) && printers.length > 0 && persistDefault) {
+        try {
+          localStorage.setItem("defaultPrinter", defaultPrinter || printers[0])
+          console.log("[Print] Saved default printer:", defaultPrinter || printers[0])
+        } catch {
+          // ignore localStorage errors
+        }
+      }
+      return printers || []
+    } catch (err) {
+      console.error("[Print] Failed to scan local printers", err)
+    }
+  }
+
   try {
     const outletId = localStorage.getItem("currentOutletId")
     if (!outletId) return []
@@ -222,7 +296,8 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
   if (typeof window === "undefined") throw new Error("Printing must be initiated from the browser")
   const channel = getPrintChannelPreference()
   const useMobileFlow = shouldUseBluetoothUsbThermalPrinterPlus(channel)
-  const shouldQueueForLocalAgent = !useMobileFlow
+  const shouldUseDirectLocalAgent = !useMobileFlow && isLocalhostBrowser()
+  const shouldQueueForLocalAgent = !useMobileFlow && !shouldUseDirectLocalAgent
 
   const resolvedOutletId =
     outletId ??
@@ -250,10 +325,12 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
       ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
       : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
 
+    const resolvedDeviceId = resolvedOutletId ? await resolveDeviceIdForOutlet(resolvedOutletId) : ""
+
     const queued: any = await api.post(`/sales/${saleId}/enqueue-print/`, {
       channel: "agent",
       printer_name: printerName || "",
-      device_id: getPrintDeviceId(),
+      device_id: resolvedDeviceId,
       paper_width: "auto",
     })
 
@@ -264,6 +341,24 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
       receiptNumber: queued?.receipt_number,
     })
     return
+  }
+
+  let printerName: string | null = null
+  if (shouldUseDirectLocalAgent) {
+    printerName = resolvedOutletId
+      ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
+      : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
+
+    if (!printerName) {
+      const found = await scanPrinters(true)
+      if (found && found.length > 0) {
+        printerName = found[0]
+      }
+    }
+
+    if (!printerName) {
+      throw new Error(`[Print] No printer found. Check printer settings or ensure Local Print Agent is reachable at ${LOCAL_PRINT_AGENT_URL}`)
+    }
   }
 
   let receiptNumber = String(payload?.sale?.receipt_number || payload?.sale?.id || "")
@@ -295,6 +390,24 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     await printViaBluetoothUsbThermalPrinterPlus(printableText)
     return
   }
+
+  const job: EscposPrintJob = {
+    printerName: printerName || "",
+    contentBase64,
+    jobName: receiptNumber ? `PrimePOS Receipt ${receiptNumber}` : "PrimePOS Receipt",
+  }
+
+  console.log("[Print] Sending print job to agent:", {
+    url: LOCAL_PRINT_AGENT_URL,
+    printer: job.printerName,
+    jobName: job.jobName,
+    contentLength: job.contentBase64.length,
+  })
+
+  await agentFetch("/print", {
+    method: "POST",
+    body: JSON.stringify(job),
+  })
 }
 
 export default printReceipt
