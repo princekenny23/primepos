@@ -507,6 +507,7 @@ static class CloudPoller
 
             SetDeviceApiKey(http, deviceApiKey);
             Console.WriteLine($"[CloudPoller] Device ready. Polling every {pollSeconds}s for jobs on channel='{channel}' printerType='{printerType}'.");
+            var printerSyncIntervalSeconds = 300;
 
             // Send heartbeat immediately so is_active becomes true right away
             try
@@ -519,7 +520,21 @@ static class CloudPoller
                 Console.WriteLine($"[CloudPoller] Initial heartbeat warning: {hbEx.Message}");
             }
 
+            try
+            {
+                await SyncInstalledPrintersAsync(http, apiBase, deviceId, stoppingToken);
+            }
+            catch (DeviceUnauthorizedException)
+            {
+                throw;
+            }
+            catch (Exception syncEx)
+            {
+                Console.WriteLine($"[CloudPoller] Initial printer sync warning: {syncEx.Message}");
+            }
+
             var lastHeartbeatAt = DateTime.UtcNow;
+            var lastPrinterSyncAt = DateTime.UtcNow;
             var pollCount = 0;
 
             try
@@ -542,6 +557,23 @@ static class CloudPoller
                             Console.WriteLine($"[CloudPoller] Heartbeat warning: {hbEx.Message}");
                         }
                         lastHeartbeatAt = DateTime.UtcNow;
+                    }
+
+                    if ((DateTime.UtcNow - lastPrinterSyncAt).TotalSeconds >= printerSyncIntervalSeconds)
+                    {
+                        try
+                        {
+                            await SyncInstalledPrintersAsync(http, apiBase, deviceId, stoppingToken);
+                        }
+                        catch (DeviceUnauthorizedException)
+                        {
+                            throw;
+                        }
+                        catch (Exception syncEx)
+                        {
+                            Console.WriteLine($"[CloudPoller] Printer sync warning: {syncEx.Message}");
+                        }
+                        lastPrinterSyncAt = DateTime.UtcNow;
                     }
 
                     pollCount++;
@@ -750,6 +782,56 @@ static class CloudPoller
             }
         }
         catch { /* ignore JSON parse errors on heartbeat result */ }
+    }
+
+    private static List<string> GetInstalledPrinters()
+    {
+        var printers = new List<string>();
+        if (!OperatingSystem.IsWindows())
+        {
+            return printers;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string printer in System.Drawing.Printing.PrinterSettings.InstalledPrinters)
+        {
+            var name = (printer ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(name) || !seen.Add(name))
+            {
+                continue;
+            }
+            printers.Add(name);
+        }
+
+        return printers;
+    }
+
+    private static async Task SyncInstalledPrintersAsync(
+        HttpClient http,
+        string apiBase,
+        string deviceId,
+        CancellationToken ct)
+    {
+        var endpoint = $"{apiBase}/devices/sync-printers/";
+        var printers = GetInstalledPrinters();
+        var payload = new
+        {
+            device_id = deviceId,
+            printers,
+        };
+
+        using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            throw new DeviceUnauthorizedException();
+        }
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException($"Sync printers failed {(int)response.StatusCode}: {body}");
+        }
+
+        Console.WriteLine($"[CloudPoller] Printer sync OK. device={deviceId} count={printers.Count}");
     }
 
     private sealed class HeartbeatResult

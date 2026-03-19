@@ -210,19 +210,26 @@ export function PrinterSettings() {
         return
       }
 
-      const existing: any = await api.get(`${apiEndpoints.printers.list}?outlet=${outletId}`)
-      const printersList = Array.isArray(existing) ? existing : (existing.results || [])
-      const outletPrinters = printersList
+      const connector = await resolveActiveConnectorForOutlet(outletId)
+      if (!connector?.deviceId) {
+        setPrinters([])
+        setRawPrinters(extraPrinters)
+        if (!silent) {
+          toast({
+            title: "No active connector",
+            description: "No online connector is linked to this outlet yet.",
+            variant: "destructive",
+          })
+        }
+        return
+      }
+
+      const synced: any = await api.get(`/devices/printers/?device_id=${encodeURIComponent(connector.deviceId)}`)
+      const syncedList = Array.isArray(synced?.printers) ? synced.printers : []
+      const discovered = syncedList
         .map((p: any) => String(p?.identifier || p?.name || "").trim())
         .filter(Boolean)
 
-      const cloud: any = await api.get(`/cloud-printers/?outlet=${outletId}`)
-      const cloudList = Array.isArray(cloud) ? cloud : (cloud.results || [])
-      const cloudPrinters = cloudList
-        .map((p: any) => String(p?.identifier || p?.name || "").trim())
-        .filter(Boolean)
-
-      const discovered = Array.from(new Set([...outletPrinters, ...cloudPrinters]))
       setPrinters(discovered)
       const combined = Array.from(new Set([...(discovered || []), ...extraPrinters]))
       setRawPrinters(combined)
@@ -235,7 +242,7 @@ export function PrinterSettings() {
         }
       }
       if (!silent) {
-        toast({ title: "Printers loaded", description: `${combined.length} printer(s) found in backend records.` })
+        toast({ title: "Printers loaded", description: `${combined.length} connector-synced printer(s) found.` })
       }
     } catch (err: any) {
       toast({ title: "Search failed", description: (err && err.message) || String(err), variant: "destructive" })

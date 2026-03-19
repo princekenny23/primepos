@@ -2004,20 +2004,51 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         code = f"{secrets.randbelow(1_000_000):06d}"
         expires_at = timezone.now() + timedelta(minutes=10)
 
-        session, _ = ConnectorPairingSession.objects.update_or_create(
-            device_id=device_id,
-            defaults={
+        try:
+            printer_identifier = str(request.data.get('printer_identifier', '') or '').strip()
+            defaults = {
                 'pairing_code': code,
                 'channel': channel,
-                'printer_identifier': str(request.data.get('printer_identifier', '') or '').strip(),
+                'printer_identifier': printer_identifier,
                 'expires_at': expires_at,
                 'claimed_at': None,
                 'tenant': None,
                 'outlet': None,
                 'issued_api_key': '',
                 'delivered_at': None,
-            },
-        )
+            }
+
+            # Be resilient if duplicate rows exist for the same device_id.
+            # update_or_create would raise MultipleObjectsReturned in that case.
+            sessions_qs = ConnectorPairingSession.objects.filter(device_id=device_id).order_by('-updated_at')
+            session = sessions_qs.first()
+            if session:
+                if sessions_qs.count() > 1:
+                    sessions_qs.exclude(pk=session.pk).delete()
+                for key, value in defaults.items():
+                    setattr(session, key, value)
+                session.save(update_fields=[
+                    'pairing_code',
+                    'channel',
+                    'printer_identifier',
+                    'expires_at',
+                    'claimed_at',
+                    'tenant',
+                    'outlet',
+                    'issued_api_key',
+                    'delivered_at',
+                    'updated_at',
+                ])
+            else:
+                session = ConnectorPairingSession.objects.create(device_id=device_id, **defaults)
+        except Exception as ex:
+            return Response(
+                {
+                    'detail': 'Unable to create pairing session. Confirm backend migrations are up to date.',
+                    'error': str(ex),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         return Response({
             'device_id': session.device_id,
@@ -2210,6 +2241,134 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         device.save(update_fields=['last_seen_at', 'is_active', 'printer_status', 'updated_at'])
 
         return Response({'ok': True, 'device_id': device.device_id, 'last_seen_at': device.last_seen_at})
+
+    @action(
+        detail=False,
+        methods=['post'],
+        url_path='sync-printers',
+        authentication_classes=[SessionAuthentication, BasicAuthentication],
+        throttle_classes=[ConnectorThrottle],
+    )
+    def sync_printers(self, request):
+        """Connector syncs installed local printers into backend records."""
+        logger = logging.getLogger(__name__)
+
+        device = _authenticate_device_by_api_key(request)
+        if not device:
+            logger.warning('sync-printers denied: missing/invalid device API key')
+            return Response({'detail': 'Device API key required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        requested_device_id = str(request.data.get('device_id', '') or '').strip()
+        if requested_device_id and requested_device_id != device.device_id:
+            logger.warning('sync-printers denied: device_id mismatch token=%s payload=%s', device.device_id, requested_device_id)
+            return Response({'detail': 'device_id mismatch for authenticated device.'}, status=status.HTTP_403_FORBIDDEN)
+
+        raw_printers = request.data.get('printers', [])
+        if not isinstance(raw_printers, list):
+            return Response({'detail': 'printers must be an array of strings.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        normalized = []
+        seen = set()
+        for item in raw_printers:
+            name = str(item or '').strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized.append(name)
+
+        if not device.outlet:
+            logger.warning('sync-printers skipped: device %s has no outlet', device.device_id)
+            return Response({'detail': 'Device is not bound to an outlet yet.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing = Printer.objects.filter(device=device)
+        existing_by_identifier = {str(p.identifier or '').strip().lower(): p for p in existing}
+
+        synced_count = 0
+        now = timezone.now()
+
+        for name in normalized:
+            ident = name.strip()
+            ident_key = ident.lower()
+
+            printer = existing_by_identifier.get(ident_key)
+            if printer:
+                updates = []
+                if printer.name != name:
+                    printer.name = name
+                    updates.append('name')
+                if not printer.is_active:
+                    printer.is_active = True
+                    updates.append('is_active')
+                if updates:
+                    updates.append('updated_at')
+                    printer.save(update_fields=updates)
+            else:
+                Printer.objects.create(
+                    tenant=device.tenant,
+                    outlet=device.outlet,
+                    device=device,
+                    name=name,
+                    identifier=ident,
+                    printer_type='receipt',
+                    connection_type='usb',
+                    is_default=False,
+                    is_active=True,
+                )
+            synced_count += 1
+
+        stale_qs = existing.exclude(identifier__in=[p for p in normalized])
+        stale_qs.update(is_active=False, updated_at=now)
+
+        device.last_seen_at = now
+        device.is_active = True
+        device.save(update_fields=['last_seen_at', 'is_active', 'updated_at'])
+
+        logger.info('sync-printers ok: device=%s synced=%s disabled=%s', device.device_id, synced_count, stale_qs.count())
+        return Response({
+            'ok': True,
+            'device_id': device.device_id,
+            'synced_count': synced_count,
+            'disabled_count': stale_qs.count(),
+        })
+
+    @action(detail=False, methods=['get'], url_path='printers', permission_classes=[IsAuthenticated])
+    def device_printers(self, request):
+        """Frontend reads connector-synced printers from backend for a given device_id."""
+        user = request.user
+        tenant = getattr(request, 'tenant', None) or getattr(user, 'tenant', None)
+        if not tenant and not getattr(user, 'is_saas_admin', False):
+            return Response({'detail': 'Tenant context is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device_id = str(request.query_params.get('device_id', '') or '').strip()
+        if not device_id:
+            return Response({'detail': 'device_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device_qs = PrintDevice.objects.select_related('tenant', 'outlet').filter(device_id=device_id)
+        if not getattr(user, 'is_saas_admin', False):
+            device_qs = device_qs.filter(tenant=tenant)
+
+        device = device_qs.first()
+        if not device:
+            return Response({'printers': []})
+
+        if not device.is_active:
+            return Response({'printers': [], 'device_status': 'offline'})
+
+        printers = (
+            Printer.objects
+            .filter(device=device, is_active=True)
+            .order_by('-is_default', 'name')
+            .values('id', 'name', 'identifier', 'is_default', 'updated_at')
+        )
+
+        return Response({
+            'device_id': device.device_id,
+            'device_status': 'online',
+            'printers': list(printers),
+        })
 
 
 class PrinterViewSet(viewsets.ModelViewSet, TenantFilterMixin):
