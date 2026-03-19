@@ -147,6 +147,7 @@ app.MapPost("/cloud/pair/activate", (LocalPairingActivateRequest request) =>
     }
 
     RuntimeCloudState.SetDeviceApiKey(request.ApiKey);
+    ApiKeyStore.Save(request.ApiKey);   // persist across restarts
     return Results.Ok(new { activated = true });
 });
 
@@ -342,15 +343,10 @@ static class CloudPoller
         }
 
         var bootstrapToken = (cloud.AuthToken ?? string.Empty).Trim();
-        var deviceApiKey = (cloud.DeviceApiKey ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(deviceApiKey))
-        {
-            deviceApiKey = RuntimeCloudState.GetDeviceApiKey();
-        }
         var channel = string.IsNullOrWhiteSpace(cloud.Channel) ? "agent" : cloud.Channel.Trim().ToLowerInvariant();
         var deviceId = string.IsNullOrWhiteSpace(cloud.DeviceId) ? Environment.MachineName : cloud.DeviceId.Trim();
         var printerType = NormalizePrinterType(cloud.PrinterType);
-        var pollSeconds = cloud.PollIntervalSeconds <= 0 ? 2 : cloud.PollIntervalSeconds;
+        var pollSeconds = cloud.PollIntervalSeconds <= 0 ? 5 : Math.Max(3, cloud.PollIntervalSeconds);
         var hasTenantContext = !string.IsNullOrWhiteSpace(cloud.TenantId);
         var hasOutletContext = !string.IsNullOrWhiteSpace(cloud.OutletId);
         var hasPairingContext = hasTenantContext || hasOutletContext;
@@ -368,80 +364,180 @@ static class CloudPoller
 
         Console.WriteLine($"[CloudPoller] Running. api={apiBase} channel={channel} device={deviceId} printerType={printerType}");
 
-        if (string.IsNullOrWhiteSpace(deviceApiKey) && !string.IsNullOrWhiteSpace(bootstrapToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
-            try
+            var deviceApiKey = (cloud.DeviceApiKey ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(deviceApiKey))
             {
-                var registration = await RegisterDeviceAsync(http, apiBase, cloud, channel, deviceId, bootstrapToken, ct: stoppingToken);
-                if (!string.IsNullOrWhiteSpace(registration.ApiKey))
+                deviceApiKey = RuntimeCloudState.GetDeviceApiKey();
+            }
+            if (string.IsNullOrWhiteSpace(deviceApiKey))
+            {
+                deviceApiKey = (ApiKeyStore.Load() ?? string.Empty).Trim();
+                if (!string.IsNullOrWhiteSpace(deviceApiKey))
                 {
-                    deviceApiKey = registration.ApiKey.Trim();
                     RuntimeCloudState.SetDeviceApiKey(deviceApiKey);
-                    Console.WriteLine("[CloudPoller] Device API key received from registration.");
+                    Console.WriteLine("[CloudPoller] Loaded device API key from local store.");
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[CloudPoller] Device registration warning: {ex.Message}");
-            }
-        }
 
-        if (string.IsNullOrWhiteSpace(deviceApiKey) && hasPairingContext)
-        {
-            try
+            if (string.IsNullOrWhiteSpace(deviceApiKey) && !string.IsNullOrWhiteSpace(bootstrapToken))
             {
-                var pairing = await RequestPairingCodeAsync(http, apiBase, cloud, channel, deviceId, stoppingToken);
-                if (!string.IsNullOrWhiteSpace(pairing.PairingCode))
+                try
                 {
-                    Console.WriteLine($"[CloudPoller] Enter pairing code in frontend: {pairing.PairingCode}");
+                    var registration = await RegisterDeviceAsync(http, apiBase, cloud, channel, deviceId, bootstrapToken, ct: stoppingToken);
+                    if (!string.IsNullOrWhiteSpace(registration.ApiKey))
+                    {
+                        deviceApiKey = registration.ApiKey.Trim();
+                        RuntimeCloudState.SetDeviceApiKey(deviceApiKey);
+                        ApiKeyStore.Save(deviceApiKey);
+                        Console.WriteLine("[CloudPoller] Device API key received from registration.");
+                    }
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CloudPoller] Device registration warning: {ex.Message}");
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(deviceApiKey) && hasPairingContext)
+            {
+                try
+                {
+                    var pairing = await RequestPairingCodeAsync(http, apiBase, cloud, channel, deviceId, stoppingToken);
+                    if (!string.IsNullOrWhiteSpace(pairing.PairingCode))
+                    {
+                        Console.WriteLine($"[CloudPoller] Enter pairing code in frontend: {pairing.PairingCode}");
+                    }
+
+                    while (!stoppingToken.IsCancellationRequested && string.IsNullOrWhiteSpace(deviceApiKey))
+                    {
+                        var pairingStatus = await PollPairingStatusAsync(http, apiBase, cloud, deviceId, pairing.PairingCode, stoppingToken);
+                        if (pairingStatus?.Paired == true && !string.IsNullOrWhiteSpace(pairingStatus.ApiKey))
+                        {
+                            deviceApiKey = pairingStatus.ApiKey.Trim();
+                            RuntimeCloudState.SetDeviceApiKey(deviceApiKey);
+                            ApiKeyStore.Save(deviceApiKey);
+                            Console.WriteLine("[CloudPoller] Device paired and API key received.");
+                            break;
+                        }
+
+                        var runtimeKey = RuntimeCloudState.GetDeviceApiKey();
+                        if (!string.IsNullOrWhiteSpace(runtimeKey))
+                        {
+                            deviceApiKey = runtimeKey;
+                            ApiKeyStore.Save(deviceApiKey);
+                            Console.WriteLine("[CloudPoller] Using runtime API key provided by local pairing flow.");
+                            break;
+                        }
+
+                        await Task.Delay(TimeSpan.FromSeconds(Math.Max(3, pollSeconds)), stoppingToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CloudPoller] Pairing bootstrap warning: {ex.Message}");
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(deviceApiKey))
+            {
+                Console.WriteLine("[CloudPoller] Skipping bootstrap pairing (TenantId/OutletId not configured). Waiting for frontend Connect flow...");
+            }
+
+            if (string.IsNullOrWhiteSpace(deviceApiKey))
+            {
+                Console.WriteLine("[CloudPoller] Missing DeviceApiKey. Waiting for frontend pairing activation...");
 
                 while (!stoppingToken.IsCancellationRequested && string.IsNullOrWhiteSpace(deviceApiKey))
                 {
-                    var pairingStatus = await PollPairingStatusAsync(http, apiBase, cloud, deviceId, pairing.PairingCode, stoppingToken);
-                    if (pairingStatus?.Paired == true && !string.IsNullOrWhiteSpace(pairingStatus.ApiKey))
-                    {
-                        deviceApiKey = pairingStatus.ApiKey.Trim();
-                        RuntimeCloudState.SetDeviceApiKey(deviceApiKey);
-                        Console.WriteLine("[CloudPoller] Device paired and API key received.");
-                        break;
-                    }
-
                     var runtimeKey = RuntimeCloudState.GetDeviceApiKey();
                     if (!string.IsNullOrWhiteSpace(runtimeKey))
                     {
                         deviceApiKey = runtimeKey;
-                        Console.WriteLine("[CloudPoller] Using runtime API key provided by local pairing flow.");
+                        ApiKeyStore.Save(deviceApiKey);
+                        Console.WriteLine("[CloudPoller] Runtime API key activated from frontend pairing.");
                         break;
                     }
 
-                    Console.WriteLine("[CloudPoller] Waiting for frontend pairing confirmation...");
                     await Task.Delay(TimeSpan.FromSeconds(Math.Max(3, pollSeconds)), stoppingToken);
                 }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[CloudPoller] Pairing bootstrap warning: {ex.Message}");
-            }
-        }
-        else if (string.IsNullOrWhiteSpace(deviceApiKey))
-        {
-            Console.WriteLine("[CloudPoller] Skipping bootstrap pairing (TenantId/OutletId not configured). Waiting for frontend Connect flow...");
-        }
 
-        if (string.IsNullOrWhiteSpace(deviceApiKey))
-        {
-            Console.WriteLine("[CloudPoller] Missing DeviceApiKey. Waiting for frontend pairing activation...");
-
-            while (!stoppingToken.IsCancellationRequested && string.IsNullOrWhiteSpace(deviceApiKey))
-            {
-                var runtimeKey = RuntimeCloudState.GetDeviceApiKey();
-                if (!string.IsNullOrWhiteSpace(runtimeKey))
+                if (string.IsNullOrWhiteSpace(deviceApiKey))
                 {
-                    deviceApiKey = runtimeKey;
-                    Console.WriteLine("[CloudPoller] Runtime API key activated from frontend pairing.");
                     break;
                 }
+            }
+
+            SetDeviceApiKey(http, deviceApiKey);
+            var lastHeartbeatAt = DateTime.UtcNow;
+
+            try
+            {
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    if ((DateTime.UtcNow - lastHeartbeatAt).TotalSeconds >= 30)
+                    {
+                        await HeartbeatAsync(http, apiBase, stoppingToken);
+                        lastHeartbeatAt = DateTime.UtcNow;
+                    }
+
+                    var claimed = await ClaimNextAsync(http, apiBase, channel, deviceId, printerType, stoppingToken);
+                    if (claimed is null)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(pollSeconds), stoppingToken);
+                        continue;
+                    }
+
+                    var contentBase64 = (claimed.Payload?.ContentBase64 ?? string.Empty).Trim();
+                    var printerName = (claimed.PrinterIdentifier ?? string.Empty).Trim();
+                    if (string.IsNullOrWhiteSpace(printerName))
+                    {
+                        printerName = (cloud.DefaultPrinter ?? string.Empty).Trim();
+                    }
+
+                    if (string.IsNullOrWhiteSpace(contentBase64))
+                    {
+                        await CompleteAsync(http, apiBase, claimed.Id, "failed", "Missing content_base64", stoppingToken);
+                        continue;
+                    }
+                    if (string.IsNullOrWhiteSpace(printerName))
+                    {
+                        await CompleteAsync(http, apiBase, claimed.Id, "failed", "Missing printer name", stoppingToken);
+                        continue;
+                    }
+
+                    byte[] payload;
+                    try
+                    {
+                        payload = Convert.FromBase64String(contentBase64);
+                    }
+                    catch
+                    {
+                        await CompleteAsync(http, apiBase, claimed.Id, "failed", "Invalid base64 payload", stoppingToken);
+                        continue;
+                    }
+
+                    var jobName = string.IsNullOrWhiteSpace(claimed.Payload?.ReceiptNumber)
+                        ? "PrimePOS Receipt"
+                        : $"PrimePOS Receipt {claimed.Payload.ReceiptNumber}";
+
+                    var sent = RawPrinterHelper.SendBytesToPrinter(printerName, jobName, payload);
+                    if (!sent)
+                    {
+                        await CompleteAsync(http, apiBase, claimed.Id, "failed", "Failed to send bytes to printer", stoppingToken);
+                        continue;
+                    }
+
+                    await CompleteAsync(http, apiBase, claimed.Id, "completed", string.Empty, stoppingToken);
+                    Console.WriteLine($"[CloudPoller] Printed job #{claimed.Id} on '{printerName}'");
+                }
+            }
+            catch (DeviceUnauthorizedException ex)
+            {
+                Console.WriteLine($"[CloudPoller] {ex.Message}");
+                ClearDeviceApiKey(http);
+                RuntimeCloudState.ClearApiKey();
+                ApiKeyStore.Clear();
 
                 try
                 {
@@ -449,86 +545,9 @@ static class CloudPoller
                 }
                 catch (TaskCanceledException)
                 {
-                    return;
+                    break;
                 }
-            }
-
-            if (string.IsNullOrWhiteSpace(deviceApiKey))
-            {
-                return;
-            }
-        }
-
-        SetDeviceApiKey(http, deviceApiKey);
-
-        var lastHeartbeatAt = DateTime.UtcNow;
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                if ((DateTime.UtcNow - lastHeartbeatAt).TotalSeconds >= 30)
-                {
-                    try
-                    {
-                        await HeartbeatAsync(http, apiBase, stoppingToken);
-                        lastHeartbeatAt = DateTime.UtcNow;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[CloudPoller] Device heartbeat warning: {ex.Message}");
-                    }
-                }
-
-                var claimed = await ClaimNextAsync(http, apiBase, channel, deviceId, printerType, stoppingToken);
-                if (claimed is null)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(pollSeconds), stoppingToken);
-                    continue;
-                }
-
-                var contentBase64 = (claimed.Payload?.ContentBase64 ?? string.Empty).Trim();
-                var printerName = (claimed.PrinterIdentifier ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(printerName))
-                {
-                    printerName = (cloud.DefaultPrinter ?? string.Empty).Trim();
-                }
-
-                if (string.IsNullOrWhiteSpace(contentBase64))
-                {
-                    await CompleteAsync(http, apiBase, claimed.Id, "failed", "Missing content_base64", stoppingToken);
-                    continue;
-                }
-                if (string.IsNullOrWhiteSpace(printerName))
-                {
-                    await CompleteAsync(http, apiBase, claimed.Id, "failed", "Missing printer name", stoppingToken);
-                    continue;
-                }
-
-                byte[] payload;
-                try
-                {
-                    payload = Convert.FromBase64String(contentBase64);
-                }
-                catch
-                {
-                    await CompleteAsync(http, apiBase, claimed.Id, "failed", "Invalid base64 payload", stoppingToken);
-                    continue;
-                }
-
-                var jobName = string.IsNullOrWhiteSpace(claimed.Payload?.ReceiptNumber)
-                    ? "PrimePOS Receipt"
-                    : $"PrimePOS Receipt {claimed.Payload.ReceiptNumber}";
-
-                var sent = RawPrinterHelper.SendBytesToPrinter(printerName, jobName, payload);
-                if (!sent)
-                {
-                    await CompleteAsync(http, apiBase, claimed.Id, "failed", "Failed to send bytes to printer", stoppingToken);
-                    continue;
-                }
-
-                await CompleteAsync(http, apiBase, claimed.Id, "completed", string.Empty, stoppingToken);
-                Console.WriteLine($"[CloudPoller] Printed job #{claimed.Id} on '{printerName}'");
+                continue;
             }
             catch (TaskCanceledException)
             {
@@ -564,6 +583,11 @@ static class CloudPoller
         if ((int)response.StatusCode == 204)
         {
             return null;
+        }
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            throw new DeviceUnauthorizedException();
         }
 
         if (!response.IsSuccessStatusCode)
@@ -644,6 +668,10 @@ static class CloudPoller
         };
 
         using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            throw new DeviceUnauthorizedException();
+        }
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(ct);
@@ -764,6 +792,12 @@ static class CloudPoller
         http.DefaultRequestHeaders.Authorization = null;
         http.DefaultRequestHeaders.Remove("X-Device-API-Key");
         http.DefaultRequestHeaders.Add("X-Device-API-Key", apiKey);
+    }
+
+    private static void ClearDeviceApiKey(HttpClient http)
+    {
+        http.DefaultRequestHeaders.Authorization = null;
+        http.DefaultRequestHeaders.Remove("X-Device-API-Key");
     }
 }
 
@@ -903,6 +937,14 @@ static class RuntimeCloudState
         }
     }
 
+    public static void ClearApiKey()
+    {
+        lock (Sync)
+        {
+            _deviceApiKey = string.Empty;
+        }
+    }
+
     public static object GetSnapshot()
     {
         lock (Sync)
@@ -916,6 +958,70 @@ static class RuntimeCloudState
             };
         }
     }
+}
+
+/// <summary>
+/// Persists the device API key to a local file so it survives connector restarts.
+/// Stored in %USERPROFILE%\.primepos\connector_key.dat (or ~/.primepos/ on Linux).
+/// </summary>
+static class ApiKeyStore
+{
+    private static string StorePath()
+    {
+        var folder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".primepos");
+        Directory.CreateDirectory(folder);
+        return Path.Combine(folder, "connector_key.dat");
+    }
+
+    public static string? Load()
+    {
+        try
+        {
+            var path = StorePath();
+            if (!File.Exists(path)) return null;
+            var key = File.ReadAllText(path).Trim();
+            return string.IsNullOrWhiteSpace(key) ? null : key;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ApiKeyStore] Load warning: {ex.Message}");
+            return null;
+        }
+    }
+
+    public static void Save(string key)
+    {
+        try
+        {
+            File.WriteAllText(StorePath(), key.Trim());
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ApiKeyStore] Save warning: {ex.Message}");
+        }
+    }
+
+    public static void Clear()
+    {
+        try
+        {
+            var path = StorePath();
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ApiKeyStore] Clear warning: {ex.Message}");
+        }
+    }
+}
+
+/// <summary>Thrown when the backend responds with 401 — device must re-pair.</summary>
+sealed class DeviceUnauthorizedException : Exception
+{
+    public DeviceUnauthorizedException()
+        : base("Device API key rejected (401). Connector will re-initiate pairing.") { }
 }
 
 static class RawPrinterHelper

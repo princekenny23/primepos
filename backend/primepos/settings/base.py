@@ -191,6 +191,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': config('THROTTLE_ANON', default='100/hour'),
         'user': config('THROTTLE_USER', default='1000/hour'),
+        'connector': config('THROTTLE_CONNECTOR', default='300/minute'),
     },
 }
 

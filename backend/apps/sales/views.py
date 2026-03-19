@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.authentication import BasicAuthentication, SessionAuthentication
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.throttling import AnonRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction, models
@@ -42,13 +43,30 @@ def _authenticate_device_by_api_key(request):
     if not token:
         return None
 
-    # API keys are hashed, so we verify against active devices.
-    for device in PrintDevice.objects.select_related('tenant', 'outlet').filter(is_active=True):
+    # Check active, non-revoked devices. Order by most recently used so the
+    # actively-polling device is found first, minimising bcrypt iterations.
+    qs = (
+        PrintDevice.objects
+        .select_related('tenant', 'outlet')
+        .filter(is_active=True, api_key_revoked=False)
+        .order_by('-api_key_last_used_at')
+    )
+    for device in qs:
         if device.check_api_key(token):
             device.api_key_last_used_at = timezone.now()
             device.save(update_fields=['api_key_last_used_at', 'updated_at'])
             return device
     return None
+
+
+class ConnectorThrottle(AnonRateThrottle):
+    """High-rate throttle for connector polling endpoints (300/minute by default).
+
+    Configured via DEFAULT_THROTTLE_RATES['connector'] in settings.
+    Much more permissive than the global AnonRateThrottle so the connector
+    can poll every few seconds without hitting a 429.
+    """
+    scope = 'connector'
 
 
 class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
@@ -1668,7 +1686,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         methods=['post'],
         url_path='claim-next',
         authentication_classes=[SessionAuthentication, BasicAuthentication],
-        throttle_classes=[],
+        throttle_classes=[ConnectorThrottle],
     )
     def claim_next(self, request):
         """Atomically claim next pending print job for a device."""
@@ -1696,7 +1714,11 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             requested_printer_type = ''
 
         with transaction.atomic():
-            qs = PrintJob.objects.select_for_update(of=('self',)).filter(
+            # skip_locked=True: skip any rows already locked by a concurrent transaction
+            # instead of blocking, preventing the FOR UPDATE outer-join error and
+            # improving throughput under concurrent connectors.
+            # of=('self',): lock only PrintJob rows, never joined relation rows.
+            qs = PrintJob.objects.select_for_update(of=('self',), skip_locked=True).filter(
                 status='pending',
                 channel=channel,
                 attempts__lt=models.F('max_attempts'),
@@ -1708,11 +1730,12 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             if requested_printer_type:
                 qs = qs.filter(printer_type=requested_printer_type)
             if device_id:
+                # Filter by device_id without any JOIN — avoids the PostgreSQL
+                # "FOR UPDATE cannot be applied to nullable side of outer join" error.
                 qs = qs.filter(models.Q(device_id='') | models.Q(device_id=device_id))
-            if device:
-                qs = qs.filter(models.Q(printer__isnull=True) | models.Q(printer__device=device))
-                if device.printer_identifier:
-                    qs = qs.filter(models.Q(printer_identifier='') | models.Q(printer_identifier=device.printer_identifier))
+            if device and device.printer_identifier:
+                # Filter by printer_identifier without joining through Printer table.
+                qs = qs.filter(models.Q(printer_identifier='') | models.Q(printer_identifier=device.printer_identifier))
 
             job = qs.order_by('created_at').first()
             if not job:
@@ -1729,7 +1752,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
 
         return Response(PrintJobSerializer(job).data)
 
-    @action(detail=False, methods=['post'], url_path='register-device', throttle_classes=[])
+    @action(detail=False, methods=['post'], url_path='register-device', throttle_classes=[ConnectorThrottle])
     def register_device(self, request):
         """Register/update a print connector device for SaaS-safe routing."""
         tenant, user, authenticated_device = self._request_actor(request)
@@ -1816,11 +1839,70 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
     @action(
+        detail=False,
+        methods=['post'],
+        url_path='test-print',
+        permission_classes=[IsAuthenticated],
+        throttle_classes=[],
+    )
+    def test_print(self, request):
+        """Queue a test print job for the current outlet. The connector will claim and print it."""
+        import base64
+
+        tenant, user, _ = self._request_actor(request)
+        if not user:
+            return Response({'detail': 'Authentication required.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+        outlet_id_raw = request.data.get('outlet_id')
+        outlet = None
+        if outlet_id_raw:
+            try:
+                from apps.outlets.models import Outlet
+                outlet = Outlet.objects.get(id=int(outlet_id_raw), tenant=tenant)
+            except Exception:
+                return Response({'detail': 'Invalid outlet_id.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not outlet:
+            outlet = self.get_outlet_for_request(request)
+        if not outlet:
+            return Response({'detail': 'outlet_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        printer_identifier = str(request.data.get('printer_identifier', '') or '').strip()
+        device_id = str(request.data.get('device_id', '') or '').strip()
+
+        ts = timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+        test_text = (
+            "\x1b@"                  # ESC @ — initialise printer
+            "PRIMEPOS TEST PRINT\n"
+            "===================\n"
+            f"{ts}\n"
+            "\n"
+            "If you see this your\n"
+            "connector is working!\n"
+            "\n\n\n"
+            "\x1d\x56\x00"           # GS V 0 — full cut
+        )
+        content_b64 = base64.b64encode(test_text.encode('utf-8')).decode('utf-8')
+
+        job = PrintJob.objects.create(
+            tenant=tenant,
+            outlet=outlet,
+            requested_by=user,
+            channel='agent',
+            printer_type='receipt',
+            status='pending',
+            device_id=device_id,
+            printer_identifier=printer_identifier,
+            payload={'content_base64': content_b64, 'receipt_number': 'TEST'},
+            max_attempts=1,
+        )
+        return Response(PrintJobSerializer(job).data, status=status.HTTP_201_CREATED)
+
+    @action(
         detail=True,
         methods=['post'],
         url_path='complete',
         authentication_classes=[SessionAuthentication, BasicAuthentication],
-        throttle_classes=[],
+        throttle_classes=[ConnectorThrottle],
     )
     def complete(self, request, pk=None):
         """Mark claimed job as completed/failed."""
@@ -1892,7 +1974,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         tenant = getattr(request, 'tenant', None) or getattr(user, 'tenant', None)
         return user, tenant
 
-    @action(detail=False, methods=['post'], url_path='pairing/request', throttle_classes=[])
+    @action(detail=False, methods=['post'], url_path='pairing/request', throttle_classes=[ConnectorThrottle])
     def pairing_request(self, request):
         """Connector requests short-lived pairing code without API key."""
         device_id = str(request.data.get('device_id', '') or '').strip()
@@ -2014,7 +2096,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             'api_key': raw_api_key,
         })
 
-    @action(detail=False, methods=['post'], url_path='pairing/status', throttle_classes=[])
+    @action(detail=False, methods=['post'], url_path='pairing/status', throttle_classes=[ConnectorThrottle])
     def pairing_status(self, request):
         """Connector polls pairing status to auto-receive API key."""
         device_id = str(request.data.get('device_id', '') or '').strip()
@@ -2099,7 +2181,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         methods=['post'],
         url_path='heartbeat',
         authentication_classes=[SessionAuthentication, BasicAuthentication],
-        throttle_classes=[],
+        throttle_classes=[ConnectorThrottle],
     )
     def heartbeat(self, request):
         device = _authenticate_device_by_api_key(request)

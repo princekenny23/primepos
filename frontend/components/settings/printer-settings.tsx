@@ -9,27 +9,12 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
 
-
-const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
-const LOCAL_PRINT_AGENT_URL =
-  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
-const LOCAL_PRINT_AGENT_TOKEN =
-  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
 const PRINT_DEVICE_ID_STORAGE_KEY = "printDeviceId"
 const PRINT_DEVICE_PK_STORAGE_PREFIX = "printDevicePk"
 type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
 type WizardStep = 1 | 2 | 3
-
-function encodeTextToBase64(text: string): string {
-  const bytes = new TextEncoder().encode(text)
-  let binary = ""
-  bytes.forEach((b) => {
-    binary += String.fromCharCode(b)
-  })
-  return btoa(binary)
-}
 
 function getOrCreatePrintDeviceId(): string {
   if (typeof window === "undefined") return ""
@@ -49,70 +34,13 @@ function getOrCreatePrintDeviceId(): string {
   }
 }
 
-async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (LOCAL_PRINT_AGENT_TOKEN) {
-    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
+async function enqueueBackendTestPrint(outletId: number, printerIdentifier: string, deviceId: string): Promise<void> {
+  const payload = {
+    outlet_id: outletId,
+    printer_identifier: printerIdentifier,
+    device_id: deviceId,
   }
-  const url = `${LOCAL_PRINT_PROXY_BASE}${path}`
-  console.log("[Printer Settings] Calling agent:", { url, method: init?.method || "GET" })
-  const response = await fetch(url, {
-    ...init,
-    headers: { ...headers, ...(init?.headers || {}) },
-  })
-  if (!response.ok) {
-    const body = await response.text().catch(() => "")
-    console.error("[Printer Settings] Agent error:", { status: response.status, url, body })
-    throw new Error(`Agent error (${response.status}): ${body || response.statusText}`)
-  }
-  return response
-}
-
-async function directAgentFetch(path: string, init?: RequestInit): Promise<Response> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (LOCAL_PRINT_AGENT_TOKEN) {
-    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
-  }
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`
-  const url = `${LOCAL_PRINT_AGENT_URL.replace(/\/$/, "")}${normalizedPath}`
-  const response = await fetch(url, {
-    ...init,
-    headers: { ...headers, ...(init?.headers || {}) },
-  })
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "")
-    throw new Error(`Direct agent error (${response.status}): ${body || response.statusText}`)
-  }
-
-  return response
-}
-
-async function localAgentFetch(path: string, init?: RequestInit): Promise<Response> {
-  try {
-    return await agentFetch(path, init)
-  } catch (proxyErr: any) {
-    try {
-      return await directAgentFetch(path, init)
-    } catch (directErr: any) {
-      const proxyMsg = proxyErr?.message || "proxy failed"
-      const directMsg = directErr?.message || "direct failed"
-      throw new Error(`Unable to reach local connector. ${proxyMsg}. ${directMsg}.`)
-    }
-  }
-}
-
-async function getLocalPairState(): Promise<{ hasApiKey: boolean; deviceId: string }> {
-  try {
-    const response = await localAgentFetch("/cloud/pair/state", { method: "GET" })
-    const state = await response.json().catch(() => ({}))
-    return {
-      hasApiKey: Boolean(state?.has_api_key),
-      deviceId: String(state?.device_id || "").trim(),
-    }
-  } catch {
-    return { hasApiKey: false, deviceId: "" }
-  }
+  await api.post("/print-jobs/test-print/", payload)
 }
 
 export function PrinterSettings() {
@@ -167,15 +95,15 @@ export function PrinterSettings() {
         next === "bluetooth_usb_thermal_printer_plus"
           ? "Receipts will open Android share for Bluetooth-USB Thermal Printer+."
           : next === "agent"
-            ? "Receipts will always use the Local Print Agent."
-            : "Auto mode enabled: Android uses Bluetooth-USB Thermal Printer+, desktop uses Local Print Agent.",
+            ? "Receipts will always use cloud connector delivery via backend."
+            : "Auto mode enabled: Android uses Bluetooth-USB Thermal Printer+, desktop uses cloud connector delivery.",
     })
   }
 
   useEffect(() => {
     const ping = async () => {
       try {
-        await localAgentFetch("/health", { method: "GET" })
+        await api.get(apiEndpoints.printers.list)
         setConnected(true)
         setStep((prev) => (prev < 2 ? 2 : prev))
       } catch {
@@ -188,15 +116,15 @@ export function PrinterSettings() {
   const connectAgent = async () => {
     setIsConnecting(true)
     try {
-      await localAgentFetch("/health", { method: "GET" })
+      await api.get(apiEndpoints.printers.list)
       setConnected(true)
       setStep((prev) => (prev < 2 ? 2 : prev))
       await autoPairCurrentConnector(true)
       await scanPrinters(true)
-      toast({ title: "Connected", description: "Connector is online and ready for printer selection." })
+      toast({ title: "Connected", description: "Cloud print service is reachable and ready." })
     } catch (err: any) {
       setConnected(false)
-      toast({ title: "Connection failed", description: err?.message || "Unable to reach local PrimePOS connector.", variant: "destructive" })
+      toast({ title: "Connection failed", description: err?.message || "Unable to reach backend print service.", variant: "destructive" })
     } finally {
       setIsConnecting(false)
     }
@@ -204,29 +132,53 @@ export function PrinterSettings() {
 
   const disconnectAgent = async () => {
     setConnected(false)
-    toast({ title: "Disconnected", description: "Disconnected from Local Print Agent." })
+    toast({ title: "Disconnected", description: "Print setup disconnected." })
   }
 
   const scanPrinters = async (silent = false) => {
+    if (!currentOutlet) {
+      if (!silent) {
+        toast({ title: "No outlet", description: "Select an outlet first." })
+      }
+      return
+    }
+
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    if (!outletId) {
+      if (!silent) {
+        toast({ title: "Invalid outlet", description: "Select a valid outlet first." })
+      }
+      return
+    }
+
     setIsScanning(true)
     try {
-      const response = await localAgentFetch("/printers", { method: "GET" })
-      const data = await response.json().catch(() => ({}))
-      const discovered: string[] = Array.isArray(data?.printers) ? data.printers : []
+      const existing: any = await api.get(`${apiEndpoints.printers.list}?outlet=${outletId}`)
+      const printersList = Array.isArray(existing) ? existing : (existing.results || [])
+      const outletPrinters = printersList
+        .map((p: any) => String(p?.identifier || p?.name || "").trim())
+        .filter(Boolean)
+
+      const cloud: any = await api.get(`/cloud-printers/?outlet=${outletId}`)
+      const cloudList = Array.isArray(cloud) ? cloud : (cloud.results || [])
+      const cloudPrinters = cloudList
+        .map((p: any) => String(p?.identifier || p?.name || "").trim())
+        .filter(Boolean)
+
+      const discovered = Array.from(new Set([...outletPrinters, ...cloudPrinters]))
       setPrinters(discovered)
       const combined = Array.from(new Set([...(discovered || []), ...extraPrinters]))
       setRawPrinters(combined)
       setStep((prev) => (prev < 3 ? 3 : prev))
-      if (data?.default && !selectedPrinter) {
-        const next = String(data.default)
+      if (!selectedPrinter && combined.length > 0) {
+        const next = combined[0]
         setSelectedPrinter(next)
-        if (currentOutlet && typeof window !== "undefined") {
-          const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
-          if (outletId) localStorage.setItem(getOutletStorageKey(outletId), next)
+        if (typeof window !== "undefined") {
+          localStorage.setItem(getOutletStorageKey(outletId), next)
         }
       }
       if (!silent) {
-        toast({ title: "Printers found", description: `${combined.length} printer(s) discovered.` })
+        toast({ title: "Printers loaded", description: `${combined.length} printer(s) found in backend records.` })
       }
     } catch (err: any) {
       toast({ title: "Search failed", description: (err && err.message) || String(err), variant: "destructive" })
@@ -240,18 +192,20 @@ export function PrinterSettings() {
       toast({ title: "No printer selected", description: "Select a printer to test-print." })
       return
     }
+    if (!currentOutlet) {
+      toast({ title: "No outlet", description: "Select an outlet before test printing." })
+      return
+    }
+
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    if (!outletId) {
+      toast({ title: "Invalid outlet", description: "Select a valid outlet first." })
+      return
+    }
+
     try {
-      const text = `TEST PRINT\n${new Date().toLocaleString()}\n\n`
-      const contentBase64 = encodeTextToBase64(text)
-      await localAgentFetch("/print", {
-        method: "POST",
-        body: JSON.stringify({
-          printerName: selectedPrinter,
-          contentBase64,
-          jobName: "PrimePOS Test Print",
-        }),
-      })
-      toast({ title: "Test print sent", description: `Sent test page to ${selectedPrinter}` })
+      await enqueueBackendTestPrint(outletId, selectedPrinter, getOrCreatePrintDeviceId())
+      toast({ title: "Test print queued", description: `Queued test print for ${selectedPrinter}.` })
     } catch (err: any) {
       console.error("Test print failed", err)
       toast({ title: "Test print failed", description: err?.message || String(err), variant: "destructive" })
@@ -365,60 +319,29 @@ export function PrinterSettings() {
 
     setIsAutoPairing(true)
     try {
-      const pairState = await getLocalPairState()
-      if (pairState.hasApiKey) {
-        if (!silent) {
-          toast({ title: "Connector already paired", description: "Using active connector key. Skipping re-pair to avoid key reset." })
-        }
-        return
-      }
-
-      const localStartResponse = await localAgentFetch("/cloud/pair/start", {
-        method: "POST",
-        body: JSON.stringify({
-          outlet_id: String(outletId),
-          printer_identifier: selectedPrinter || "",
-        }),
-      })
-      const localStart = await localStartResponse.json().catch(() => ({}))
-      const generatedPairingCode = String(localStart?.pairing_code || "").trim()
-
-      if (!generatedPairingCode) {
-        throw new Error("Connector did not return a pairing code.")
-      }
-
-      const claimPayload: any = {
-        pairing_code: generatedPairingCode,
-        outlet_id: outletId,
-        printer_identifier: selectedPrinter || "",
-      }
-
-      const claimResult: any = await api.post("/devices/pairing/claim/", claimPayload)
-      const apiKey = String(claimResult?.api_key || "").trim()
-      const devicePk = String(claimResult?.device?.id || "").trim()
-
-      if (!apiKey) {
-        throw new Error("Pairing succeeded but no device API key was returned.")
-      }
-
-      await localAgentFetch("/cloud/pair/activate", {
-        method: "POST",
-        body: JSON.stringify({ api_key: apiKey }),
-      })
+      const devicesRaw: any = await api.get(`/devices/?outlet=${outletId}&is_active=true`)
+      const devices = Array.isArray(devicesRaw) ? devicesRaw : (devicesRaw.results || [])
+      const firstDevice = devices[0]
+      const devicePk = String(firstDevice?.id || "").trim()
 
       if (devicePk) {
         setPairedDevicePk(devicePk)
         if (typeof window !== "undefined") {
           localStorage.setItem(getDevicePkStorageKey(outletId), devicePk)
         }
-      }
-
-      if (!silent) {
-        toast({ title: "Connector paired", description: "This connector is now paired to the current outlet." })
+        if (!silent) {
+          toast({ title: "Connector linked", description: "Active connector device found for this outlet." })
+        }
+      } else if (!silent) {
+        toast({
+          title: "No active connector",
+          description: "Start the Windows connector and complete pairing there. Frontend does not call localhost.",
+          variant: "destructive",
+        })
       }
     } catch (err: any) {
       if (!silent) {
-        toast({ title: "Auto-pair failed", description: err?.message || "Unable to pair connector.", variant: "destructive" })
+        toast({ title: "Connector lookup failed", description: err?.message || "Unable to load connector status.", variant: "destructive" })
       }
     } finally {
       setIsAutoPairing(false)
@@ -534,20 +457,20 @@ export function PrinterSettings() {
     <Card>
       <CardHeader>
         <CardTitle>Cloud Printing Setup</CardTitle>
-        <CardDescription>Simple setup: Connect connector, search printers, assign selected printer to this outlet.</CardDescription>
+        <CardDescription>Cloud-safe setup: link connector, load backend printers, assign selected printer to this outlet.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="rounded border p-3 text-sm space-y-3">
           <div className="font-medium">Current outlet</div>
           <div className="text-sm">{currentOutlet?.name || "No outlet selected"}</div>
-          <div className="text-xs text-muted-foreground">Agent URL: {LOCAL_PRINT_AGENT_URL}</div>
           <div className="text-xs text-muted-foreground">Connector status: {connected ? "Connected" : "Disconnected"}</div>
+          <div className="text-xs text-muted-foreground">Frontend sends jobs to backend only.</div>
         </div>
 
         <div className="rounded border p-3 space-y-3">
           <div className="font-medium">Step 1: Connect</div>
           <p className="text-xs text-muted-foreground">
-            Click Connect once. The system checks connector health, auto-pairs to this outlet, and loads printers.
+            Click Connect once. The system checks backend availability and links any active connector device for this outlet.
           </p>
           <div className="flex gap-2">
             <Button onClick={connectAgent} disabled={isConnecting || isAutoPairing}>
@@ -560,7 +483,7 @@ export function PrinterSettings() {
         <div className="rounded border p-3 space-y-3">
           <div className="font-medium">Step 2: Search printers</div>
           <p className="text-xs text-muted-foreground">
-            Search printers connected to this machine, then select one.
+            Load printers already registered in backend for this outlet and connector.
           </p>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => scanPrinters(false)} disabled={!connected || isScanning}>
@@ -617,6 +540,7 @@ export function PrinterSettings() {
             <Button variant="outline" onClick={testPrint} disabled={!selectedPrinter || !connected}>Test Agent Print</Button>
             <Button variant="outline" onClick={testBluetoothUsbThermalPrinterPlus}>Test Bluetooth-USB Thermal Printer+</Button>
           </div>
+          <div className="text-xs text-muted-foreground">Test Agent Print now enqueues a backend print job for the connector to claim.</div>
           <div className="text-xs text-muted-foreground">Step progress: {step}/3</div>
         </div>
 
