@@ -347,9 +347,6 @@ static class CloudPoller
         var deviceId = string.IsNullOrWhiteSpace(cloud.DeviceId) ? Environment.MachineName : cloud.DeviceId.Trim();
         var printerType = NormalizePrinterType(cloud.PrinterType);
         var pollSeconds = cloud.PollIntervalSeconds <= 0 ? 5 : Math.Max(3, cloud.PollIntervalSeconds);
-        var hasTenantContext = !string.IsNullOrWhiteSpace(cloud.TenantId);
-        var hasOutletContext = !string.IsNullOrWhiteSpace(cloud.OutletId);
-        var hasPairingContext = hasTenantContext || hasOutletContext;
 
         using var http = new HttpClient();
         http.Timeout = TimeSpan.FromSeconds(20);
@@ -400,7 +397,7 @@ static class CloudPoller
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(deviceApiKey) && hasPairingContext)
+            if (string.IsNullOrWhiteSpace(deviceApiKey))
             {
                 try
                 {
@@ -438,10 +435,6 @@ static class CloudPoller
                 {
                     Console.WriteLine($"[CloudPoller] Pairing bootstrap warning: {ex.Message}");
                 }
-            }
-            else if (string.IsNullOrWhiteSpace(deviceApiKey))
-            {
-                Console.WriteLine("[CloudPoller] Skipping bootstrap pairing (TenantId/OutletId not configured). Waiting for frontend Connect flow...");
             }
 
             if (string.IsNullOrWhiteSpace(deviceApiKey))
@@ -733,18 +726,11 @@ static class CloudPoller
         string pairingCode,
         CancellationToken ct)
     {
-        int? tenantId = null;
-        if (int.TryParse((cloud.TenantId ?? string.Empty).Trim(), out var parsedTenantId))
-        {
-            tenantId = parsedTenantId;
-        }
-
         var endpoint = $"{apiBase}/devices/pairing/status/";
         var payload = new
         {
             device_id = deviceId,
             pairing_code = pairingCode,
-            tenant_id = tenantId,
         };
 
         using var response = await http.PostAsJsonAsync(endpoint, payload, ct);
@@ -859,26 +845,12 @@ static class CloudPairingBridge
         string deviceId,
         CancellationToken ct)
     {
-        int? outletId = null;
-        if (int.TryParse((cloud.OutletId ?? string.Empty).Trim(), out var parsedOutletId))
-        {
-            outletId = parsedOutletId;
-        }
-
-        int? tenantId = null;
-        if (int.TryParse((cloud.TenantId ?? string.Empty).Trim(), out var parsedTenantId))
-        {
-            tenantId = parsedTenantId;
-        }
-
         var endpoint = $"{apiBase}/devices/pairing/request/";
         var payload = new
         {
             device_id = deviceId,
             name = Environment.MachineName,
             channel,
-            outlet_id = outletId,
-            tenant_id = tenantId,
             printer_identifier = (cloud.DefaultPrinter ?? string.Empty).Trim(),
         };
 

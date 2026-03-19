@@ -60,19 +60,6 @@ const navTranslationKeys: Record<string, string> = {
   "Bar": "common.navigation.bar",
 }
 
-const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
-const LOCAL_PRINT_AGENT_TOKEN =
-  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
-const AGENT_PING_INTERVAL_MS = 15000
-
-function buildAgentHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {}
-  if (LOCAL_PRINT_AGENT_TOKEN) {
-    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
-  }
-  return headers
-}
-
 interface DashboardLayoutProps {
   children: React.ReactNode
   showSubNavbar?: boolean
@@ -153,40 +140,9 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   }
 
   useEffect(() => {
-    let cancelled = false
-    let intervalId: ReturnType<typeof setInterval> | undefined
-
-    const hostname = typeof window !== "undefined" ? window.location.hostname : ""
-    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
-
-    if (!isLocalHost) {
-      setAgentStatus("disconnected")
-      return
-    }
-
-    const pingAgent = async () => {
-      try {
-        const response = await fetch(`${LOCAL_PRINT_PROXY_BASE}/health`, {
-          method: "GET",
-          headers: buildAgentHeaders(),
-        })
-        if (!cancelled) {
-          setAgentStatus(response.ok ? "connected" : "disconnected")
-        }
-      } catch {
-        if (!cancelled) {
-          setAgentStatus("disconnected")
-        }
-      }
-    }
-
-    pingAgent()
-    intervalId = setInterval(pingAgent, AGENT_PING_INTERVAL_MS)
-
-    return () => {
-      cancelled = true
-      if (intervalId) clearInterval(intervalId)
-    }
+    // Frontend no longer talks to localhost or local proxy endpoints.
+    // Connector health is reflected server-side through device heartbeat.
+    setAgentStatus("disconnected")
   }, [])
   
   // Helper to translate navigation item names

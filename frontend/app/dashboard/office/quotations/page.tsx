@@ -67,19 +67,6 @@ import { useTenant } from "@/contexts/tenant-context"
 import { SelectProductModal } from "@/components/modals/select-product-modal"
 import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 
-const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
-const LOCAL_PRINT_AGENT_TOKEN =
-  process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
-
-function encodeTextToBase64(text: string): string {
-  const bytes = new TextEncoder().encode(text)
-  let binary = ""
-  bytes.forEach((b) => {
-    binary += String.fromCharCode(b)
-  })
-  return btoa(binary)
-}
-
 function htmlToText(html: string): string {
   if (typeof window === "undefined") return html
   const doc = new DOMParser().parseFromString(html, "text/html")
@@ -87,24 +74,22 @@ function htmlToText(html: string): string {
 }
 
 async function printTextViaAgent(text: string, printer?: string): Promise<void> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" }
-  if (LOCAL_PRINT_AGENT_TOKEN) {
-    headers["X-Primepos-Token"] = LOCAL_PRINT_AGENT_TOKEN
+  if (typeof window === "undefined") {
+    throw new Error("Printing is only available in browser context")
   }
-  const contentBase64 = encodeTextToBase64(text)
-  const response = await fetch(`${LOCAL_PRINT_PROXY_BASE}/print`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      printerName: printer || "",
-      contentBase64,
-      jobName: "PrimePOS Quotation",
-    }),
-  })
-  if (!response.ok) {
-    const body = await response.text().catch(() => "")
-    throw new Error(body || response.statusText)
+
+  const printWindow = window.open("", "_blank", "width=800,height=900")
+  if (!printWindow) {
+    throw new Error("Pop-up blocked. Allow pop-ups to print this quotation.")
   }
+
+  const safeText = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  const title = printer ? `PrimePOS Quotation - ${printer}` : "PrimePOS Quotation"
+  printWindow.document.write(`<!doctype html><html><head><title>${title}</title></head><body><pre style=\"font-family:monospace;white-space:pre-wrap;\">${safeText}</pre></body></html>`)
+  printWindow.document.close()
+  printWindow.focus()
+  printWindow.print()
+  printWindow.close()
 }
 
 export default function QuotationsPage() {

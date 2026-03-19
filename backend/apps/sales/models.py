@@ -572,6 +572,41 @@ class PrintDevice(models.Model):
         self.api_key_revoked_at = timezone.now()
 
 
+class ConnectorPairingSession(models.Model):
+    """Short-lived pairing bridge between unpaired connector and tenant-scoped device.
+
+    The connector can create a session without tenant/outlet context. A logged-in
+    user later claims the pairing code, binds tenant/outlet, and issues an API key.
+    """
+
+    device_id = models.CharField(max_length=100, db_index=True)
+    pairing_code = models.CharField(max_length=6, db_index=True)
+    channel = models.CharField(max_length=20, default='agent')
+    printer_identifier = models.CharField(max_length=255, blank=True, default='')
+    expires_at = models.DateTimeField()
+    claimed_at = models.DateTimeField(null=True, blank=True)
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.SET_NULL, null=True, blank=True, related_name='connector_pairing_sessions')
+    outlet = models.ForeignKey(Outlet, on_delete=models.SET_NULL, null=True, blank=True, related_name='connector_pairing_sessions')
+    issued_api_key = models.CharField(max_length=255, blank=True, default='')
+    delivered_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'sales_connector_pairing_session'
+        ordering = ['-updated_at']
+        indexes = [
+            models.Index(fields=['device_id', 'pairing_code']),
+            models.Index(fields=['pairing_code', 'expires_at']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.device_id}:{self.pairing_code}"
+
+
 class Printer(models.Model):
     """Physical/local printer endpoint attached to a print device and outlet."""
 
