@@ -90,20 +90,21 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
   return (
     <>
       <ScrollArea className="flex-1">
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 p-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-3">
           {products.map((product) => {
             return (
               <Card
                 key={product.id}
-                className="h-28 cursor-pointer hover:shadow-md transition-shadow border border-muted"
+                className="w-20 h-20 overflow-hidden cursor-pointer hover:shadow-md transition-shadow border border-muted"
                 onClick={() => handleProductClick(product)}
               >
-                <CardContent className="h-full p-2.5">
-                  <div className="flex h-full flex-col gap-1">
-                    <div className="min-h-[2rem] text-xs font-medium leading-tight overflow-hidden">
-                      {product.name}
-                    </div>
-                  </div>
+                <CardContent className="h-full p-1 flex flex-col justify-between">
+                  <p className="text-xs font-medium leading-tight line-clamp-2 overflow-hidden break-words">
+                    {product.name}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-auto">
+                    Stock: {product.stock ?? 0}
+                  </p>
                 </CardContent>
               </Card>
             )

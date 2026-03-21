@@ -8,7 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 from .models import Quotation, QuotationItem
 from .serializers import QuotationSerializer, QuotationItemSerializer
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 from apps.sales.models import Sale, SaleItem
 
 
@@ -18,7 +18,8 @@ class QuotationViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         'tenant', 'outlet', 'user', 'customer'
     ).prefetch_related('items', 'items__product').all()
     serializer_class = QuotationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_sales']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'status', 'customer']
     search_fields = ['quotation_number', 'customer_name']

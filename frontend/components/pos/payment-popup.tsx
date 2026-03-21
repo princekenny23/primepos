@@ -22,7 +22,10 @@ interface CartItem {
 
 interface PaymentPopupProps {
   open: boolean;
-  onClose: () => void;
+  onClose?: () => void;
+  onDismiss?: () => void;
+  onCancel?: () => void;
+  blockOutsideClose?: boolean;
   total: number;
   subtotal?: number;
   discount?: number;
@@ -42,6 +45,9 @@ const NUMPAD = [
 export function PaymentPopup({
   open,
   onClose,
+  onDismiss,
+  onCancel,
+  blockOutsideClose = false,
   total,
   subtotal = 0,
   discount = 0,
@@ -80,9 +86,48 @@ export function PaymentPopup({
     setReceivedAmount('');
   };
 
+  const handleDismiss = () => {
+    if (onDismiss) {
+      onDismiss();
+      return;
+    }
+    if (onClose) {
+      onClose();
+    }
+  };
+
+  const handleCancel = () => {
+    if (onCancel) {
+      onCancel();
+      return;
+    }
+    if (onClose) {
+      onClose();
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="w-[calc(100vw-1rem)] max-w-2xl border border-gray-200 bg-white p-0 shadow-lg max-h-[90vh] overflow-hidden">
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          handleDismiss();
+        }
+      }}
+    >
+      <DialogContent
+        className="w-[calc(100vw-1rem)] max-w-2xl border border-gray-200 bg-white p-0 shadow-lg max-h-[90vh] overflow-hidden"
+        onPointerDownOutside={(event) => {
+          if (blockOutsideClose) {
+            event.preventDefault();
+          }
+        }}
+        onEscapeKeyDown={(event) => {
+          if (blockOutsideClose) {
+            event.preventDefault();
+          }
+        }}
+      >
         <div className="flex h-full max-h-[90vh] flex-col md:max-h-[80vh] md:flex-row">
           {/* Left Column - Transaction Details */}
           <div className="flex-1 border-b border-gray-200 bg-gray-50 p-4 overflow-y-auto md:border-b-0 md:border-r">
@@ -213,7 +258,7 @@ export function PaymentPopup({
             <div className="flex gap-2 mt-auto">
               <Button
                 variant="outline"
-                onClick={onClose}
+                onClick={handleCancel}
                 size="sm"
                 className="flex-1 text-sm"
               >

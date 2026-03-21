@@ -9,7 +9,7 @@ from django.core.files.uploadedfile import UploadedFile
 import logging
 from .models import Tenant
 from .serializers import TenantSerializer
-from .permissions import IsSaaSAdmin, TenantFilterMixin
+from .permissions import IsSaaSAdmin, TenantFilterMixin, HasTenantModuleAccess
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -19,7 +19,8 @@ class TenantViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Tenant ViewSet"""
     queryset = Tenant.objects.prefetch_related('outlets', 'users').all()
     serializer_class = TenantSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['type', 'is_active']
     search_fields = ['name', 'email', 'phone']

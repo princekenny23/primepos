@@ -252,7 +252,6 @@ export default function AdminTenantsPage() {
                           <TableHead>Status</TableHead>
                           <TableHead>Users</TableHead>
                           <TableHead>Outlets</TableHead>
-                          <TableHead>Revenue</TableHead>
                           <TableHead>Total Paid</TableHead>
                           <TableHead>Joined</TableHead>
                           <TableHead>Actions</TableHead>
@@ -276,9 +275,6 @@ export default function AdminTenantsPage() {
                             </TableCell>
                             <TableCell>
                               {Array.isArray(tenant.outlets) ? tenant.outlets.length : (tenant.outlets || 0)}
-                            </TableCell>
-                            <TableCell className="font-semibold">
-                              MWK {(tenant.revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                             </TableCell>
                             <TableCell className="font-semibold text-green-700 dark:text-green-300">
                               MWK {(tenant.total_manual_payments || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}

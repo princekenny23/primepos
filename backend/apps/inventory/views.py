@@ -13,7 +13,7 @@ from .models import StockMovement, StockTake, StockTakeItem, LocationStock, Batc
 from .serializers import StockMovementSerializer, StockTakeSerializer, StockTakeItemSerializer, LocationStockSerializer, BatchSerializer
 from .stock_helpers import get_available_stock, deduct_stock, add_stock, adjust_stock, mark_expired_batches, get_expiring_soon
 from apps.products.models import Product
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,8 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Stock movement ViewSet - tracks inventory movements"""
     queryset = StockMovement.objects.select_related('product', 'outlet', 'user')
     serializer_class = StockMovementSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'product', 'outlet', 'movement_type']
     ordering_fields = ['created_at']
@@ -217,7 +218,8 @@ class StockTakeItemViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Stock take item ViewSet"""
     queryset = StockTakeItem.objects.select_related('product', 'stock_take', 'stock_take__tenant')
     serializer_class = StockTakeItemSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory', 'allow_inventory_stock_take']
     
     def get_queryset(self):
         """Filter stock take items by tenant through stock_take"""
@@ -278,7 +280,8 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Stock take ViewSet"""
     queryset = StockTake.objects.select_related('tenant', 'outlet', 'user').prefetch_related('items')
     serializer_class = StockTakeSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory', 'allow_inventory_stock_take']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'status', 'operating_date']
     ordering_fields = ['created_at', 'operating_date']
@@ -825,7 +828,8 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Location Stock ViewSet - per-location inventory tracking"""
     queryset = LocationStock.objects.select_related('product', 'outlet', 'tenant')
     serializer_class = LocationStockSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet']
     search_fields = ['product__name', 'product__sku', 'product__barcode']
@@ -1020,7 +1024,8 @@ class BatchViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """
     queryset = Batch.objects.select_related('product', 'outlet')
     serializer_class = BatchSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'product', 'outlet', 'batch_number']
     search_fields = ['batch_number', 'product__name']

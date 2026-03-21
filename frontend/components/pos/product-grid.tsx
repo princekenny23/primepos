@@ -37,27 +37,25 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
         {products.map((product) => (
           <Card
             key={product.id}
-            className="cursor-pointer hover:border-primary transition-colors"
+            className="w-20 h-20 overflow-hidden cursor-pointer hover:border-primary transition-colors"
             onClick={() => onAddToCart(product)}
           >
-            <CardContent className="p-4">
-              <div className="flex flex-col items-center text-center space-y-2">
-                <div className="w-16 h-16 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Package className="h-8 w-8 text-primary" />
-                </div>
-                <div className="w-full">
-                  <p className="font-medium text-sm whitespace-normal break-normal">{product.name}</p>
-                  <p className="text-xs text-muted-foreground mt-1">MWK {(product.price || 0).toFixed(2)}</p>
-                  <p className="text-xs text-muted-foreground">Stock: {product.stock}</p>
-                </div>
-                <Button size="sm" className="w-full" onClick={(e) => {
-                  e.stopPropagation()
-                  onAddToCart(product)
-                }}>
-                  <Plus className="h-3 w-3 mr-1" />
-                  Add
-                </Button>
+            <CardContent className="h-full p-1 flex flex-col items-center text-center gap-1">
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <Package className="h-6 w-6 text-primary" />
               </div>
+              <div className="w-full flex-1 flex flex-col justify-center min-h-0 overflow-hidden">
+                <p className="font-medium text-xs line-clamp-2 overflow-hidden break-words">{product.name}</p>
+                <p className="text-xs text-muted-foreground truncate">MWK {(product.price || 0).toFixed(2)}</p>
+                <p className="text-[10px] text-muted-foreground">Stock: {product.stock}</p>
+              </div>
+              <Button size="sm" className="w-full flex-shrink-0" onClick={(e) => {
+                e.stopPropagation()
+                onAddToCart(product)
+              }}>
+                <Plus className="h-3 w-3 mr-1" />
+                Add
+              </Button>
             </CardContent>
           </Card>
         ))}

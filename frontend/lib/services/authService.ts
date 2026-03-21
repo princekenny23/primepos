@@ -63,11 +63,12 @@ export interface RegisterData {
 }
 
 export const authService = {
-  async login(email: string, password: string): Promise<LoginResponse> {
+  async login(identifier: string, password: string): Promise<LoginResponse> {
     try {
       console.log("Attempting login to:", apiEndpoints.auth.login)
       const response = await api.post<LoginResponse>(apiEndpoints.auth.login, {
-        email,
+        identifier,
+        email: identifier,
         password,
       })
       
@@ -160,9 +161,10 @@ export const authService = {
     return response
   },
 
-  async verifyCredentials(email: string, password: string): Promise<boolean> {
+  async verifyCredentials(identifier: string, password: string): Promise<boolean> {
     await api.post(apiEndpoints.auth.login, {
-      email,
+      identifier,
+      email: identifier,
       password,
     })
     return true

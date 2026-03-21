@@ -50,6 +50,9 @@ interface TenantPermissions {
   // Office Features
   allow_office_accounting: boolean
   allow_office_hr: boolean
+  allow_office_users: boolean
+  allow_office_staff: boolean
+  allow_office_shift_management: boolean
   allow_office_reports: boolean
   allow_office_analytics: boolean
 
@@ -108,6 +111,9 @@ export function ManagePermissionsModal({
     // Office Features
     allow_office_accounting: true,
     allow_office_hr: true,
+    allow_office_users: true,
+    allow_office_staff: true,
+    allow_office_shift_management: true,
     allow_office_reports: true,
     allow_office_analytics: true,
 
@@ -129,7 +135,13 @@ export function ManagePermissionsModal({
     try {
       const data = await adminService.getTenantPermissions(tenant.id)
       if (data) {
-        setPermissions(data)
+        // Keep users and staff managed together in the UI.
+        const usersAndStaffEnabled = (data.allow_office_users !== false) || (data.allow_office_staff !== false)
+        setPermissions({
+          ...data,
+          allow_office_users: usersAndStaffEnabled,
+          allow_office_staff: usersAndStaffEnabled,
+        })
       }
     } catch (error: any) {
       console.error("Failed to load permissions:", error)
@@ -144,10 +156,20 @@ export function ManagePermissionsModal({
   }
 
   const handleToggle = (key: keyof TenantPermissions, value: boolean) => {
-    setPermissions(prev => ({
-      ...prev,
-      [key]: value
-    }))
+    setPermissions(prev => {
+      if (key === 'allow_office_users') {
+        return {
+          ...prev,
+          allow_office_users: value,
+          allow_office_staff: value,
+        }
+      }
+
+      return {
+        ...prev,
+        [key]: value
+      }
+    })
 
     // Auto-disable child features when parent app is disabled
     if (!value) {
@@ -180,6 +202,9 @@ export function ManagePermissionsModal({
           ...prev,
           allow_office_accounting: false,
           allow_office_hr: false,
+          allow_office_users: false,
+          allow_office_staff: false,
+          allow_office_shift_management: false,
           allow_office_reports: false,
           allow_office_analytics: false,
         }))
@@ -395,7 +420,7 @@ export function ManagePermissionsModal({
             </TabsContent>
 
             <TabsContent value="features" className="space-y-4 mt-4">
-              {!permissions.allow_sales && !permissions.allow_pos && !permissions.allow_inventory && !permissions.allow_office && !permissions.allow_settings && (
+              {!permissions.allow_sales && !permissions.allow_pos && !permissions.allow_inventory && !permissions.allow_office && !permissions.allow_settings && !permissions.has_distribution && (
                 <Card className="border-amber-500">
                   <CardContent className="pt-6">
                     <div className="flex items-center gap-2 text-amber-600">
@@ -533,28 +558,35 @@ export function ManagePermissionsModal({
                   <CardContent className="space-y-2">
                     <PermissionSwitch
                       id="allow_office_accounting"
-                      label="Accounting"
+                      label="Expenses, Quotations & Payments"
                       checked={permissions.allow_office_accounting}
                       onChange={(checked) => handleToggle('allow_office_accounting', checked)}
                       disabled={!permissions.allow_office}
                     />
                     <PermissionSwitch
-                      id="allow_office_hr"
-                      label="HR & Payroll"
-                      checked={permissions.allow_office_hr}
-                      onChange={(checked) => handleToggle('allow_office_hr', checked)}
+                      id="allow_office_users"
+                      label="Users & Staff Management"
+                      checked={permissions.allow_office_users}
+                      onChange={(checked) => handleToggle('allow_office_users', checked)}
+                      disabled={!permissions.allow_office}
+                    />
+                    <PermissionSwitch
+                      id="allow_office_shift_management"
+                      label="Shift Management"
+                      checked={permissions.allow_office_shift_management}
+                      onChange={(checked) => handleToggle('allow_office_shift_management', checked)}
                       disabled={!permissions.allow_office}
                     />
                     <PermissionSwitch
                       id="allow_office_reports"
-                      label="Reports"
+                      label="Office Reports"
                       checked={permissions.allow_office_reports}
                       onChange={(checked) => handleToggle('allow_office_reports', checked)}
                       disabled={!permissions.allow_office}
                     />
                     <PermissionSwitch
                       id="allow_office_analytics"
-                      label="Analytics Dashboard"
+                      label="Customer Management"
                       checked={permissions.allow_office_analytics}
                       onChange={(checked) => handleToggle('allow_office_analytics', checked)}
                       disabled={!permissions.allow_office}
@@ -571,15 +603,8 @@ export function ManagePermissionsModal({
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <PermissionSwitch
-                      id="allow_settings_users"
-                      label="User Management"
-                      checked={permissions.allow_settings_users}
-                      onChange={(checked) => handleToggle('allow_settings_users', checked)}
-                      disabled={!permissions.allow_settings}
-                    />
-                    <PermissionSwitch
                       id="allow_settings_outlets"
-                      label="Outlet Management"
+                      label="Outlets and Tills"
                       checked={permissions.allow_settings_outlets}
                       onChange={(checked) => handleToggle('allow_settings_outlets', checked)}
                       disabled={!permissions.allow_settings}
@@ -593,10 +618,28 @@ export function ManagePermissionsModal({
                     />
                     <PermissionSwitch
                       id="allow_settings_advanced"
-                      label="Advanced Settings"
+                      label="Business, Tax, Notifications & Activity Logs"
                       checked={permissions.allow_settings_advanced}
                       onChange={(checked) => handleToggle('allow_settings_advanced', checked)}
                       disabled={!permissions.allow_settings}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Distribution Features */}
+              {permissions.has_distribution && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Distribution Features</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <PermissionSwitch
+                      id="has_distribution"
+                      label="Fleet & Delivery Operations"
+                      checked={permissions.has_distribution}
+                      onChange={(checked) => handleToggle('has_distribution', checked)}
+                      description="Enables distribution dashboard, routes, and delivery workflows"
                     />
                   </CardContent>
                 </Card>

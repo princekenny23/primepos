@@ -4,7 +4,6 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/stores/authStore"
 import { useBusinessStore } from "@/stores/businessStore"
@@ -40,17 +39,17 @@ export default function LoginPage() {
     setError(null)
     
     const formData = new FormData(e.currentTarget)
-    const email = formData.get("email") as string
+    const identifier = formData.get("identifier") as string
     const password = formData.get("password") as string
     
-    if (!email || !password) {
-      setError("Please enter both email and password")
+    if (!identifier || !password) {
+      setError("Please enter username/email and password")
       setIsLoading(false)
       return
     }
     
     console.log("Starting login process...")
-    const result = await login(email, password)
+    const result = await login(identifier, password)
     console.log("Login result:", { success: result.success, hasUser: !!result.user, error: result.error })
     
     if (result.success && result.user) {
@@ -196,14 +195,14 @@ export default function LoginPage() {
                 )}
                 
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-gray-700">Useremail</Label>
+                  <Label htmlFor="identifier" className="text-gray-700">Email or Username</Label>
                   <div className="relative">
                     <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input 
-                      id="email" 
-                      name="email" 
-                      type="email" 
-                      placeholder="Enter your email" 
+                      id="identifier" 
+                      name="identifier" 
+                      type="text" 
+                      placeholder="Enter your email or username" 
                       required 
                       disabled={isLoading}
                       className="pl-10"
@@ -212,12 +211,7 @@ export default function LoginPage() {
                 </div>
                 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="password" className="text-gray-700">Password</Label>
-                    <Link href="/auth/forgot-password" className="text-sm text-blue-900 hover:underline">
-                      Forgot password?
-                    </Link>
-                  </div>
+                  <Label htmlFor="password" className="text-gray-700">Password</Label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input 

@@ -9,7 +9,7 @@ from .models import Outlet, Till
 from .serializers import OutletSerializer, TillSerializer
 from .models import Printer
 from .serializers import PrinterSerializer
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 from django.http import HttpResponse
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,8 @@ class OutletViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Outlet ViewSet"""
     queryset = Outlet.objects.select_related('tenant').prefetch_related('tills')
     serializer_class = OutletSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['is_active', 'tenant']
     search_fields = ['name', 'phone', 'email', 'address']
@@ -330,7 +331,8 @@ class TillViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Till ViewSet"""
     queryset = Till.objects.select_related('outlet', 'outlet__tenant')
     serializer_class = TillSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'is_active', 'is_in_use']
     search_fields = ['name']
@@ -488,7 +490,8 @@ class PrinterViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Manage printers registered to outlets"""
     queryset = Printer.objects.select_related('outlet', 'outlet__tenant').all()
     serializer_class = PrinterSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'driver', 'is_default']
     search_fields = ['name', 'identifier']

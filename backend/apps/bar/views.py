@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.db.models import Sum, Count, Max
 from decimal import Decimal
 
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 from apps.customers.models import Customer
 from apps.sales.models import Sale, SaleItem
 from apps.products.models import Product, ProductUnit
@@ -32,7 +32,8 @@ class BarTableViewSet(TenantFilterMixin, viewsets.ModelViewSet):
     """
     queryset = BarTable.objects.all()
     serializer_class = BarTableSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_pos']
     filterset_fields = ['status', 'table_type', 'location', 'is_active', 'outlet']
     search_fields = ['number', 'location', 'notes']
     ordering_fields = ['number', 'created_at', 'status']
@@ -112,7 +113,8 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
     ViewSet for Bar Tabs management with all workflows
     """
     queryset = Tab.objects.all()
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_pos']
     filterset_fields = ['status', 'table', 'customer', 'outlet']
     search_fields = ['tab_number', 'customer_name', 'customer__name']
     ordering_fields = ['opened_at', 'total', 'tab_number']

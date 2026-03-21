@@ -15,7 +15,7 @@ from .serializers import (
     SupplierInvoiceSerializer, PurchaseReturnSerializer,
     ProductSupplierSerializer
 )
-from apps.tenants.permissions import TenantFilterMixin, is_admin_user
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess, is_admin_user
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,8 @@ class SupplierViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Supplier ViewSet"""
     queryset = Supplier.objects.select_related('tenant', 'outlet')
     serializer_class = SupplierSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'is_active']
     search_fields = ['name', 'contact_name', 'email', 'phone']
@@ -118,7 +119,8 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Purchase Order ViewSet - outlet-specific"""
     queryset = PurchaseOrder.objects.select_related('tenant', 'supplier', 'outlet', 'created_by')
     serializer_class = PurchaseOrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'supplier', 'outlet', 'status']
     search_fields = ['po_number', 'notes']
@@ -217,7 +219,8 @@ class SupplierInvoiceViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Supplier Invoice ViewSet - outlet-specific"""
     queryset = SupplierInvoice.objects.select_related('tenant', 'supplier', 'purchase_order', 'outlet')
     serializer_class = SupplierInvoiceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'supplier', 'outlet', 'status']
     search_fields = ['invoice_number', 'supplier_invoice_number']
@@ -302,7 +305,8 @@ class PurchaseReturnViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Purchase Return ViewSet - outlet-specific"""
     queryset = PurchaseReturn.objects.select_related('tenant', 'supplier', 'purchase_order', 'outlet', 'created_by')
     serializer_class = PurchaseReturnSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'supplier', 'outlet', 'status']
     search_fields = ['return_number', 'reason']
@@ -401,7 +405,8 @@ class ProductSupplierViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Product Supplier relationship ViewSet"""
     queryset = ProductSupplier.objects.select_related('tenant', 'product', 'supplier')
     serializer_class = ProductSupplierSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'product', 'supplier', 'is_preferred', 'is_active']
     search_fields = ['product__name', 'supplier__name']

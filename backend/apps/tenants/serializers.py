@@ -148,8 +148,15 @@ class TenantPermissionsSerializer(serializers.ModelSerializer):
                 )
         
         # Office features depend on allow_office
-        if any([data.get('allow_office_accounting'), data.get('allow_office_hr'),
-                data.get('allow_office_reports'), data.get('allow_office_analytics')]):
+        if any([
+            data.get('allow_office_accounting'),
+            data.get('allow_office_hr'),
+            data.get('allow_office_users'),
+            data.get('allow_office_staff'),
+            data.get('allow_office_shift_management'),
+            data.get('allow_office_reports'),
+            data.get('allow_office_analytics')
+        ]):
             if not data.get('allow_office', getattr(self.instance, 'allow_office', True)):
                 raise serializers.ValidationError(
                     "Cannot enable office features when Office app is disabled"

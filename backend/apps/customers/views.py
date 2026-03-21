@@ -10,7 +10,7 @@ from django.utils.dateparse import parse_date
 from decimal import Decimal
 from .models import Customer, LoyaltyTransaction, CreditPayment
 from .serializers import CustomerSerializer, LoyaltyTransactionSerializer, CreditPaymentSerializer
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 from apps.sales.models import Sale
 from django.db.models import DecimalField, ExpressionWrapper, F, Sum
 
@@ -19,7 +19,8 @@ class CustomerViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Customer ViewSet"""
     queryset = Customer.objects.all()
     serializer_class = CustomerSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_sales']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'is_active']
     search_fields = ['name', 'email', 'phone']
@@ -307,7 +308,8 @@ class CreditPaymentViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Credit Payment ViewSet"""
     queryset = CreditPayment.objects.select_related('customer', 'sale', 'user')
     serializer_class = CreditPaymentSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_sales']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'customer', 'sale', 'payment_method']
     search_fields = ['reference_number', 'notes']

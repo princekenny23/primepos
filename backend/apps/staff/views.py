@@ -7,14 +7,15 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from .models import Role, Staff, Attendance
 from .serializers import RoleSerializer, StaffSerializer, AttendanceSerializer
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 
 
 class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Role ViewSet"""
     queryset = Role.objects.all()
     serializer_class = RoleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'is_active']
     search_fields = ['name', 'description']
@@ -97,7 +98,8 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Staff ViewSet"""
     queryset = Staff.objects.select_related('user', 'tenant', 'role').prefetch_related('outlets')
     serializer_class = StaffSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'role', 'is_active']
     search_fields = ['user__name', 'user__email']
@@ -258,7 +260,8 @@ class AttendanceViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Attendance ViewSet"""
     queryset = Attendance.objects.select_related('staff', 'staff__tenant', 'outlet', 'outlet__tenant')
     serializer_class = AttendanceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['staff', 'outlet']
     ordering_fields = ['check_in']

@@ -46,7 +46,7 @@ export const fullNavigation: NavigationItem[] = [
   { name: "Sales", href: "/dashboard/sales", icon: ShoppingBag, permission: "sales" },
   { name: "Sales / POS", href: "/dashboard/pos", icon: Monitor, permission: "pos" },
   { name: "Inventory", href: "/dashboard/inventory", icon: Package, permission: "inventory" },
-  { name: "Distribution", href: "/dashboard/distribution", icon: Package2, permission: "inventory" },
+  { name: "Distribution", href: "/dashboard/distribution", icon: Package2, permission: "distribution" },
   { name: "Office", href: "/dashboard/office", icon: Building2, permission: "office" },
   { name: "Settings", href: "/dashboard/settings", icon: Settings, permission: "settings" },
 ]

@@ -9,14 +9,15 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 from .models import Expense
 from .serializers import ExpenseSerializer
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 
 
 class ExpenseViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Expense ViewSet with tenant filtering"""
     queryset = Expense.objects.select_related('tenant', 'outlet', 'user').all()
     serializer_class = ExpenseSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_office']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'category', 'status', 'payment_method']
     search_fields = ['expense_number', 'title', 'description', 'vendor']

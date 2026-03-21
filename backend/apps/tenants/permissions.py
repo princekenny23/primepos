@@ -118,6 +118,43 @@ class IsTenantAdmin(permissions.BasePermission):
         return user.has_permission('can_settings') or user.effective_role == 'admin'
 
 
+class HasTenantModuleAccess(permissions.BasePermission):
+    """
+    Enforce tenant module/feature access using TenantPermissions flags.
+
+    View attributes:
+    - required_tenant_permissions: str | list[str] | tuple[str, ...]
+    - require_any_tenant_permission: bool (default False)
+    """
+
+    def has_permission(self, request, view):
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+
+        # SaaS admins can access all modules when authenticated.
+        if getattr(user, 'is_saas_admin', False):
+            return True
+
+        required = getattr(view, 'required_tenant_permissions', None)
+        if not required:
+            return True
+
+        tenant = resolve_tenant_from_request(request)
+        if not tenant:
+            return False
+
+        permissions_obj = getattr(tenant, 'permissions', None)
+        if not permissions_obj:
+            return True
+
+        keys = required if isinstance(required, (list, tuple, set)) else [required]
+        checks = [getattr(permissions_obj, key, True) is not False for key in keys]
+        require_any = bool(getattr(view, 'require_any_tenant_permission', False))
+
+        return any(checks) if require_any else all(checks)
+
+
 def is_tenant_admin(user):
     """Helper function to check if user is a tenant admin"""
     if not user or not user.is_authenticated:

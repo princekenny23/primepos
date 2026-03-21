@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 
 User = get_user_model()
 
@@ -49,6 +50,15 @@ class UserSerializer(serializers.ModelSerializer):
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Custom token serializer that includes user info"""
+    identifier = serializers.CharField(write_only=True, required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # USERNAME_FIELD is email in this project; make it optional so identifier can drive auth.
+        username_field = self.username_field
+        if username_field in self.fields:
+            self.fields[username_field].required = False
+            self.fields[username_field].allow_blank = True
     
     @classmethod
     def get_token(cls, user):
@@ -62,6 +72,18 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
     
     def validate(self, attrs):
+        # Support hybrid login using either email or username.
+        identifier = attrs.pop('identifier', None) or attrs.get(self.username_field)
+        if identifier:
+            user = User.objects.filter(
+                Q(email__iexact=identifier) | Q(username__iexact=identifier)
+            ).first()
+            if user:
+                attrs[self.username_field] = getattr(user, self.username_field)
+            else:
+                # Preserve original input so default auth path can still return standard invalid-credentials response.
+                attrs[self.username_field] = identifier
+
         data = super().validate(attrs)
         # Add user data to response
         data['user'] = UserSerializer(self.user).data

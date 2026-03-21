@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from .models import Shift
 from .serializers import ShiftSerializer
 from apps.outlets.models import Till, Outlet
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 from apps.tenants.permissions import is_admin_user
 
 
@@ -19,7 +19,8 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Shift ViewSet"""
     queryset = Shift.objects.select_related('outlet', 'outlet__tenant', 'till', 'user')
     serializer_class = ShiftSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_pos']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'till', 'status', 'operating_date']
     ordering_fields = ['start_time', 'operating_date']

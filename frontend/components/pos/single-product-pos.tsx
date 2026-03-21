@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -27,7 +27,7 @@ import { distributionService } from "@/lib/services/distributionService"
 import { useToast } from "@/components/ui/use-toast"
 import type { Customer } from "@/lib/services/customerService"
 import type { Product } from "@/lib/types"
-import { Package, Plus, Minus, ShoppingCart, X, User, Tag, RotateCcw, Lock, Ban, Truck } from "lucide-react"
+import { Package, Plus, Minus, ShoppingCart, X, User, Tag, RotateCcw, Lock, Truck } from "lucide-react"
 
 interface ProductUnit {
   id: string | number
@@ -51,6 +51,9 @@ export function SingleProductPOS() {
   const [showCustomerSelect, setShowCustomerSelect] = useState(false)
   const [showPaymentMethod, setShowPaymentMethod] = useState(false)
   const [isDeliveryRequired, setIsDeliveryRequired] = useState(false)
+  const [transactionLocked, setTransactionLocked] = useState(false)
+  const [initiatedSaleId, setInitiatedSaleId] = useState("")
+  const paymentCloseByConfirmRef = useRef(false)
   // Receipt preview removed from POS terminal
   const [products, setProducts] = useState<Product[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
@@ -125,6 +128,15 @@ export function SingleProductPOS() {
   }, [selectedProduct, selectedUnit])
 
   const handleAddToCart = () => {
+    if (transactionLocked) {
+      toast({
+        title: "Transaction locked",
+        description: "Complete or cancel payment before editing cart.",
+        variant: "destructive",
+      })
+      return
+    }
+
     if (!selectedProduct) {
       toast({
         title: "Error",
@@ -177,7 +189,55 @@ export function SingleProductPOS() {
       })
       return
     }
-    setShowPaymentMethod(true)
+    if (!currentOutlet || !activeShift) {
+      toast({
+        title: "Error",
+        description: "Missing required information. Please ensure you have an active shift.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (transactionLocked) {
+      toast({
+        title: "Transaction locked",
+        description: "Complete or cancel the current payment flow first.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    void (async () => {
+      try {
+        const paymentTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+        const initiated = await saleService.initiatePayment({
+          outlet: String(currentOutlet!.id),
+          shift: String(activeShift!.id),
+          customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+          delivery_required: isDeliveryRequired,
+          items_data: cart.map((item) => ({
+            product_id: String(item.productId),
+            quantity: item.quantity,
+            price: item.price,
+          })),
+          subtotal: paymentTotal,
+          total: paymentTotal,
+          tax: 0,
+          discount: 0,
+          notes: "Transaction initiated from POS pay screen.",
+        })
+
+        setInitiatedSaleId(String(initiated.id))
+        setTransactionLocked(true)
+        setShowPaymentMethod(true)
+      } catch (error: any) {
+        toast({
+          title: "Checkout start failed",
+          description: error?.message || "Unable to initiate transaction.",
+          variant: "destructive",
+        })
+      }
+    })()
   }
 
   const handleDelivery = async () => {
@@ -248,6 +308,7 @@ export function SingleProductPOS() {
   }
 
   const handlePayment = async (paymentMethod: string, amount: number) => {
+    paymentCloseByConfirmRef.current = true
     if (!currentBusiness || !currentOutlet || !activeShift) {
       toast({
         title: "Error",
@@ -259,28 +320,16 @@ export function SingleProductPOS() {
 
     setIsProcessingPayment(true)
     try {
-      const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
-      
-      const paymentTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
-
-      const saleData = {
-        outlet: String(currentOutlet.id),
-        shift: String(activeShift.id),
-        customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
-        delivery_required: isDeliveryRequired,
-        items_data: cart.map((item) => ({
-          product_id: String(item.productId),
-          quantity: item.quantity,
-          price: item.price,
-        })),
-        subtotal: paymentTotal,
-        total: paymentTotal,
-        payment_method: paymentMethod as any,
-        discount: 0,
-        tax: 0,
+      if (!initiatedSaleId) {
+        throw new Error("No initiated transaction found. Click Pay again.")
       }
 
-      const sale = await saleService.create(saleData as any)
+      const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+
+      const sale = await saleService.finalizePayment(initiatedSaleId, {
+        payment_method: paymentMethod as any,
+        cash_received: amount,
+      })
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("sale-completed"))
@@ -298,6 +347,8 @@ export function SingleProductPOS() {
 
       clearCart()
       setSelectedCustomer(null)
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
 
       // Attempt to print the canonical saved sale (non-blocking)
       try {
@@ -325,6 +376,35 @@ export function SingleProductPOS() {
     } finally {
       setIsProcessingPayment(false)
       setShowPaymentMethod(false)
+      setIsDeliveryRequired(false)
+    }
+  }
+
+  const handlePaymentCancel = async () => {
+    if (paymentCloseByConfirmRef.current) {
+      paymentCloseByConfirmRef.current = false
+      return
+    }
+    setShowPaymentMethod(false)
+    if (!transactionLocked || !initiatedSaleId) {
+      return
+    }
+
+    try {
+      await saleService.voidTransaction(initiatedSaleId, "Cashier cancelled payment popup")
+      clearCart()
+      setSelectedCustomer(null)
+      toast({ title: "Transaction voided", description: "Initiated transaction was cancelled and logged." })
+    } catch (error: any) {
+      toast({
+        title: "Cancel failed",
+        description: error?.message || "Unable to void initiated transaction.",
+        variant: "destructive",
+      })
+    } finally {
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
+      setIsProcessingPayment(false)
       setIsDeliveryRequired(false)
     }
   }
@@ -586,6 +666,7 @@ export function SingleProductPOS() {
                             updateCartItem(item.id, { quantity: newQuantity })
                           }
                         }}
+                        disabled={transactionLocked}
                       >
                         <Minus className="h-4 w-4" />
                       </Button>
@@ -595,6 +676,7 @@ export function SingleProductPOS() {
                         size="icon"
                         className="h-8 w-8"
                         onClick={() => updateCartItem(item.id, { quantity: item.quantity + 1 })}
+                        disabled={transactionLocked}
                       >
                         <Plus className="h-4 w-4" />
                       </Button>
@@ -603,6 +685,7 @@ export function SingleProductPOS() {
                         size="icon"
                         className="h-8 w-8 text-destructive"
                         onClick={() => removeFromCart(item.id)}
+                        disabled={transactionLocked}
                       >
                         <X className="h-4 w-4" />
                       </Button>
@@ -649,16 +732,6 @@ export function SingleProductPOS() {
               <Button
                 size="sm"
                 variant="outline"
-                className="gap-2 text-red-600"
-                disabled={cart.length === 0}
-                title="Void sale"
-              >
-                <Ban className="h-4 w-4" />
-                <span className="text-xs">Void</span>
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
                 className="gap-2 text-sky-700"
                 disabled={cart.length === 0}
                 title="Delivery sale"
@@ -686,7 +759,7 @@ export function SingleProductPOS() {
                   setIsDeliveryRequired(false)
                   handleCheckout()
                 }}
-                disabled={isProcessingPayment || cart.length === 0}
+                disabled={isProcessingPayment || cart.length === 0 || transactionLocked}
               >
                 {isProcessingPayment ? (
                   "Processing..."
@@ -709,7 +782,13 @@ export function SingleProductPOS() {
       
       <PaymentPopup
         open={showPaymentMethod}
-        onClose={() => setShowPaymentMethod(false)}
+        onDismiss={() => {
+          setShowPaymentMethod(false)
+        }}
+        onCancel={() => {
+          void handlePaymentCancel()
+        }}
+        blockOutsideClose={transactionLocked}
         total={cartTotal}
         subtotal={cartTotal}
         discount={0}

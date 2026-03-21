@@ -6,7 +6,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from .models import Product, Category, ProductUnit
 from .serializers import ProductSerializer, CategorySerializer, ProductUnitSerializer
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 from django.db import transaction
 from decimal import Decimal
 import logging
@@ -22,7 +22,8 @@ class CategoryViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Category ViewSet"""
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory', 'allow_inventory_products']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant']
     search_fields = ['name', 'description']
@@ -109,7 +110,8 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Product ViewSet - outlet-specific products"""
     queryset = Product.objects.select_related('category', 'tenant', 'outlet')
     serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory', 'allow_inventory_products']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'category', 'is_active']
     search_fields = ['name', 'sku', 'barcode', 'description']
@@ -1267,7 +1269,8 @@ class ProductUnitViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Product Unit ViewSet for multi-unit selling - UNITS ONLY ARCHITECTURE"""
     queryset = ProductUnit.objects.select_related('product', 'product__tenant', 'product__outlet')
     serializer_class = ProductUnitSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_inventory', 'allow_inventory_products']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['product', 'is_active']
     search_fields = ['unit_name', 'product__name']

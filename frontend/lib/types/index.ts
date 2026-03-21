@@ -78,6 +78,9 @@ export interface User {
       allow_inventory_suppliers?: boolean
       allow_office_accounting?: boolean
       allow_office_hr?: boolean
+      allow_office_users?: boolean
+      allow_office_staff?: boolean
+      allow_office_shift_management?: boolean
       allow_office_reports?: boolean
       allow_office_analytics?: boolean
       allow_settings_users?: boolean

@@ -7,14 +7,15 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from .models import Table, KitchenOrderTicket, RestaurantOrder
 from .serializers import TableSerializer, KitchenOrderTicketSerializer, RestaurantOrderSerializer
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 
 
 class TableViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Restaurant Table ViewSet"""
     queryset = Table.objects.select_related('tenant', 'outlet', 'outlet__tenant')
     serializer_class = TableSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_pos']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'status', 'is_active']
     search_fields = ['number', 'location']
@@ -123,7 +124,8 @@ class KitchenOrderTicketViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Kitchen Order Ticket ViewSet"""
     queryset = KitchenOrderTicket.objects.select_related('tenant', 'outlet', 'sale', 'table')
     serializer_class = KitchenOrderTicketSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_pos']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'status', 'priority', 'table']
     ordering_fields = ['sent_to_kitchen_at', 'priority']
@@ -329,7 +331,8 @@ class RestaurantOrderViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Restaurant Order ViewSet for managing persistent order sessions"""
     queryset = RestaurantOrder.objects.select_related('tenant', 'outlet', 'customer', 'table', 'sale', 'till')
     serializer_class = RestaurantOrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_pos']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'status', 'table', 'order_type', 'customer']
     search_fields = ['order_number', 'customer_name']

@@ -72,6 +72,25 @@ export interface VoidSaleData {
   reason?: string
 }
 
+export interface InitiatePaymentData {
+  outlet: string | number
+  shift?: string | number
+  customer?: string | number
+  delivery_required?: boolean
+  items_data: Array<{
+    product_id: string | number
+    quantity: number
+    price: number
+    unit_id?: string | number
+    notes?: string
+  }>
+  subtotal?: number
+  tax?: number
+  discount?: number
+  total?: number
+  notes?: string
+}
+
 // Transform backend sale to frontend format
 function transformSale(backendSale: any): Sale {
   const paymentMethod = (backendSale.payment_method || backendSale.paymentMethod || "cash") as string
@@ -254,6 +273,30 @@ export const saleService = {
         },
       }))
     }
+    return transformSale(response)
+  },
+
+  async initiatePayment(data: InitiatePaymentData): Promise<SaleWithMetadata> {
+    const response = await api.post<any>(`/sales/initiate-payment/`, data)
+    return transformSale(response)
+  },
+
+  async finalizePayment(
+    id: string,
+    payload: {
+      payment_method: "cash" | "card" | "mobile" | "tab" | "credit"
+      cash_received?: number
+      change?: number
+    }
+  ): Promise<SaleWithMetadata> {
+    const response = await api.post<any>(`/sales/${id}/finalize-payment/`, payload)
+    return transformSale(response)
+  },
+
+  async voidTransaction(id: string, reason?: string): Promise<SaleWithMetadata> {
+    const response = await api.post<any>(`/sales/${id}/void-transaction/`, {
+      reason: reason || "Cancelled during payment stage",
+    })
     return transformSale(response)
   },
 

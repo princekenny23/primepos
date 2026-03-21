@@ -20,7 +20,7 @@ from .services import ReceiptService
 from apps.products.models import Product, ProductUnit
 from apps.inventory.models import StockMovement, LocationStock, Batch
 from apps.inventory.stock_helpers import get_available_stock, deduct_stock, add_stock
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 
 
 def _extract_bearer_token(request):
@@ -76,7 +76,8 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         'items__product'  # Prefetch product data for sale items to avoid N+1 queries
     )
     serializer_class = SaleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_sales']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'user', 'status', 'payment_method']
     search_fields = ['receipt_number', 'notes']
@@ -679,6 +680,272 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
         response_serializer = SaleSerializer(sale)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    @action(detail=False, methods=['post'], url_path='initiate-payment')
+    def initiate_payment(self, request):
+        """Create a pending sale when cashier clicks Pay, before payment confirmation."""
+        logger = logging.getLogger(__name__)
+
+        tenant = self.get_tenant_for_request(request)
+        if not tenant and not request.user.is_saas_admin:
+            return Response({"detail": "User must have a tenant"}, status=status.HTTP_400_BAD_REQUEST)
+        if not tenant:
+            return Response({"detail": "Tenant is required. Please provide tenant_id in request data."}, status=status.HTTP_400_BAD_REQUEST)
+
+        outlet_id = request.data.get("outlet")
+        if not outlet_id:
+            return Response({"detail": "outlet is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        from apps.outlets.models import Outlet
+        try:
+            outlet = Outlet.objects.get(id=outlet_id, tenant=tenant)
+        except Outlet.DoesNotExist:
+            return Response({"detail": "Invalid outlet"}, status=status.HTTP_400_BAD_REQUEST)
+
+        shift = None
+        shift_id = request.data.get("shift")
+        if shift_id:
+            from apps.shifts.models import Shift
+            try:
+                shift = Shift.objects.get(id=shift_id, outlet__tenant=tenant)
+            except Shift.DoesNotExist:
+                return Response({"detail": "Invalid shift"}, status=status.HTTP_400_BAD_REQUEST)
+
+        customer = None
+        customer_id = request.data.get("customer")
+        if customer_id:
+            from apps.customers.models import Customer
+            try:
+                customer = Customer.objects.get(id=customer_id, tenant=tenant)
+            except Customer.DoesNotExist:
+                return Response({"detail": "Invalid customer"}, status=status.HTTP_400_BAD_REQUEST)
+
+        items_data = request.data.get("items_data") or request.data.get("items") or []
+        if not items_data:
+            return Response({"detail": "items_data is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        def to_decimal(value, field_name, default=None):
+            if value is None or value == "":
+                return default
+            try:
+                return Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                raise serializers.ValidationError({field_name: "Invalid decimal value"})
+
+        parsed_items = []
+        computed_subtotal = Decimal("0")
+
+        for idx, item_data in enumerate(items_data):
+            product_id = item_data.get("product_id") or item_data.get("productId")
+            if not product_id:
+                raise serializers.ValidationError(f"Item {idx + 1}: product_id is required")
+
+            try:
+                quantity = int(item_data.get("quantity", 1))
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(f"Item {idx + 1}: Invalid quantity")
+            if quantity <= 0:
+                raise serializers.ValidationError(f"Item {idx + 1}: Quantity must be greater than 0")
+
+            price = to_decimal(item_data.get("price", "0"), f"items_data[{idx}].price", Decimal("0"))
+            if price <= 0:
+                raise serializers.ValidationError(f"Item {idx + 1}: Price must be greater than 0")
+
+            try:
+                product = Product.objects.get(id=product_id, tenant=tenant, outlet=outlet)
+            except Product.DoesNotExist:
+                raise serializers.ValidationError(f"Item {idx + 1}: Product {product_id} not found")
+
+            unit = None
+            unit_name = product.unit
+            quantity_in_base_units = quantity
+            unit_id = item_data.get("unit_id") or item_data.get("unitId")
+            if unit_id:
+                try:
+                    unit = ProductUnit.objects.get(id=unit_id, product=product, is_active=True)
+                    unit_name = unit.unit_name
+                    quantity_in_base_units = unit.convert_to_base_units(quantity)
+                except ProductUnit.DoesNotExist:
+                    raise serializers.ValidationError(f"Item {idx + 1}: Unit {unit_id} not found or inactive")
+
+            line_total = (price * Decimal(quantity)).quantize(Decimal("0.01"))
+            computed_subtotal += line_total
+
+            parsed_items.append({
+                "product": product,
+                "unit": unit,
+                "unit_name": unit_name,
+                "quantity": quantity,
+                "quantity_in_base_units": quantity_in_base_units,
+                "price": price.quantize(Decimal("0.01")),
+                "total": line_total,
+                "notes": item_data.get("notes", ""),
+            })
+
+        subtotal = (to_decimal(request.data.get("subtotal"), "subtotal", None) or computed_subtotal).quantize(Decimal("0.01"))
+        tax = (to_decimal(request.data.get("tax", 0), "tax", Decimal("0")) or Decimal("0")).quantize(Decimal("0.01"))
+        discount = (to_decimal(request.data.get("discount", 0), "discount", Decimal("0")) or Decimal("0")).quantize(Decimal("0.01"))
+        total = to_decimal(request.data.get("total"), "total", None)
+        if total is None or total <= 0:
+            total = (subtotal + tax - discount).quantize(Decimal("0.01"))
+
+        if total <= 0:
+            return Response({"detail": "total must be greater than 0"}, status=status.HTTP_400_BAD_REQUEST)
+
+        sale = Sale.objects.create(
+            receipt_number=self._generate_receipt_number(tenant),
+            user=request.user,
+            tenant=tenant,
+            outlet=outlet,
+            shift=shift,
+            customer=customer,
+            subtotal=subtotal,
+            tax=tax,
+            discount=discount,
+            discount_amount=discount,
+            total=total,
+            payment_method="tab",
+            status="pending",
+            payment_status="unpaid",
+            amount_paid=Decimal("0"),
+            is_void=False,
+            void_reason="",
+            delivery_required=bool(request.data.get("delivery_required", False)),
+            notes=request.data.get("notes", "") or "Transaction initiated from POS pay screen.",
+        )
+
+        for item in parsed_items:
+            SaleItem.objects.create(
+                sale=sale,
+                product=item["product"],
+                unit=item["unit"],
+                product_name=item["product"].name,
+                variation_name="",
+                unit_name=item["unit_name"],
+                quantity=item["quantity"],
+                quantity_in_base_units=item["quantity_in_base_units"],
+                price=item["price"],
+                tax_rate_at_sale=Decimal("0"),
+                total=item["total"],
+                notes=item["notes"],
+                kitchen_status="pending",
+            )
+
+        logger.info("POS payment initiated: sale_id=%s receipt=%s user=%s", sale.id, sale.receipt_number, request.user.id)
+        return Response(SaleSerializer(sale).data, status=status.HTTP_201_CREATED)
+
+    @transaction.atomic
+    @action(detail=True, methods=['post'], url_path='finalize-payment')
+    def finalize_payment(self, request, pk=None):
+        """Finalize an initiated sale after cashier confirms payment."""
+        logger = logging.getLogger(__name__)
+        sale = self.get_object()
+
+        if sale.is_void:
+            return Response({"detail": "Sale is voided and cannot be finalized."}, status=status.HTTP_400_BAD_REQUEST)
+        if sale.status == 'refunded':
+            return Response({"detail": "Refunded sale cannot be finalized."}, status=status.HTTP_400_BAD_REQUEST)
+        if sale.payment_status == 'paid' and sale.status == 'completed':
+            return Response({"detail": "Sale already finalized."}, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_method = str(request.data.get("payment_method") or sale.payment_method or "cash").strip().lower()
+        if payment_method not in ['cash', 'card', 'mobile', 'tab', 'credit']:
+            return Response({"detail": "Invalid payment_method."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Deduct stock only once, at finalization time.
+        if not bool(sale.delivery_required):
+            for item in sale.items.select_related('product').all():
+                if not item.product:
+                    continue
+
+                product = Product.objects.select_for_update().get(id=item.product.id, tenant=sale.tenant, outlet=sale.outlet)
+                required = int(item.quantity_in_base_units or item.quantity)
+                if product.stock < required:
+                    return Response(
+                        {"detail": f"Insufficient stock for {product.name}. Available: {product.stock}, required: {required}."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                product.stock -= required
+                product.save(update_fields=['stock'])
+
+                StockMovement.objects.create(
+                    tenant=sale.tenant,
+                    product=product,
+                    outlet=sale.outlet,
+                    user=request.user,
+                    movement_type='sale',
+                    quantity=required,
+                    reference_id=str(sale.id),
+                    reason=f"Sale {sale.receipt_number} finalized",
+                )
+
+        sale.payment_method = payment_method
+        if payment_method in ['cash', 'card', 'mobile']:
+            sale.status = 'completed'
+            sale.payment_status = 'paid'
+            sale.amount_paid = sale.total
+            sale.cash_amount = Decimal('0')
+            sale.card_amount = Decimal('0')
+            sale.mobile_amount = Decimal('0')
+            if payment_method == 'cash':
+                sale.cash_amount = sale.total
+                cash_received = request.data.get('cash_received')
+                if cash_received not in (None, ''):
+                    try:
+                        sale.cash_received = Decimal(str(cash_received)).quantize(Decimal('0.01'))
+                        sale.change_given = max(Decimal('0'), (sale.cash_received - sale.total)).quantize(Decimal('0.01'))
+                    except Exception:
+                        pass
+            elif payment_method == 'card':
+                sale.card_amount = sale.total
+            elif payment_method == 'mobile':
+                sale.mobile_amount = sale.total
+        elif payment_method in ['tab', 'credit']:
+            sale.status = 'pending'
+            sale.payment_status = 'unpaid'
+            sale.amount_paid = Decimal('0')
+
+        finalized_note = f"Payment finalized by user {request.user.id} at {timezone.now().isoformat()} via {payment_method}."
+        sale.notes = f"{(sale.notes or '').strip()} {finalized_note}".strip()
+        sale.save()
+
+        transaction.on_commit(
+            lambda sale_id=sale.id, user_id=request.user.id: self._run_post_sale_commit_tasks(sale_id, user_id)
+        )
+
+        logger.info("POS payment finalized: sale_id=%s receipt=%s user=%s method=%s", sale.id, sale.receipt_number, request.user.id, payment_method)
+        return Response(SaleSerializer(sale).data)
+
+    @transaction.atomic
+    @action(detail=True, methods=['post'], url_path='void-transaction')
+    def void_transaction(self, request, pk=None):
+        """Void an initiated transaction (post-pay stage) with audit details."""
+        logger = logging.getLogger(__name__)
+        sale = self.get_object()
+
+        if sale.is_void:
+            return Response({"detail": "Sale already voided."}, status=status.HTTP_400_BAD_REQUEST)
+        if sale.status == 'completed' or sale.payment_status == 'paid':
+            return Response({"detail": "Completed sale cannot be voided. Use refund flow instead."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = str(request.data.get('reason', '') or '').strip()
+        if not reason:
+            reason = 'Cancelled during payment stage'
+
+        sale.status = 'cancelled'
+        sale.payment_status = 'unpaid'
+        sale.is_void = True
+        sale.void_reason = reason
+        audit_line = f"VOID by user {request.user.id} at {timezone.now().isoformat()} reason: {reason}."
+        sale.notes = f"{(sale.notes or '').strip()} {audit_line}".strip()
+        sale.save(update_fields=['status', 'payment_status', 'is_void', 'void_reason', 'notes', 'updated_at'])
+
+        sale.items.update(kitchen_status='cancelled')
+
+        logger.info("POS transaction voided: sale_id=%s receipt=%s user=%s reason=%s", sale.id, sale.receipt_number, request.user.id, reason)
+        return Response(SaleSerializer(sale).data)
     
     @transaction.atomic
     @action(detail=False, methods=['post'], url_path='checkout-cash')
@@ -1456,7 +1723,8 @@ class ReceiptViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
     """Receipt ViewSet - Read-only for retrieving receipts"""
     queryset = Receipt.objects.select_related('sale', 'tenant', 'generated_by', 'sale__outlet', 'sale__customer')
     serializer_class = ReceiptSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_sales']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'sale', 'format', 'is_sent']
     search_fields = ['receipt_number']
@@ -1616,6 +1884,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
     queryset = PrintJob.objects.select_related('tenant', 'outlet', 'sale', 'requested_by').all()
     serializer_class = PrintJobSerializer
     permission_classes = [AllowAny]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'status', 'channel', 'device_id']
     search_fields = ['printer_identifier', 'device_id', 'sale__receipt_number']
@@ -1858,7 +2127,7 @@ class PrintJobViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         detail=False,
         methods=['post'],
         url_path='test-print',
-        permission_classes=[IsAuthenticated],
+        permission_classes=[IsAuthenticated, HasTenantModuleAccess],
         throttle_classes=[],
     )
     def test_print(self, request):
@@ -1962,6 +2231,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
     queryset = PrintDevice.objects.select_related('tenant', 'outlet', 'registered_by').all()
     serializer_class = PrintDeviceSerializer
     permission_classes = [AllowAny]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'channel', 'is_active']
     search_fields = ['device_id', 'name', 'printer_identifier']
@@ -2057,7 +2327,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             'message': 'Enter this pairing code in frontend device pairing screen.',
         })
 
-    @action(detail=False, methods=['post'], url_path='pairing/claim', permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=['post'], url_path='pairing/claim', permission_classes=[IsAuthenticated, HasTenantModuleAccess])
     def pairing_claim(self, request):
         """Frontend claims pairing code, binds tenant/outlet, and issues API key."""
         user, tenant = self._resolve_authenticated_user_tenant(request)
@@ -2182,7 +2452,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
 
         return Response({'paired': True, 'status': 'paired'})
 
-    @action(detail=True, methods=['post'], url_path='rotate-api-key', permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['post'], url_path='rotate-api-key', permission_classes=[IsAuthenticated, HasTenantModuleAccess])
     def rotate_api_key(self, request, pk=None):
         user, tenant = self._resolve_authenticated_user_tenant(request)
         if not tenant:
@@ -2203,7 +2473,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             'device': PrintDeviceSerializer(device).data,
         })
 
-    @action(detail=True, methods=['post'], url_path='revoke-api-key', permission_classes=[IsAuthenticated])
+    @action(detail=True, methods=['post'], url_path='revoke-api-key', permission_classes=[IsAuthenticated, HasTenantModuleAccess])
     def revoke_api_key(self, request, pk=None):
         user, tenant = self._resolve_authenticated_user_tenant(request)
         if not tenant:
@@ -2334,7 +2604,7 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
             'disabled_count': stale_qs.count(),
         })
 
-    @action(detail=False, methods=['get'], url_path='printers', permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=['get'], url_path='printers', permission_classes=[IsAuthenticated, HasTenantModuleAccess])
     def device_printers(self, request):
         """Frontend reads connector-synced printers from backend for a given device_id."""
         user = request.user
@@ -2376,7 +2646,8 @@ class PrinterViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
     queryset = Printer.objects.select_related('tenant', 'outlet', 'device').all()
     serializer_class = PrinterSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'device', 'printer_type', 'is_active', 'is_default']
     search_fields = ['name', 'identifier', 'device__device_id']
@@ -2415,7 +2686,8 @@ class ReceiptTemplateViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     from .models import ReceiptTemplate as _RT  # local import for typing
     queryset = _RT.objects.all()
     serializer_class = ReceiptTemplateSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'is_default']
     search_fields = ['name']

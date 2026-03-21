@@ -67,7 +67,7 @@ import {
   RotateCcw, Percent, Pencil,
   Wallet, ShieldAlert, XCircle, Zap, History, ChefHat, Truck
 } from "lucide-react"
-import { Tag, PauseCircle, Ban } from "lucide-react"
+import { Tag, PauseCircle } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { PaymentPopup } from "@/components/pos/payment-popup"
 import { SaleDiscountModal, type SaleDiscount } from "@/components/modals/sale-discount-modal"
@@ -170,6 +170,8 @@ export function RestaurantPOS() {
   
   // Payment Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [transactionLocked, setTransactionLocked] = useState(false)
+  const [initiatedSaleId, setInitiatedSaleId] = useState("")
   
   // Manager Actions Popup
   const [showManagerActions, setShowManagerActions] = useState(false)
@@ -194,7 +196,6 @@ export function RestaurantPOS() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isSendingToKitchen, setIsSendingToKitchen] = useState(false)
   const [activeView, setActiveView] = useState<"products" | "tables">("products")
-  const [isCategoryOpen, setIsCategoryOpen] = useState(true)
 
   // Sale discount state (retail-style flow)
   const [saleDiscount, setSaleDiscount] = useState<SaleDiscount | null>(null)
@@ -828,6 +829,99 @@ export function RestaurantPOS() {
     }
   }
 
+  const handleStartPayment = async () => {
+    if (cart.length === 0) {
+      toast({ title: "Error", description: "Cart is empty.", variant: "destructive" })
+      return
+    }
+
+    if (currentTab) {
+      setShowPaymentModal(true)
+      return
+    }
+
+    if (!outlet || !activeShift) {
+      toast({ title: "Error", description: "Missing outlet or active shift.", variant: "destructive" })
+      return
+    }
+
+    if (transactionLocked) {
+      setShowPaymentModal(true)
+      return
+    }
+
+    try {
+      const subtotal = Math.round(cartSubtotal * 100) / 100
+      const discount = Math.round(discountAmount * 100) / 100
+      const tax = 0
+      const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+      const initiated = await saleService.initiatePayment({
+        outlet: outlet.id,
+        shift: activeShift.id,
+        customer: selectedCustomer?.id || undefined,
+        delivery_required: isDeliveryRequired,
+        items_data: cart.map((item) => ({
+          product_id: item.productId,
+          unit_id: (item as any).unitId || undefined,
+          quantity: item.quantity,
+          price: Math.round(item.price * 100) / 100,
+          notes: item.notes || "",
+        })),
+        subtotal,
+        tax,
+        discount,
+        total,
+        notes: "Transaction initiated from Restaurant POS pay screen.",
+      })
+
+      setInitiatedSaleId(String(initiated.id))
+      setTransactionLocked(true)
+      setShowPaymentModal(true)
+      toast({
+        title: "Transaction initiated",
+        description: `Receipt #${initiated._raw?.receipt_number || initiated.id} is locked for payment.`,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Checkout start failed",
+        description: error?.message || "Unable to initiate transaction.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handlePaymentCancel = async () => {
+    setShowPaymentModal(false)
+
+    // Tab workflow does not use initiated sale void flow.
+    if (currentTab) {
+      return
+    }
+
+    if (!transactionLocked || !initiatedSaleId) {
+      return
+    }
+
+    try {
+      await saleService.voidTransaction(initiatedSaleId, "Cashier cancelled payment popup")
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+      toast({ title: "Transaction voided", description: "Initiated transaction was cancelled and logged." })
+    } catch (error: any) {
+      toast({
+        title: "Cancel failed",
+        description: error?.message || "Unable to void initiated transaction.",
+        variant: "destructive",
+      })
+    } finally {
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
+      setIsDeliveryRequired(false)
+    }
+  }
+
   const handleOpenDrawer = () => {
     toast({
       title: "Drawer",
@@ -1441,26 +1535,10 @@ export function RestaurantPOS() {
           {activeView === "products" && (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               <div className="flex-1 flex min-h-0 overflow-hidden">
-                {/* Category Sidebar */}
-                <div
-                  className={cn(
-                    "border-r bg-gray-200 overflow-y-auto flex-shrink-0 transition-all duration-200",
-                    isCategoryOpen ? "w-40 p-3" : "w-12 p-2"
-                  )}
-                >
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className={cn("text-xs font-medium", !isCategoryOpen && "sr-only")}>
-                      Categories
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      onClick={() => setIsCategoryOpen((prev) => !prev)}
-                      title={isCategoryOpen ? "Collapse categories" : "Expand categories"}
-                    >
-                      {isCategoryOpen ? "«" : "»"}
-                    </Button>
+                {/* Category Sidebar - Fixed */}
+                <div className="w-32 border-r bg-gray-200 flex-shrink-0 p-2 flex flex-col gap-2">
+                  <div className="mb-2">
+                    <span className="text-xs font-medium">Categories</span>
                   </div>
                   {isLoadingCategories ? (
                     <div className="space-y-2">
@@ -1471,33 +1549,29 @@ export function RestaurantPOS() {
                   ) : categoriesError ? (
                     <div className="text-xs text-destructive">{categoriesError}</div>
                   ) : (
-                    <div className="flex flex-col gap-2">
-                      <Button
-                        key="all"
-                        variant={selectedCategory === "all" ? "default" : "outline"}
-                        className={cn(
-                          "h-10 justify-start px-3 text-sm",
-                          selectedCategory === "all" && "ring-2 ring-primary",
-                          !isCategoryOpen && "hidden"
-                        )}
-                        onClick={() => setSelectedCategory("all")}
-                      >
-                        All
-                      </Button>
-                      {categories.map(cat => (
+                    <div className="max-h-[22rem] overflow-y-auto">
+                      <div className="grid grid-cols-1 gap-2 justify-items-center">
                         <Button
-                          key={cat.id}
-                          variant={selectedCategory === cat.id ? "default" : "outline"}
-                          className={cn(
-                            "h-10 justify-start px-3 text-sm",
-                            selectedCategory === cat.id && "ring-2 ring-primary",
-                            !isCategoryOpen && "hidden"
-                          )}
-                          onClick={() => setSelectedCategory(cat.id)}
+                          key="all"
+                          variant={selectedCategory === "all" ? "default" : "outline"}
+                          className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
+                          onClick={() => setSelectedCategory("all")}
+                          title="All"
                         >
-                          {cat.name}
+                          <span className="truncate text-center">All</span>
                         </Button>
-                      ))}
+                        {categories.map(cat => (
+                          <Button
+                            key={cat.id}
+                            variant={selectedCategory === cat.id ? "default" : "outline"}
+                            className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
+                            onClick={() => setSelectedCategory(cat.id)}
+                            title={cat.name}
+                          >
+                            <span className="truncate text-center">{cat.name}</span>
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1521,17 +1595,16 @@ export function RestaurantPOS() {
                         <p>No products found</p>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-3 p-5">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 p-3">
                         {filteredProducts.map(product => (
                           <Card
                             key={product.id}
-                            className="cursor-pointer hover:shadow-md transition-shadow border border-muted"
+                            className="w-20 h-20 overflow-hidden cursor-pointer hover:shadow-md transition-shadow border border-muted"
                             onClick={() => handleAddItemToTab(product)}
                           >
-                            <CardContent className="p-3">
-                              <div className="flex flex-col gap-1">
-                                <h3 className="text-sm leading-tight whitespace-normal break-normal">{product.name}</h3>
-                              </div>
+                            <CardContent className="h-full p-1 flex flex-col justify-between">
+                              <h3 className="text-xs font-medium leading-tight line-clamp-2 overflow-hidden break-words">{product.name}</h3>
+                              <p className="text-[10px] text-muted-foreground">Stock: {product.stock ?? 0}</p>
                             </CardContent>
                           </Card>
                         ))}
@@ -1665,7 +1738,7 @@ export function RestaurantPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-                onClick={() => requestRowActionConfirmation("hold")}
+                onClick={handleHoldSale}
               >
                 <PauseCircle className="h-4 w-4" />
                 Hold
@@ -1693,14 +1766,6 @@ export function RestaurantPOS() {
               >
                 <Lock className="h-4 w-4" />
                 Close
-              </Button>
-              <Button
-                size="sm"
-                className="h-9 gap-2 bg-red-600 text-white hover:bg-red-700"
-                onClick={() => requestRowActionConfirmation("void")}
-              >
-                <Ban className="h-4 w-4" />
-                Void
               </Button>
               <Button
                 size="sm"
@@ -1898,7 +1963,7 @@ export function RestaurantPOS() {
                 className="flex-1 h-14 text-lg bg-blue-900 hover:bg-blue-800"
                 onClick={() => {
                   setIsDeliveryRequired(false)
-                  setShowPaymentModal(true)
+                  void handleStartPayment()
                 }}
                 disabled={cart.length === 0}
               >
@@ -2388,7 +2453,11 @@ export function RestaurantPOS() {
       {/* ==================== PAYMENT POPUP ==================== */}
       <PaymentPopup
         open={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
+        onDismiss={() => setShowPaymentModal(false)}
+        onCancel={() => {
+          void handlePaymentCancel()
+        }}
+        blockOutsideClose={transactionLocked && !currentTab}
         total={currentTab?.total || cartSubtotal}
         subtotal={currentTab?.subtotal || cartSubtotal}
         discount={currentTab?.discount || 0}
@@ -2400,14 +2469,36 @@ export function RestaurantPOS() {
           if (currentTab) {
             handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "credit", amount, change)
           } else {
-            // Quick sale (no tab) - just show confirmation
-            if (method && amount) {
+            if (!initiatedSaleId) {
+              toast({ title: "Error", description: "No initiated transaction found. Click Payment again.", variant: "destructive" })
+              return
+            }
+
+            try {
+              await saleService.finalizePayment(initiatedSaleId, {
+                payment_method: paymentMethod as "cash" | "card" | "mobile" | "tab" | "credit",
+                cash_received: amount,
+                change,
+              })
+
+              setCart([])
+              setSaleDiscount(null)
+              setSelectedCustomer(null)
+              setTransactionLocked(false)
+              setInitiatedSaleId("")
+
               toast({
                 title: "Payment Processed",
-                description: `${method.charAt(0).toUpperCase() + method.slice(1)} payment of ${formatCurrency(cartSubtotal, currentBusiness)} received${change && change > 0 ? `. Change: ${formatCurrency(change, currentBusiness)}` : ''}`,
+                description: `${method.charAt(0).toUpperCase() + method.slice(1)} payment completed successfully.`,
               })
+            } catch (error: any) {
+              toast({
+                title: "Payment failed",
+                description: error?.message || "Unable to finalize payment.",
+                variant: "destructive",
+              })
+              return
             }
-            setCart([])
           }
           setShowPaymentModal(false)
         }}

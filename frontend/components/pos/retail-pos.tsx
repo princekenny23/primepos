@@ -52,7 +52,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  Ban,
   History,
   Lock,
   PauseCircle,
@@ -155,7 +154,6 @@ export function RetailPOS() {
   const [showSaleDiscount, setShowSaleDiscount] = useState(false)
   const [saleDiscount, setSaleDiscount] = useState<SaleDiscount | null>(null)
   const [isDeliveryRequired, setIsDeliveryRequired] = useState(false)
-  const [isCategoryOpen, setIsCategoryOpen] = useState(true)
   const [showHoldSales, setShowHoldSales] = useState(false)
   const [heldSales, setHeldSales] = useState<HeldSale[]>([])
   const [showReplaceCartConfirm, setShowReplaceCartConfirm] = useState(false)
@@ -165,9 +163,12 @@ export function RetailPOS() {
   const [rowActionUsername, setRowActionUsername] = useState("")
   const [rowActionPassword, setRowActionPassword] = useState("")
   const [isVerifyingRowAction, setIsVerifyingRowAction] = useState(false)
+  const [transactionLocked, setTransactionLocked] = useState(false)
+  const [initiatedSaleId, setInitiatedSaleId] = useState("")
   
   // Focus search on mount and after actions
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const paymentCloseByConfirmRef = useRef(false)
 
   
 
@@ -407,10 +408,18 @@ export function RetailPOS() {
   }
 
   const handleProductGridAdd = (product: any, variation?: any, unit?: any, quantity = 1) => {
+    if (transactionLocked) {
+      toast({ title: "Transaction locked", description: "Complete or cancel payment before editing cart.", variant: "destructive" })
+      return
+    }
     addCartWithDetails(product, variation, unit, quantity)
   }
 
   const handleAddToCart = async (product: any) => {
+    if (transactionLocked) {
+      toast({ title: "Transaction locked", description: "Complete or cancel payment before editing cart.", variant: "destructive" })
+      return
+    }
     // Check if product has multiple selling units
     const sellingUnits = (product as any).units || (product as any).selling_units || []
     const activeUnits = sellingUnits.filter((u: any) => u.is_active !== false)
@@ -519,7 +528,10 @@ export function RetailPOS() {
   const handleConfirmSaleTypeChange = async () => {
     if (pendingSaleType) {
       if (cart.length > 0) {
-        await handleVoidSale()
+        clearCart()
+        setSaleDiscount(null)
+        setSelectedCustomer(null)
+        toast({ title: "Cart cleared", description: "Cart cleared before switching sale type." })
       }
       setSaleType(pendingSaleType)
       setPendingSaleType(null)
@@ -561,8 +573,54 @@ export function RetailPOS() {
       return
     }
 
-    // Show payment method selection modal
-    setShowPaymentMethod(true)
+    if (transactionLocked) {
+      toast({
+        title: "Transaction locked",
+        description: "Complete or cancel the current payment flow first.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const subtotal = Math.round(cartSubtotal * 100) / 100
+      const discount = Math.round(discountAmount * 100) / 100
+      const tax = 0
+      const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+      const initiated = await saleService.initiatePayment({
+        outlet: currentOutlet.id,
+        shift: activeShift.id,
+        customer: selectedCustomer?.id || undefined,
+        delivery_required: isDeliveryRequired,
+        items_data: cart.map((item) => ({
+          product_id: item.productId,
+          unit_id: (item as any).unitId || undefined,
+          quantity: item.quantity,
+          price: Math.round(item.price * 100) / 100,
+          notes: item.notes || "",
+        })),
+        subtotal,
+        tax,
+        discount,
+        total,
+        notes: "Transaction initiated from POS pay screen.",
+      })
+
+      setInitiatedSaleId(String(initiated.id))
+      setTransactionLocked(true)
+      setShowPaymentMethod(true)
+      toast({
+        title: "Transaction initiated",
+        description: `Receipt #${initiated._raw?.receipt_number || initiated.id} is locked for payment.`,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Checkout start failed",
+        description: error?.message || "Unable to initiate transaction.",
+        variant: "destructive",
+      })
+    }
   }
 
   const handleDeliveryCheckout = async () => {
@@ -644,6 +702,7 @@ export function RetailPOS() {
   }
 
   const handlePaymentConfirm = async (method: "cash" | "card" | "mobile" | "tab", amount?: number, change?: number) => {
+    paymentCloseByConfirmRef.current = true
     setShowPaymentMethod(false)
     
     // Re-validate (shouldn't happen, but safety check)
@@ -660,46 +719,22 @@ export function RetailPOS() {
     setIsProcessingPayment(true)
 
     try {
+      if (!initiatedSaleId) {
+        throw new Error("No initiated transaction found. Click PAY to start again.")
+      }
+
       // Calculate totals - round to 2 decimal places to avoid floating point precision issues
       const subtotal = Math.round(cartSubtotal * 100) / 100
       const discount = Math.round(discountAmount * 100) / 100
       const tax = 0 // TODO: Calculate tax if needed
       const total = Math.round((subtotal - discount + tax) * 100) / 100
 
-      // Transform cart items to backend format
-      const items_data = cart.map((item) => {
-        // Extract variation_id and unit_id from item if stored
-        // For now, we'll use product_id only (backend will handle variations if needed)
-        return {
-          product_id: item.productId,
-          variation_id: (item as any).variationId || undefined,
-          unit_id: (item as any).unitId || undefined,
-          quantity: item.quantity,
-          price: Math.round(item.price * 100) / 100, // Round price to 2 decimal places
-          notes: item.notes || "",
-        }
-      })
-
-      // Create sale data - ensure all decimal values are rounded to 2 decimal places
-      // TypeScript knows currentOutlet and activeShift are not null due to the check above
-      const saleData = {
-        outlet: currentOutlet!.id,
-        shift: activeShift!.id,
-        customer: selectedCustomer?.id || undefined,
-        delivery_required: isDeliveryRequired,
-        items_data: items_data,
-        subtotal: Math.round(subtotal * 100) / 100,
-        tax: Math.round(tax * 100) / 100,
-        discount: Math.round(discount * 100) / 100,
-        discount_type: saleDiscount?.type,
-        discount_reason: saleDiscount?.reason,
-        total: Math.round(total * 100) / 100,
+      // Finalize previously initiated sale
+      const sale = await saleService.finalizePayment(initiatedSaleId, {
         payment_method: method,
-        notes: method === "tab" ? "Credit sale" : "",
-      }
-
-      // Call backend API
-      const sale = await saleService.create(saleData)
+        cash_received: amount,
+        change,
+      })
       // Fetch canonical sale from backend to ensure printed receipt matches DB
       let fullSale = sale
       try {
@@ -742,6 +777,8 @@ export function RetailPOS() {
       setSelectedCustomer(null)
       setSaleDiscount(null)
       setIsDeliveryRequired(false)
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
 
   // Receipt preview removed: we no longer open a preview modal in the POS terminal
       // Attempt to auto-print (non-blocking). Uses the Local Print Agent and saved default printer.
@@ -794,42 +831,13 @@ export function RetailPOS() {
   }
 
   const handleVoidSale = async () => {
-    if (cart.length === 0) {
-      toast({ title: "Void Sale", description: "Cart is already empty." })
-      return
-    }
-
-    if (!currentOutlet) {
-      toast({ title: "Void Sale", description: "Outlet not available.", variant: "destructive" })
+    if (!transactionLocked || !initiatedSaleId) {
+      toast({ title: "Void", description: "Void is available only after PAY is clicked and transaction is initiated.", variant: "destructive" })
       return
     }
 
     try {
-      const subtotal = Math.round(cartSubtotal * 100) / 100
-      const discount = Math.round(discountAmount * 100) / 100
-      const tax = 0
-      const total = Math.round((subtotal - discount + tax) * 100) / 100
-
-      const items_data = cart.map((item) => ({
-        product_id: item.productId,
-        unit_id: (item as any).unitId || undefined,
-        quantity: item.quantity,
-        price: Math.round(item.price * 100) / 100,
-        notes: item.notes || "",
-      }))
-
-      const voidSale = await saleService.void({
-        outlet: currentOutlet.id,
-        shift: activeShift?.id,
-        customer: selectedCustomer?.id || undefined,
-        items_data,
-        subtotal,
-        tax,
-        discount,
-        total,
-        payment_method: "cash",
-        notes: "Voided sale from POS",
-      })
+      const voidSale = await saleService.voidTransaction(initiatedSaleId, "Cancelled from POS payment stage")
 
       const receiptNumber =
         voidSale._raw?.receipt_number ||
@@ -843,6 +851,8 @@ export function RetailPOS() {
       clearCart()
       setSaleDiscount(null)
       setSelectedCustomer(null)
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
     } catch (error: any) {
       console.error("Void sale error:", error)
       toast({
@@ -850,6 +860,37 @@ export function RetailPOS() {
         description: error.message || "Unable to record void sale.",
         variant: "destructive",
       })
+    }
+  }
+
+  const handlePaymentCancel = async () => {
+    if (paymentCloseByConfirmRef.current) {
+      paymentCloseByConfirmRef.current = false
+      return
+    }
+    setShowPaymentMethod(false)
+    if (!transactionLocked || !initiatedSaleId) {
+      setIsProcessingPayment(false)
+      return
+    }
+
+    try {
+      await saleService.voidTransaction(initiatedSaleId, "Cashier cancelled payment popup")
+      clearCart()
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+      toast({ title: "Transaction voided", description: "Initiated transaction was cancelled and logged." })
+    } catch (error: any) {
+      toast({
+        title: "Cancel failed",
+        description: error?.message || "Unable to void initiated transaction.",
+        variant: "destructive",
+      })
+    } finally {
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
+      setIsProcessingPayment(false)
+      setIsDeliveryRequired(false)
     }
   }
 
@@ -941,40 +982,22 @@ export function RetailPOS() {
         {/* Products Panel - Clean List View */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-background">
           <div className="flex-1 flex min-h-0 overflow-hidden">
-            {/* Category Filter - Sidebar */}
+            {/* Category Filter - Fixed Sidebar */}
             {categories.length > 1 && (
-              <div
-                className={
-                  "border-r bg-gray-200 overflow-y-auto flex-shrink-0 transition-all duration-200 " +
-                  (isCategoryOpen ? "w-40 p-2" : "w-12 p-1.5")
-                }
-              >
-                <div className="mb-2 flex items-center justify-between">
-                  <span className={isCategoryOpen ? "text-xs font-medium" : "sr-only"}>
-                    Categories
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 w-7 p-0"
-                    onClick={() => setIsCategoryOpen((prev) => !prev)}
-                    title={isCategoryOpen ? "Collapse categories" : "Expand categories"}
-                  >
-                    {isCategoryOpen ? "«" : "»"}
-                  </Button>
+              <div className="w-32 border-r bg-gray-200 flex-shrink-0 p-2">
+                <div className="mb-2">
+                  <span className="text-xs font-medium">Categories</span>
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="max-h-[22rem] overflow-y-auto">
+                  <div className="grid grid-cols-1 gap-2 justify-items-center">
                   <Button
                     key="all"
                     variant={selectedCategory === "all" ? "default" : "outline"}
-                    className={
-                      "h-9 justify-start px-2.5 text-xs" +
-                      (selectedCategory === "all" ? " ring-2 ring-primary" : "") +
-                      (!isCategoryOpen ? " hidden" : "")
-                    }
+                    className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
                     onClick={() => setSelectedCategory("all")}
+                    title="All"
                   >
-                    All
+                    <span className="truncate text-center">All</span>
                   </Button>
                   {categories
                     .filter((category) => category !== "all")
@@ -982,16 +1005,14 @@ export function RetailPOS() {
                       <Button
                         key={category}
                         variant={selectedCategory === category ? "default" : "outline"}
-                        className={
-                          "h-9 justify-start px-2.5 text-xs" +
-                          (selectedCategory === category ? " ring-2 ring-primary" : "") +
-                          (!isCategoryOpen ? " hidden" : "")
-                        }
+                        className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
                         onClick={() => setSelectedCategory(category)}
+                        title={category}
                       >
-                        {category}
+                        <span className="truncate text-center">{category}</span>
                       </Button>
                     ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -1062,7 +1083,7 @@ export function RetailPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-1 px-2.5 text-xs bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
-                onClick={() => requestRowActionConfirmation("hold")}
+                onClick={handleHoldSale}
               >
                 <PauseCircle className="h-4 w-4" />
                 Hold
@@ -1090,14 +1111,6 @@ export function RetailPOS() {
               >
                 <Lock className="h-4 w-4" />
                 Close
-              </Button>
-              <Button
-                size="sm"
-                className="h-9 gap-1 px-2.5 text-xs bg-red-600 text-white hover:bg-red-700 shrink-0"
-                onClick={() => requestRowActionConfirmation("void")}
-              >
-                <Ban className="h-4 w-4" />
-                Void
               </Button>
               <Button
                 size="sm"
@@ -1493,7 +1506,7 @@ export function RetailPOS() {
                             size="sm"
                             className="h-5 w-5 p-0"
                             onClick={() => updateCartItem(item.id, { quantity: item.quantity - 1 })}
-                            disabled={item.quantity <= 1}
+                            disabled={item.quantity <= 1 || transactionLocked}
                           >
                             −
                           </Button>
@@ -1503,6 +1516,7 @@ export function RetailPOS() {
                             size="sm"
                             className="h-5 w-5 p-0"
                             onClick={() => updateCartItem(item.id, { quantity: item.quantity + 1 })}
+                            disabled={transactionLocked}
                           >
                             +
                           </Button>
@@ -1515,6 +1529,7 @@ export function RetailPOS() {
                           size="sm"
                           className="h-5 w-5 p-0"
                           onClick={() => removeFromCart(item.id)}
+                          disabled={transactionLocked}
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -1555,7 +1570,7 @@ export function RetailPOS() {
                     setIsDeliveryRequired(false)
                     void handleCheckout()
                   }}
-                  disabled={isProcessingPayment || cart.length === 0}
+                  disabled={isProcessingPayment || cart.length === 0 || transactionLocked}
                 >
                   {isProcessingPayment ? "Processing..." : "PAY"}
                 </Button>
@@ -1781,10 +1796,13 @@ export function RetailPOS() {
       {/* Payment Popup Modal - Single unified popup */}
       <PaymentPopup
         open={showPaymentMethod}
-        onClose={() => {
+        onDismiss={() => {
           setShowPaymentMethod(false)
-          setIsProcessingPayment(false)
         }}
+        onCancel={() => {
+          void handlePaymentCancel()
+        }}
+        blockOutsideClose={transactionLocked}
         total={cartTotal}
         subtotal={cartSubtotal}
         discount={discountAmount}

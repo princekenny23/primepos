@@ -120,40 +120,114 @@ export function PrinterSettings() {
   }
 
   useEffect(() => {
-    const ping = async () => {
+    const pingLocal = async () => {
+      if (hostMode !== "local") return
       try {
-        if (isLocalhostBrowser()) {
-          await localAgentFetch("/health", { method: "GET" })
-        } else {
-          await api.get(apiEndpoints.printers.list)
-        }
+        await localAgentFetch("/health", { method: "GET" })
         setConnected(true)
         setStep((prev) => (prev < 2 ? 2 : prev))
       } catch {
         setConnected(false)
       }
     }
-    ping()
-  }, [])
+    pingLocal()
+  }, [hostMode])
+
+  useEffect(() => {
+    if (hostMode !== "cloud") return
+
+    let active = true
+    const checkCloudConnector = async () => {
+      try {
+        await api.get(apiEndpoints.printers.list)
+
+        if (!currentOutlet) {
+          if (active) {
+            setConnected(false)
+            setPairedDevicePk("")
+          }
+          return
+        }
+
+        const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+        if (!outletId) {
+          if (active) {
+            setConnected(false)
+            setPairedDevicePk("")
+          }
+          return
+        }
+
+        const connector = await resolveActiveConnectorForOutlet(outletId)
+        if (!active) return
+
+        const isLinked = !!connector?.pk
+        setPairedDevicePk(connector?.pk || "")
+        setConnected(isLinked)
+        if (isLinked) {
+          setStep((prev) => (prev < 2 ? 2 : prev))
+        }
+      } catch {
+        if (!active) return
+        setConnected(false)
+      }
+    }
+
+    checkCloudConnector()
+    const intervalId = window.setInterval(checkCloudConnector, 15000)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+    }
+  }, [hostMode, currentOutlet])
 
   const connectAgent = async () => {
     setIsConnecting(true)
     try {
       if (isLocalhostBrowser()) {
         await localAgentFetch("/health", { method: "GET" })
+        setConnected(true)
+        setStep((prev) => (prev < 2 ? 2 : prev))
+        await scanPrinters(true)
+        toast({
+          title: "Connected",
+          description: "Local print connector is reachable and ready.",
+        })
       } else {
         await api.get(apiEndpoints.printers.list)
+        if (!currentOutlet) {
+          setConnected(false)
+          toast({ title: "Select outlet", description: "Select an outlet to check cloud connector status.", variant: "destructive" })
+          return
+        }
+
+        const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+        if (!outletId) {
+          setConnected(false)
+          toast({ title: "Invalid outlet", description: "Select a valid outlet first.", variant: "destructive" })
+          return
+        }
+
+        const connector = await resolveActiveConnectorForOutlet(outletId)
+        const isLinked = !!connector?.pk
+        setPairedDevicePk(connector?.pk || "")
+        setConnected(isLinked)
+
+        if (isLinked) {
+          setStep((prev) => (prev < 2 ? 2 : prev))
+          await scanPrinters(true)
+          toast({
+            title: "Connected",
+            description: "Cloud connector is linked and online for this outlet.",
+          })
+        } else {
+          toast({
+            title: "Cloud reachable",
+            description: "Backend is reachable, but no active connector is linked to this outlet yet.",
+            variant: "destructive",
+          })
+        }
       }
-      setConnected(true)
-      setStep((prev) => (prev < 2 ? 2 : prev))
-      await autoPairCurrentConnector(true)
-      await scanPrinters(true)
-      toast({
-        title: "Connected",
-        description: isLocalhostBrowser()
-          ? "Local print connector is reachable and ready."
-          : "Cloud print service is reachable and ready.",
-      })
     } catch (err: any) {
       setConnected(false)
       toast({
@@ -405,10 +479,12 @@ export function PrinterSettings() {
 
       if (devicePk) {
         setPairedDevicePk(devicePk)
+        setConnected(true)
         if (!silent) {
           toast({ title: "Connector linked", description: "Active connector device found for this outlet." })
         }
       } else if (!silent) {
+        setConnected(false)
         toast({
           title: "No active connector",
           description: "Start the Windows connector and complete pairing there. Frontend does not call localhost.",
@@ -462,6 +538,7 @@ export function PrinterSettings() {
         setPairingDeviceId(deviceId)
       }
 
+      setConnected(true)
       setPairingStatusMessage("Connector paired successfully.")
       setStep((prev) => (prev < 2 ? 2 : prev))
       toast({ title: "Connector paired", description: "Cloud connector linked to this outlet." })

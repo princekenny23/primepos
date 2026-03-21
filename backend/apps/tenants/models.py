@@ -137,6 +137,9 @@ class TenantPermissions(models.Model):
     # Office features
     allow_office_accounting = models.BooleanField(default=True, help_text='Accounting module')
     allow_office_hr = models.BooleanField(default=True, help_text='HR & Payroll module')
+    allow_office_users = models.BooleanField(default=True, help_text='User management')
+    allow_office_staff = models.BooleanField(default=True, help_text='Staff management')
+    allow_office_shift_management = models.BooleanField(default=True, help_text='Shift management')
     allow_office_reports = models.BooleanField(default=True, help_text='Office reports')
     allow_office_analytics = models.BooleanField(default=True, help_text='Analytics dashboard')
     

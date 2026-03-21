@@ -8,7 +8,7 @@ from django.utils import timezone
 from django.db.models import Q, Count
 from .models import Notification, NotificationPreference
 from .serializers import NotificationSerializer, NotificationPreferenceSerializer
-from apps.tenants.permissions import TenantFilterMixin
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 from rest_framework.permissions import IsAuthenticated
 
 
@@ -18,7 +18,8 @@ class NotificationViewSet(TenantFilterMixin, viewsets.ModelViewSet):
     """
     queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_dashboard']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['type', 'priority', 'read']
     search_fields = ['title', 'message']
@@ -104,7 +105,8 @@ class NotificationViewSet(TenantFilterMixin, viewsets.ModelViewSet):
 class NotificationPreferenceViewSet(TenantFilterMixin, viewsets.ModelViewSet):
     queryset = NotificationPreference.objects.all()
     serializer_class = NotificationPreferenceSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, HasTenantModuleAccess]
+    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     filterset_fields = ['user', 'tenant']
     ordering_fields = ['created_at', 'updated_at']

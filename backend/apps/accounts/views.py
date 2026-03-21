@@ -4,6 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from .serializers import CustomTokenObtainPairSerializer, RegisterSerializer, UserSerializer
 
 User = get_user_model()
@@ -22,13 +23,18 @@ class LoginView(TokenObtainPairView):
         if response.status_code == 200:
             try:
                 from apps.activity_logs.utils import log_login
-                user = User.objects.get(email=request.data.get('email'))
-                if user.tenant:
+                identifier = request.data.get('identifier') or request.data.get('email')
+                user = None
+                if identifier:
+                    user = User.objects.filter(
+                        Q(email__iexact=identifier) | Q(username__iexact=identifier)
+                    ).first()
+                if user and user.tenant:
                     # Get IP address
                     ip_address = self._get_client_ip(request)
                     user_agent = request.META.get('HTTP_USER_AGENT', '')
                     log_login(user, ip_address=ip_address, user_agent=user_agent)
-            except (User.DoesNotExist, Exception) as e:
+            except Exception as e:
                 # Don't break login if logging fails
                 import logging
                 logger = logging.getLogger(__name__)

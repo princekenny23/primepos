@@ -8,7 +8,7 @@ interface AuthState {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-  login: (email: string, password: string) => Promise<{ success: boolean; user?: User; error?: string }>
+  login: (identifier: string, password: string) => Promise<{ success: boolean; user?: User; error?: string }>
   logout: () => Promise<void>
   setUser: (user: User | null) => void
   refreshUser: () => Promise<void>
@@ -21,13 +21,13 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       isLoading: false,
       
-      login: async (email: string, password: string) => {
+      login: async (identifier: string, password: string) => {
         set({ isLoading: true })
         
         try {
           // Use real API for login
           console.log("Using real API for login")
-          const response = await authService.login(email, password)
+          const response = await authService.login(identifier, password)
           console.log("Login successful, setting user state")
           set({ 
             user: response.user, 

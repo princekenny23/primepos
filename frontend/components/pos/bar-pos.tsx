@@ -63,7 +63,7 @@ import {
   Lock, RefreshCw, Users, ArrowRightLeft, Merge, Split, Clock, User,
   Table2, Armchair, List, AlertCircle, Check, Trash2,
   RotateCcw, Percent, Pencil,
-  Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Ban, Truck
+  Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Truck
 } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { PaymentPopup } from "@/components/pos/payment-popup"
@@ -174,6 +174,8 @@ export function BarPOS() {
   
   // Payment Modal
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [transactionLocked, setTransactionLocked] = useState(false)
+  const [initiatedSaleId, setInitiatedSaleId] = useState("")
   
   // Manager Actions Popup
   const [showManagerActions, setShowManagerActions] = useState(false)
@@ -197,7 +199,6 @@ export function BarPOS() {
   // Processing states
   const [isProcessing, setIsProcessing] = useState(false)
   const [activeView, setActiveView] = useState<"products" | "tables">("products")
-  const [isCategoryOpen, setIsCategoryOpen] = useState(true)
 
   // Sale discount state (retail-style flow)
   const [saleDiscount, setSaleDiscount] = useState<SaleDiscount | null>(null)
@@ -767,6 +768,98 @@ export function BarPOS() {
     }
   }
 
+  const handleStartPayment = async () => {
+    if (cart.length === 0) {
+      toast({ title: "Error", description: "Cart is empty.", variant: "destructive" })
+      return
+    }
+
+    if (currentTab) {
+      setShowPaymentModal(true)
+      return
+    }
+
+    if (!outlet || !activeShift) {
+      toast({ title: "Error", description: "Missing outlet or active shift.", variant: "destructive" })
+      return
+    }
+
+    if (transactionLocked) {
+      setShowPaymentModal(true)
+      return
+    }
+
+    try {
+      const subtotal = Math.round(cartSubtotal * 100) / 100
+      const discount = Math.round(discountAmount * 100) / 100
+      const tax = 0
+      const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+      const initiated = await saleService.initiatePayment({
+        outlet: outlet.id,
+        shift: activeShift.id,
+        customer: selectedCustomer?.id || undefined,
+        delivery_required: isDeliveryRequired,
+        items_data: cart.map((item) => ({
+          product_id: item.productId,
+          unit_id: (item as any).unitId || undefined,
+          quantity: item.quantity,
+          price: Math.round(item.price * 100) / 100,
+          notes: item.notes || "",
+        })),
+        subtotal,
+        tax,
+        discount,
+        total,
+        notes: "Transaction initiated from Bar POS pay screen.",
+      })
+
+      setInitiatedSaleId(String(initiated.id))
+      setTransactionLocked(true)
+      setShowPaymentModal(true)
+      toast({
+        title: "Transaction initiated",
+        description: `Receipt #${initiated._raw?.receipt_number || initiated.id} is locked for payment.`,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Checkout start failed",
+        description: error?.message || "Unable to initiate transaction.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handlePaymentCancel = async () => {
+    setShowPaymentModal(false)
+
+    if (currentTab) {
+      return
+    }
+
+    if (!transactionLocked || !initiatedSaleId) {
+      return
+    }
+
+    try {
+      await saleService.voidTransaction(initiatedSaleId, "Cashier cancelled payment popup")
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+      toast({ title: "Transaction voided", description: "Initiated transaction was cancelled and logged." })
+    } catch (error: any) {
+      toast({
+        title: "Cancel failed",
+        description: error?.message || "Unable to void initiated transaction.",
+        variant: "destructive",
+      })
+    } finally {
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
+      setIsDeliveryRequired(false)
+    }
+  }
+
   const handleSendToDeliveries = async () => {
     if (!outlet) {
       toast({ title: "Error", description: "Outlet not available.", variant: "destructive" })
@@ -1267,26 +1360,10 @@ export function BarPOS() {
           {activeView === "products" && (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               <div className="flex-1 flex min-h-0 overflow-hidden">
-                {/* Category Sidebar */}
-                <div
-                  className={cn(
-                    "border-r bg-gray-200 overflow-y-auto flex-shrink-0 transition-all duration-200",
-                    isCategoryOpen ? "w-40 p-3" : "w-12 p-2"
-                  )}
-                >
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className={cn("text-xs font-medium", !isCategoryOpen && "sr-only")}>
-                      Categories
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 w-7 p-0"
-                      onClick={() => setIsCategoryOpen((prev) => !prev)}
-                      title={isCategoryOpen ? "Collapse categories" : "Expand categories"}
-                    >
-                      {isCategoryOpen ? "«" : "»"}
-                    </Button>
+                {/* Category Sidebar - Fixed */}
+                <div className="w-32 border-r bg-gray-200 flex-shrink-0 p-2 flex flex-col gap-2">
+                  <div className="mb-2">
+                    <span className="text-xs font-medium">Categories</span>
                   </div>
                   {isLoadingCategories ? (
                     <div className="space-y-2">
@@ -1297,33 +1374,29 @@ export function BarPOS() {
                   ) : categoriesError ? (
                     <div className="text-xs text-destructive">{categoriesError}</div>
                   ) : (
-                    <div className="flex flex-col gap-2">
-                      <Button
-                        key="all"
-                        variant={selectedCategory === "all" ? "default" : "outline"}
-                        className={cn(
-                          "h-10 justify-start px-3 text-sm",
-                          selectedCategory === "all" && "ring-2 ring-primary",
-                          !isCategoryOpen && "hidden"
-                        )}
-                        onClick={() => setSelectedCategory("all")}
-                      >
-                        All
-                      </Button>
-                      {categories.map(cat => (
+                    <div className="max-h-[22rem] overflow-y-auto">
+                      <div className="grid grid-cols-1 gap-2 justify-items-center">
                         <Button
-                          key={cat.id}
-                          variant={selectedCategory === cat.id ? "default" : "outline"}
-                          className={cn(
-                            "h-10 justify-start px-3 text-sm",
-                            selectedCategory === cat.id && "ring-2 ring-primary",
-                            !isCategoryOpen && "hidden"
-                          )}
-                          onClick={() => setSelectedCategory(cat.id)}
+                          key="all"
+                          variant={selectedCategory === "all" ? "default" : "outline"}
+                          className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
+                          onClick={() => setSelectedCategory("all")}
+                          title="All"
                         >
-                          {cat.name}
+                          <span className="truncate text-center">All</span>
                         </Button>
-                      ))}
+                        {categories.map(cat => (
+                          <Button
+                            key={cat.id}
+                            variant={selectedCategory === cat.id ? "default" : "outline"}
+                            className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
+                            onClick={() => setSelectedCategory(cat.id)}
+                            title={cat.name}
+                          >
+                            <span className="truncate text-center">{cat.name}</span>
+                          </Button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1347,17 +1420,16 @@ export function BarPOS() {
                         <p>No products found</p>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-3 p-5">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 p-3">
                         {filteredProducts.map(product => (
                           <Card
                             key={product.id}
-                            className="cursor-pointer hover:shadow-md transition-shadow border border-muted"
+                            className="w-20 h-20 overflow-hidden cursor-pointer hover:shadow-md transition-shadow border border-muted"
                             onClick={() => handleAddItemToTab(product)}
                           >
-                            <CardContent className="p-3">
-                              <div className="flex flex-col gap-1">
-                                <h3 className="text-sm leading-tight whitespace-normal break-normal">{product.name}</h3>
-                              </div>
+                            <CardContent className="h-full p-1 flex flex-col justify-between">
+                              <h3 className="text-xs font-medium leading-tight line-clamp-2 overflow-hidden break-words">{product.name}</h3>
+                              <p className="text-[10px] text-muted-foreground">Stock: {product.stock ?? 0}</p>
                             </CardContent>
                           </Card>
                         ))}
@@ -1486,7 +1558,7 @@ export function BarPOS() {
               <Button
                 size="sm"
                 className="h-9 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
-                onClick={() => requestRowActionConfirmation("hold")}
+                onClick={handleHoldSale}
               >
                 <PauseCircle className="h-4 w-4" />
                 Hold
@@ -1514,14 +1586,6 @@ export function BarPOS() {
               >
                 <Lock className="h-4 w-4" />
                 Close
-              </Button>
-              <Button
-                size="sm"
-                className="h-9 gap-2 bg-red-600 text-white hover:bg-red-700"
-                onClick={() => requestRowActionConfirmation("void")}
-              >
-                <Ban className="h-4 w-4" />
-                Void
               </Button>
               <Button
                 size="sm"
@@ -1719,7 +1783,7 @@ export function BarPOS() {
                 className="flex-1 h-14 text-lg bg-blue-900 hover:bg-blue-800"
                 onClick={() => {
                   setIsDeliveryRequired(false)
-                  setShowPaymentModal(true)
+                  void handleStartPayment()
                 }}
                 disabled={cart.length === 0}
               >
@@ -2196,7 +2260,11 @@ export function BarPOS() {
       {/* ==================== PAYMENT POPUP ==================== */}
       <PaymentPopup
         open={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
+        onDismiss={() => setShowPaymentModal(false)}
+        onCancel={() => {
+          void handlePaymentCancel()
+        }}
+        blockOutsideClose={transactionLocked && !currentTab}
         total={currentTab?.total || cartSubtotal}
         subtotal={currentTab?.subtotal || cartSubtotal}
         discount={currentTab?.discount || 0}
@@ -2208,47 +2276,17 @@ export function BarPOS() {
           if (currentTab) {
             handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "credit", amount, change)
           } else {
-            if (!outlet) {
-              toast({ title: "Error", description: "Outlet not available.", variant: "destructive" })
-              return
-            }
-            if (!activeShift) {
-              toast({ title: "Error", description: "No active shift. Please start a shift.", variant: "destructive" })
-              return
-            }
-            if (cart.length === 0) {
-              toast({ title: "Error", description: "Cart is empty.", variant: "destructive" })
+            if (!initiatedSaleId) {
+              toast({ title: "Error", description: "No initiated transaction found. Click Payment again.", variant: "destructive" })
               return
             }
 
             setIsProcessing(true)
             try {
-              const subtotal = Math.round(cartSubtotal * 100) / 100
-              const discount = Math.round(discountAmount * 100) / 100
-              const tax = 0
-              const total = Math.round((subtotal - discount + tax) * 100) / 100
-
-              const items_data = cart.map((item) => ({
-                product_id: item.productId,
-                quantity: item.quantity,
-                price: Math.round(item.price * 100) / 100,
-                notes: item.notes || "",
-              }))
-
-              const sale = await saleService.create({
-                outlet: String(outlet.id),
-                shift: String(activeShift.id),
-                customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
-                delivery_required: isDeliveryRequired,
-                items_data,
-                subtotal,
-                tax,
-                discount,
-                discount_type: saleDiscount?.type,
-                discount_reason: saleDiscount?.reason,
-                total,
-                payment_method: paymentMethod as any,
-                notes: paymentMethod === "credit" ? "Credit sale" : "",
+              const sale = await saleService.finalizePayment(initiatedSaleId, {
+                payment_method: paymentMethod as "cash" | "card" | "mobile" | "tab" | "credit",
+                cash_received: amount,
+                change,
               })
 
               const saleAny = sale as any
@@ -2259,6 +2297,7 @@ export function BarPOS() {
               })
 
               try {
+                const saleAny = sale as any
                 await printReceipt(
                   {
                     cart: cart.map((i) => ({
@@ -2268,13 +2307,13 @@ export function BarPOS() {
                       quantity: i.quantity,
                       total: i.total,
                     })),
-                    subtotal,
-                    discount,
-                    tax,
-                    total,
+                    subtotal: Number(saleAny.subtotal ?? saleAny._raw?.subtotal ?? 0),
+                    discount: Number(saleAny.discount ?? saleAny._raw?.discount ?? 0),
+                    tax: Number(saleAny.tax ?? saleAny._raw?.tax ?? 0),
+                    total: Number(saleAny.total ?? saleAny._raw?.total ?? 0),
                     sale,
                   },
-                  outlet.id
+                  outlet!.id
                 )
               } catch (printError) {
                 console.warn("Print failed:", printError)
@@ -2283,6 +2322,8 @@ export function BarPOS() {
               setCart([])
               setSaleDiscount(null)
               setSelectedCustomer(null)
+              setTransactionLocked(false)
+              setInitiatedSaleId("")
               setIsDeliveryRequired(false)
               setShowPaymentModal(false)
             } catch (error: any) {
