@@ -237,19 +237,12 @@ export default function AccountsPage() {
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
-      if (currentOutletId && !user.is_saas_admin) {
-        const assignedOutlets = (user.outletIds || []).map((id) => String(id))
-        if (assignedOutlets.length === 0 || !assignedOutlets.includes(currentOutletId)) {
-          return false
-        }
-      }
-
       const name = user.name || ""
       const email = user.email || ""
       const searchLower = searchTerm.toLowerCase()
       return name.toLowerCase().includes(searchLower) || email.toLowerCase().includes(searchLower)
     })
-  }, [users, searchTerm, currentOutletId])
+  }, [users, searchTerm])
 
   const filteredRoles = useMemo(() => {
     return roles.filter(role => {

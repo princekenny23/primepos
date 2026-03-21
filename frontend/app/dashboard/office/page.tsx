@@ -16,15 +16,9 @@ import { isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
 const officeOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   {
     id: "users",
-    title: "User Management",
+    title: "User and Staff Management",
     href: "/dashboard/office/users",
     icon: UserCircle,
-  },
-  {
-    id: "staff",
-    title: "Staff Management",
-    href: "/dashboard/office/staff",
-    icon: UserCheck,
   },
   {
     id: "reports",
@@ -67,7 +61,7 @@ export default function OfficePage() {
 
   const filteredOfficeOptions = officeOptions.filter((option) => {
     if (!isTenantFeatureEnabled(user, "allow_office")) return false
-    if (option.id === "users" || option.id === "staff") return isTenantFeatureEnabled(user, "allow_office_users")
+    if (option.id === "users") return isTenantFeatureEnabled(user, "allow_office_users")
     if (option.id === "shift-management") return isTenantFeatureEnabled(user, "allow_office_shift_management")
     if (option.id === "reports") return isTenantFeatureEnabled(user, "allow_office_reports")
     if (option.id === "expenses" || option.id === "quotations") return isTenantFeatureEnabled(user, "allow_office_accounting")
