@@ -111,6 +111,7 @@ export default function ExpensesPage() {
     from: undefined,
     to: undefined,
   })
+  const [isDateRangeOpen, setIsDateRangeOpen] = useState(false)
   const [expenseToDelete, setExpenseToDelete] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [expenseToEdit, setExpenseToEdit] = useState<Expense | null>(null)
@@ -276,9 +277,9 @@ export default function ExpensesPage() {
           <div className="grid gap-4 md:grid-cols-2 mt-4">
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-900">Date Range</label>
-              <Popover>
+              <Popover open={isDateRangeOpen} onOpenChange={setIsDateRangeOpen}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-start text-left bg-white border-gray-300">
+                  <Button variant="outline" className="w-full justify-start whitespace-pre-line text-left bg-white border-gray-300">
                     <Calendar className="mr-2 h-4 w-4" />
                     {dateRange.from && dateRange.to
                       ? `Custom Range\n${format(dateRange.from, "MMM dd, yyyy")} - ${format(dateRange.to, "MMM dd, yyyy")}`
@@ -327,7 +328,7 @@ export default function ExpensesPage() {
                       <Button
                         size="sm"
                         className="flex-1 bg-blue-900 hover:bg-blue-800 text-white"
-                        onClick={() => {}}
+                        onClick={() => setIsDateRangeOpen(false)}
                       >
                         Confirm
                       </Button>
