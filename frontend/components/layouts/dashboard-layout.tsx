@@ -45,6 +45,7 @@ import { getOutletBusinessRouteSegment, getOutletDashboardRoute } from "@/lib/ut
 import { canAccessTenantPath, hasDistributionAccess, isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
 import { useToast } from "@/components/ui/use-toast"
 import { authService } from "@/lib/services/authService"
+import { api } from "@/lib/api"
 
 // Navigation translation keys mapping
 const navTranslationKeys: Record<string, string> = {
@@ -106,7 +107,22 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
         return
       }
 
-      setAgentStatus("disconnected")
+      const outletIdRaw = currentOutlet?.id ?? businessOutlet?.id
+      const outletId = typeof outletIdRaw === "string" ? parseInt(outletIdRaw, 10) : Number(outletIdRaw)
+      if (!outletId) {
+        setAgentStatus("disconnected")
+        return
+      }
+
+      const devicesRaw: any = await api.get(`/devices/?outlet=${outletId}&is_active=true`)
+      const devices = Array.isArray(devicesRaw) ? devicesRaw : (devicesRaw.results || [])
+      const hasLinkedConnector = devices.some((device: any) => {
+        const id = String(device?.id || "").trim()
+        const deviceId = String(device?.device_id || "").trim()
+        return Boolean(id && deviceId)
+      })
+
+      setAgentStatus(hasLinkedConnector ? "connected" : "disconnected")
     } catch {
       setAgentStatus("disconnected")
     }
@@ -172,7 +188,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
     return () => {
       window.clearInterval(timer)
     }
-  }, [])
+  }, [currentOutlet?.id, businessOutlet?.id])
   
   // Helper to translate navigation item names
   const translateNavItem = (name: string) => {

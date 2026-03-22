@@ -281,29 +281,56 @@ export default function ExpensesPage() {
                   <Button variant="outline" className="w-full justify-start text-left bg-white border-gray-300">
                     <Calendar className="mr-2 h-4 w-4" />
                     {dateRange.from && dateRange.to
-                      ? `${format(dateRange.from, "MMM dd")} - ${format(dateRange.to, "MMM dd")}`
+                      ? `Custom Range\n${format(dateRange.from, "MMM dd, yyyy")} - ${format(dateRange.to, "MMM dd, yyyy")}`
                       : dateRange.from
                       ? format(dateRange.from, "MMM dd, yyyy")
                       : "Select date range"}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0" align="start">
-                  <div className="flex gap-4 p-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-gray-600">From</label>
-                      <DatePicker
-                        date={dateRange.from}
-                        onDateChange={(date) => setDateRange({ ...dateRange, from: date })}
-                        placeholder="Start date"
-                      />
+                  <div className="p-4">
+                    <div className="mb-4">
+                      <h3 className="font-semibold text-gray-900">Custom Range</h3>
+                      {dateRange.from && dateRange.to && (
+                        <p className="text-sm text-gray-600 mt-1">
+                          {format(dateRange.from, "MMM dd, yyyy")} - {format(dateRange.to, "MMM dd, yyyy")}
+                        </p>
+                      )}
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-medium text-gray-600">To</label>
-                      <DatePicker
-                        date={dateRange.to}
-                        onDateChange={(date) => setDateRange({ ...dateRange, to: date })}
-                        placeholder="End date"
-                      />
+                    <div className="flex gap-4 mb-4">
+                      <div className="space-y-2 flex-1">
+                        <label className="text-xs font-medium text-gray-600">From</label>
+                        <DatePicker
+                          date={dateRange.from}
+                          onDateChange={(date) => setDateRange({ ...dateRange, from: date })}
+                          placeholder="Start date"
+                        />
+                      </div>
+                      <div className="space-y-2 flex-1">
+                        <label className="text-xs font-medium text-gray-600">To</label>
+                        <DatePicker
+                          date={dateRange.to}
+                          onDateChange={(date) => setDateRange({ ...dateRange, to: date })}
+                          placeholder="End date"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDateRange({ from: undefined, to: undefined })}
+                        className="flex-1"
+                      >
+                        Clear
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="flex-1 bg-blue-900 hover:bg-blue-800 text-white"
+                        onClick={() => {}}
+                      >
+                        Confirm
+                      </Button>
                     </div>
                   </div>
                 </PopoverContent>
