@@ -984,7 +984,7 @@ export function RetailPOS() {
           <div className="flex-1 flex min-h-0 overflow-hidden">
             {/* Category Filter - Fixed Sidebar */}
             {categories.length > 1 && (
-              <div className="w-32 border-r bg-gray-200 flex-shrink-0 p-2">
+              <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2">
                 <div className="mb-2">
                   <span className="text-xs font-medium">Categories</span>
                 </div>
@@ -993,7 +993,7 @@ export function RetailPOS() {
                   <Button
                     key="all"
                     variant={selectedCategory === "all" ? "default" : "outline"}
-                    className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
+                    className="h-20 w-20 p-1 justify-center items-center text-[11px] overflow-hidden"
                     onClick={() => setSelectedCategory("all")}
                     title="All"
                   >
@@ -1005,7 +1005,7 @@ export function RetailPOS() {
                       <Button
                         key={category}
                         variant={selectedCategory === category ? "default" : "outline"}
-                        className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
+                        className="h-20 w-20 p-1 justify-center items-center text-[11px] overflow-hidden"
                         onClick={() => setSelectedCategory(category)}
                         title={category}
                       >

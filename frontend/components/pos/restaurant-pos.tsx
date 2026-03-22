@@ -1536,14 +1536,14 @@ export function RestaurantPOS() {
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               <div className="flex-1 flex min-h-0 overflow-hidden">
                 {/* Category Sidebar - Fixed */}
-                <div className="w-32 border-r bg-gray-200 flex-shrink-0 p-2 flex flex-col gap-2">
+                <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2 flex flex-col gap-2">
                   <div className="mb-2">
                     <span className="text-xs font-medium">Categories</span>
                   </div>
                   {isLoadingCategories ? (
                     <div className="space-y-2">
                       {Array.from({ length: 6 }).map((_, idx) => (
-                        <div key={idx} className="h-10 bg-muted animate-pulse rounded" />
+                        <div key={idx} className="h-12 bg-muted animate-pulse rounded" />
                       ))}
                     </div>
                   ) : categoriesError ? (
@@ -1554,7 +1554,7 @@ export function RestaurantPOS() {
                         <Button
                           key="all"
                           variant={selectedCategory === "all" ? "default" : "outline"}
-                          className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
+                          className="h-20 w-20 p-1 justify-center items-center text-[11px] overflow-hidden"
                           onClick={() => setSelectedCategory("all")}
                           title="All"
                         >
@@ -1564,7 +1564,7 @@ export function RestaurantPOS() {
                           <Button
                             key={cat.id}
                             variant={selectedCategory === cat.id ? "default" : "outline"}
-                            className="h-16 w-16 p-0 justify-center items-center text-[10px] overflow-hidden"
+                            className="h-20 w-20 p-1 justify-center items-center text-[11px] overflow-hidden"
                             onClick={() => setSelectedCategory(cat.id)}
                             title={cat.name}
                           >
