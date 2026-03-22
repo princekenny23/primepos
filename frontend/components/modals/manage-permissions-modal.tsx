@@ -61,6 +61,13 @@ interface TenantPermissions {
   allow_settings_outlets: boolean
   allow_settings_integrations: boolean
   allow_settings_advanced: boolean
+
+  // Distribution Features
+  allow_distribution_routes: boolean
+  allow_distribution_drivers: boolean
+  allow_distribution_orders: boolean
+  allow_distribution_tracking: boolean
+  allow_distribution_reports: boolean
 }
 
 interface ManagePermissionsModalProps {
@@ -122,6 +129,13 @@ export function ManagePermissionsModal({
     allow_settings_outlets: true,
     allow_settings_integrations: true,
     allow_settings_advanced: true,
+
+    // Distribution Features
+    allow_distribution_routes: true,
+    allow_distribution_drivers: true,
+    allow_distribution_orders: true,
+    allow_distribution_tracking: true,
+    allow_distribution_reports: true,
   })
 
   useEffect(() => {
@@ -137,11 +151,18 @@ export function ManagePermissionsModal({
       if (data) {
         // Keep users and staff managed together in the UI.
         const usersAndStaffEnabled = (data.allow_office_users !== false) || (data.allow_office_staff !== false)
-        setPermissions({
+        setPermissions(prev => ({
+          ...prev,
           ...data,
           allow_office_users: usersAndStaffEnabled,
           allow_office_staff: usersAndStaffEnabled,
-        })
+          // Default distribution sub-features to true if not set by API
+          allow_distribution_routes: data.allow_distribution_routes ?? true,
+          allow_distribution_drivers: data.allow_distribution_drivers ?? true,
+          allow_distribution_orders: data.allow_distribution_orders ?? true,
+          allow_distribution_tracking: data.allow_distribution_tracking ?? true,
+          allow_distribution_reports: data.allow_distribution_reports ?? true,
+        }))
       }
     } catch (error: any) {
       console.error("Failed to load permissions:", error)
@@ -215,6 +236,15 @@ export function ManagePermissionsModal({
           allow_settings_outlets: false,
           allow_settings_integrations: false,
           allow_settings_advanced: false,
+        }))
+      } else if (key === 'has_distribution') {
+        setPermissions(prev => ({
+          ...prev,
+          allow_distribution_routes: false,
+          allow_distribution_drivers: false,
+          allow_distribution_orders: false,
+          allow_distribution_tracking: false,
+          allow_distribution_reports: false,
         }))
       }
     }
@@ -635,11 +665,44 @@ export function ManagePermissionsModal({
                   </CardHeader>
                   <CardContent className="space-y-2">
                     <PermissionSwitch
-                      id="has_distribution"
-                      label="Fleet & Delivery Operations"
-                      checked={permissions.has_distribution}
-                      onChange={(checked) => handleToggle('has_distribution', checked)}
-                      description="Enables distribution dashboard, routes, and delivery workflows"
+                      id="allow_distribution_orders"
+                      label="Manage Delivery Orders"
+                      checked={permissions.allow_distribution_orders}
+                      onChange={(checked) => handleToggle('allow_distribution_orders', checked)}
+                      disabled={!permissions.has_distribution}
+                      description="Create, assign and manage delivery orders"
+                    />
+                    <PermissionSwitch
+                      id="allow_distribution_routes"
+                      label="Routes & Scheduling"
+                      checked={permissions.allow_distribution_routes}
+                      onChange={(checked) => handleToggle('allow_distribution_routes', checked)}
+                      disabled={!permissions.has_distribution}
+                      description="Plan and manage delivery routes"
+                    />
+                    <PermissionSwitch
+                      id="allow_distribution_drivers"
+                      label="Drivers & Fleet Management"
+                      checked={permissions.allow_distribution_drivers}
+                      onChange={(checked) => handleToggle('allow_distribution_drivers', checked)}
+                      disabled={!permissions.has_distribution}
+                      description="Manage drivers, vehicles and fleet"
+                    />
+                    <PermissionSwitch
+                      id="allow_distribution_tracking"
+                      label="Live Tracking"
+                      checked={permissions.allow_distribution_tracking}
+                      onChange={(checked) => handleToggle('allow_distribution_tracking', checked)}
+                      disabled={!permissions.has_distribution}
+                      description="Real-time delivery and driver tracking"
+                    />
+                    <PermissionSwitch
+                      id="allow_distribution_reports"
+                      label="Distribution Reports"
+                      checked={permissions.allow_distribution_reports}
+                      onChange={(checked) => handleToggle('allow_distribution_reports', checked)}
+                      disabled={!permissions.has_distribution}
+                      description="Delivery performance and analytics reports"
                     />
                   </CardContent>
                 </Card>

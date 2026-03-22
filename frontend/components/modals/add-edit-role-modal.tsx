@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { Shield, FileText } from "lucide-react"
+import { Shield, FileText, Truck } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { roleService, type Role } from "@/lib/services/staffService"
@@ -41,6 +41,7 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
     can_staff: false,
     can_settings: false,
     can_dashboard: true,
+    can_distribution: false,
     is_active: true,
   })
 
@@ -59,6 +60,7 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
           can_staff: role.can_staff || false,
           can_settings: role.can_settings || false,
           can_dashboard: role.can_dashboard !== undefined ? role.can_dashboard : true,
+          can_distribution: role.can_distribution || false,
           is_active: role.is_active !== undefined ? role.is_active : true,
         })
       } else {
@@ -74,6 +76,7 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
           can_staff: false,
           can_settings: false,
           can_dashboard: true,
+          can_distribution: false,
           is_active: true,
         })
       }
@@ -116,6 +119,7 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
         can_staff: formData.can_staff,
         can_settings: formData.can_settings,
         can_dashboard: formData.can_dashboard,
+        can_distribution: formData.can_distribution,
         is_active: formData.is_active,
       }
 
@@ -291,6 +295,18 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
                     id="can_settings"
                     checked={formData.can_settings}
                     onCheckedChange={(checked) => setFormData({ ...formData, can_settings: checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between space-x-2">
+                  <Label htmlFor="can_distribution" className="flex flex-col space-y-1">
+                    <span>Distribution</span>
+                    <span className="font-normal text-xs text-muted-foreground">Manage deliveries, routes and fleet</span>
+                  </Label>
+                  <Switch
+                    id="can_distribution"
+                    checked={formData.can_distribution}
+                    onCheckedChange={(checked) => setFormData({ ...formData, can_distribution: checked })}
                   />
                 </div>
               </div>

@@ -42,6 +42,7 @@ export interface Role {
   can_staff: boolean
   can_settings: boolean
   can_dashboard: boolean
+  can_distribution: boolean
   is_active: boolean
   created_at: string
   updated_at: string
