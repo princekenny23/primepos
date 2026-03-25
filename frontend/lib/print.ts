@@ -18,6 +18,7 @@ type ReceiptPayload = {
 
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
 const PRINT_DEVICE_ID_STORAGE_KEY = "printDeviceId"
+const PA_HEARTBEAT_WINDOW_MS = 90_000
 const LOCAL_PRINT_AGENT_URL =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
 const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
@@ -90,11 +91,29 @@ function getPrintDeviceId(): string {
   }
 }
 
+function isLiveOutletConnector(device: any, outletId: number): boolean {
+  const pk = String(device?.id || "").trim()
+  const deviceId = String(device?.device_id || "").trim()
+  if (!pk || !deviceId) return false
+
+  const rawOutletId = typeof device?.outlet === "object" ? device?.outlet?.id : device?.outlet
+  const deviceOutletId = Number(rawOutletId)
+  if (!Number.isFinite(deviceOutletId) || deviceOutletId !== outletId) return false
+
+  if (device?.is_active !== true) return false
+
+  const lastSeenMs = device?.last_seen_at ? new Date(device.last_seen_at).getTime() : NaN
+  return Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs <= PA_HEARTBEAT_WINDOW_MS
+}
+
 async function resolveDeviceIdForOutlet(outletId: number | string): Promise<string> {
   try {
-    const devicesRaw: any = await api.get(`/devices/?outlet=${outletId}&is_active=true`)
+    const normalizedOutletId = Number(outletId)
+    if (!Number.isFinite(normalizedOutletId)) return ""
+
+    const devicesRaw: any = await api.get(`/devices/?outlet=${normalizedOutletId}&is_active=true`)
     const devices = Array.isArray(devicesRaw) ? devicesRaw : (devicesRaw.results || [])
-    const firstActive = devices[0]
+    const firstActive = devices.find((device: any) => isLiveOutletConnector(device, normalizedOutletId))
     const resolvedDeviceId = String(firstActive?.device_id || "").trim()
     return resolvedDeviceId
   } catch {
@@ -304,14 +323,6 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     payload?.sale?.outlet?.id ??
     payload?.sale?.outlet_id ??
     payload?.sale?.outlet
-
-  if (resolvedOutletId && typeof window !== "undefined") {
-    try {
-      localStorage.setItem("currentOutletId", String(resolvedOutletId))
-    } catch {
-      // Ignore localStorage failures
-    }
-  }
 
   const saleId = String(payload?.sale?.id || "").trim()
 

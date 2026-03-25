@@ -45,8 +45,9 @@ class User(AbstractUser):
     def staff_role(self):
         """Get the user's Staff Role object (from staff app)"""
         try:
-            if hasattr(self, 'staff_profile') and self.staff_profile:
-                return self.staff_profile.role
+            first_profile = self.staff_profiles.select_related('role').first()
+            if first_profile:
+                return first_profile.role
         except Exception:
             pass
         return None
@@ -152,8 +153,8 @@ def create_staff_profile(sender, instance, created, **kwargs):
         # Avoid circular import
         from apps.staff.models import Staff
         
-        # Check if staff profile already exists
-        if not hasattr(instance, 'staff_profile'):
+        # Check if staff profile already exists for this tenant
+        if not instance.staff_profiles.filter(tenant=instance.tenant).exists():
             try:
                 Staff.objects.create(
                     user=instance,

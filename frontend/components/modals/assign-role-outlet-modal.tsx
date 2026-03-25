@@ -37,8 +37,9 @@ export function AssignRoleOutletModal({ open, onOpenChange, staff, onSuccess }: 
   const { outlets } = useTenant()
   const [isLoading, setIsLoading] = useState(false)
   const [roles, setRoles] = useState<Role[]>([])
-  const [selectedRoleId, setSelectedRoleId] = useState<string>("")
+  const [fallbackRoleId, setFallbackRoleId] = useState<string>("")
   const [selectedOutletIds, setSelectedOutletIds] = useState<string[]>([])
+  const [outletRoleMap, setOutletRoleMap] = useState<Record<string, string>>({})
 
   const loadRoles = useCallback(async () => {
     if (!currentBusiness) return
@@ -53,13 +54,22 @@ export function AssignRoleOutletModal({ open, onOpenChange, staff, onSuccess }: 
   useEffect(() => {
     if (open && staff) {
       loadRoles()
-      setSelectedRoleId(staff.role?.id ? String(staff.role.id) : "")
+      setFallbackRoleId(staff.role?.id ? String(staff.role.id) : "")
       // Extract outlet IDs from outlets array
       const outletIds = staff.outlets?.map((o: any) => {
         // Handle both object format {id, name} and string format
         return typeof o === 'object' ? String(o.id) : String(o)
       }) || []
       setSelectedOutletIds(outletIds)
+
+      const nextMap: Record<string, string> = {}
+      const assignments = staff.outlet_role_assignments || []
+      for (const assignment of assignments) {
+        if (assignment.role_id !== null && assignment.role_id !== undefined) {
+          nextMap[String(assignment.outlet_id)] = String(assignment.role_id)
+        }
+      }
+      setOutletRoleMap(nextMap)
     }
   }, [open, staff, currentBusiness, loadRoles])
 
@@ -73,17 +83,29 @@ export function AssignRoleOutletModal({ open, onOpenChange, staff, onSuccess }: 
     )
   }
 
+  const handleOutletRoleChange = (outletId: string, roleId: string) => {
+    setOutletRoleMap((prev) => ({
+      ...prev,
+      [outletId]: roleId === 'none' ? '' : roleId,
+    }))
+  }
+
   const handleAssign = async () => {
     setIsLoading(true)
 
     try {
       const updateData: any = {
-        outlet_ids: selectedOutletIds.map(id => parseInt(id)),
+        outlet_roles: selectedOutletIds.map((id) => ({
+          outlet_id: parseInt(id),
+          role_id: outletRoleMap[id]
+            ? parseInt(outletRoleMap[id])
+            : (fallbackRoleId ? parseInt(fallbackRoleId) : null),
+        })),
       }
-      if (selectedRoleId) {
-        updateData.role = parseInt(selectedRoleId)
+      if (fallbackRoleId) {
+        updateData.role_id = parseInt(fallbackRoleId)
       } else {
-        updateData.role = null
+        updateData.role_id = null
       }
 
       await staffService.update(staff.id, updateData)
@@ -130,13 +152,13 @@ export function AssignRoleOutletModal({ open, onOpenChange, staff, onSuccess }: 
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="role">Role</Label>
+            <Label htmlFor="role">Default Role (Fallback)</Label>
             <Select 
-              value={selectedRoleId || "none"} 
-              onValueChange={(value) => setSelectedRoleId(value === "none" ? "" : value)}
+              value={fallbackRoleId || "none"} 
+              onValueChange={(value) => setFallbackRoleId(value === "none" ? "" : value)}
             >
               <SelectTrigger id="role">
-                <SelectValue placeholder="Select role (optional)" />
+                <SelectValue placeholder="Select default role (optional)" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No role assigned</SelectItem>
@@ -157,22 +179,45 @@ export function AssignRoleOutletModal({ open, onOpenChange, staff, onSuccess }: 
               ) : (
                 <div className="space-y-2">
                   {outlets.filter(o => o.isActive).map(outlet => (
-                    <div key={outlet.id} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        id={`outlet-${outlet.id}`}
-                        checked={selectedOutletIds.includes(String(outlet.id))}
-                        onChange={() => handleOutletToggle(String(outlet.id))}
-                        className="h-4 w-4 rounded border-gray-300"
-                        aria-label={`Select ${outlet.name} outlet`}
-                      />
-                      <Label
-                        htmlFor={`outlet-${outlet.id}`}
-                        className="flex items-center gap-2 cursor-pointer flex-1"
-                      >
-                        <MapPin className="h-3 w-3 text-muted-foreground" />
-                        <span>{outlet.name}</span>
-                      </Label>
+                    <div key={outlet.id} className="space-y-2 rounded-md border p-2">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id={`outlet-${outlet.id}`}
+                          checked={selectedOutletIds.includes(String(outlet.id))}
+                          onChange={() => handleOutletToggle(String(outlet.id))}
+                          className="h-4 w-4 rounded border-gray-300"
+                          aria-label={`Select ${outlet.name} outlet`}
+                        />
+                        <Label
+                          htmlFor={`outlet-${outlet.id}`}
+                          className="flex items-center gap-2 cursor-pointer flex-1"
+                        >
+                          <MapPin className="h-3 w-3 text-muted-foreground" />
+                          <span>{outlet.name}</span>
+                        </Label>
+                      </div>
+                      {selectedOutletIds.includes(String(outlet.id)) && (
+                        <div className="pl-6">
+                          <Label className="text-xs text-muted-foreground">Role For This Outlet</Label>
+                          <Select
+                            value={outletRoleMap[String(outlet.id)] || (fallbackRoleId || 'none')}
+                            onValueChange={(value) => handleOutletRoleChange(String(outlet.id), value)}
+                          >
+                            <SelectTrigger className="mt-1">
+                              <SelectValue placeholder="Use default role" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Use no role</SelectItem>
+                              {roles.map((role) => (
+                                <SelectItem key={`outlet-${outlet.id}-role-${role.id}`} value={String(role.id)}>
+                                  {role.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

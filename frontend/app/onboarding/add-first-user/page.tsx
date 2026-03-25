@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useRouter } from "next/navigation"
-import { UserPlus, ArrowLeft, CheckCircle2, AlertCircle } from "lucide-react"
+import { UserPlus, ArrowLeft, CheckCircle2, AlertCircle, Eye, EyeOff } from "lucide-react"
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { SuccessModal } from "@/components/modals/success-modal"
@@ -29,6 +29,8 @@ export default function AddFirstUserPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   
   const [formData, setFormData] = useState({
     firstName: "",
@@ -182,15 +184,29 @@ export default function AddFirstUserPage() {
 
             <div className="space-y-2">
               <Label htmlFor="password">Password *</Label>
-              <Input 
-                id="password" 
-                type="password" 
-                placeholder="Create a strong password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                required
-                minLength={8}
-              />
+              <div className="relative">
+                <Input 
+                  id="password" 
+                  type={showPassword ? "text" : "password"} 
+                  placeholder="Create a strong password"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  required
+                  minLength={8}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 Must be at least 8 characters long
               </p>
@@ -198,15 +214,29 @@ export default function AddFirstUserPage() {
 
             <div className="space-y-2">
               <Label htmlFor="confirm-password">Confirm Password *</Label>
-              <Input 
-                id="confirm-password" 
-                type="password" 
-                placeholder="Confirm your password"
-                value={formData.confirmPassword}
-                onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                required
-                minLength={8}
-              />
+              <div className="relative">
+                <Input 
+                  id="confirm-password" 
+                  type={showConfirmPassword ? "text" : "password"} 
+                  placeholder="Confirm your password"
+                  value={formData.confirmPassword}
+                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                  required
+                  minLength={8}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-2">

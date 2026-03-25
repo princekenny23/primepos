@@ -63,7 +63,7 @@ import {
   Lock, RefreshCw, Users, ArrowRightLeft, Merge, Split, Clock, User,
   Table2, Armchair, List, AlertCircle, Check, Trash2,
   RotateCcw, Percent, Pencil,
-  Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Truck
+  Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Truck, Eye, EyeOff
 } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { PaymentPopup } from "@/components/pos/payment-popup"
@@ -194,6 +194,7 @@ export function BarPOS() {
   const [pendingRowAction, setPendingRowAction] = useState<PosRowAction | null>(null)
   const [rowActionUsername, setRowActionUsername] = useState("")
   const [rowActionPassword, setRowActionPassword] = useState("")
+  const [showRowActionPassword, setShowRowActionPassword] = useState(false)
   const [isVerifyingRowAction, setIsVerifyingRowAction] = useState(false)
 
   // Processing states
@@ -1420,7 +1421,7 @@ export function BarPOS() {
                         <p>No products found</p>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 p-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-3">
                         {filteredProducts.map(product => (
                           <Card
                             key={product.id}
@@ -2679,14 +2680,29 @@ export function BarPOS() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="bar-row-action-password">Password</Label>
-              <Input
-                id="bar-row-action-password"
-                type="password"
-                value={rowActionPassword}
-                onChange={(event) => setRowActionPassword(event.target.value)}
-                placeholder="Enter password"
-                disabled={isVerifyingRowAction}
-              />
+              <div className="relative">
+                <Input
+                  id="bar-row-action-password"
+                  type={showRowActionPassword ? "text" : "password"}
+                  value={rowActionPassword}
+                  onChange={(event) => setRowActionPassword(event.target.value)}
+                  placeholder="Enter password"
+                  disabled={isVerifyingRowAction}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRowActionPassword(!showRowActionPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  disabled={isVerifyingRowAction}
+                >
+                  {showRowActionPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter>

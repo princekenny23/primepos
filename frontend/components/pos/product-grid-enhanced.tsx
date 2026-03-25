@@ -10,17 +10,10 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Package } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useState } from "react"
-import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
 import type { Product, ProductUnit } from "@/lib/types"
 
 interface ProductGridProps {
@@ -123,32 +116,34 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Unit selector */}
+            {/* Unit list */}
             {selectedProduct?.selling_units && selectedProduct.selling_units.length > 1 && (
               <div className="space-y-2">
-                <Label htmlFor="unit">Unit</Label>
-                <Select
-                  value={selectedUnit?.id ? String(selectedUnit.id) : ""}
-                  onValueChange={(val) => {
-                    const unit = selectedProduct.selling_units?.find(
-                      (u) => String(u.id) === val
-                    )
-                    if (unit) setSelectedUnit(unit)
-                  }}
-                >
-                  <SelectTrigger id="unit">
-                    <SelectValue placeholder="Select unit" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {selectedProduct.selling_units.map((u) => (
-                      <SelectItem key={u.id} value={String(u.id)}>
-                        {u.conversion_factor > 1
-                          ? `${u.unit_name} (${u.conversion_factor} pcs) - MWK ${Number(u.retail_price || 0).toFixed(2)}`
-                          : `${u.unit_name} - MWK ${Number(u.retail_price || 0).toFixed(2)}`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {selectedProduct.selling_units.map((u) => {
+                  const isSelected = String(selectedUnit?.id || "") === String(u.id)
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      className={`w-full text-left rounded-md border p-3 transition-colors ${
+                        isSelected ? "border-primary bg-primary/5" : "hover:border-primary/40"
+                      }`}
+                      onClick={() => setSelectedUnit(u)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-sm">
+                          {u.conversion_factor > 1
+                            ? `${u.unit_name} (${u.conversion_factor} pcs)`
+                            : u.unit_name}
+                        </span>
+                        {isSelected && <Badge variant="default">Selected</Badge>}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        MWK {Number(u.retail_price || 0).toFixed(2)}
+                      </div>
+                    </button>
+                  )
+                })}
               </div>
             )}
 
@@ -175,7 +170,7 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
             >
               Cancel
             </Button>
-            <Button onClick={handleAddToCart}>
+            <Button onClick={handleAddToCart} disabled={!selectedUnit}>
               Add to Cart
             </Button>
           </DialogFooter>

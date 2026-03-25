@@ -96,7 +96,9 @@ class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
 class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Staff ViewSet"""
-    queryset = Staff.objects.select_related('user', 'tenant', 'role').prefetch_related('outlets')
+    queryset = Staff.objects.select_related('user', 'tenant', 'role').prefetch_related(
+        'outlets', 'outlet_roles__outlet', 'outlet_roles__role'
+    )
     serializer_class = StaffSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_settings']
@@ -126,7 +128,9 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         tenant = request_tenant or user_tenant
         
         # Get base queryset
-        queryset = Staff.objects.select_related('user', 'tenant', 'role').prefetch_related('outlets').all()
+        queryset = Staff.objects.select_related('user', 'tenant', 'role').prefetch_related(
+            'outlets', 'outlet_roles__outlet', 'outlet_roles__role'
+        ).all()
         
         # Apply tenant filter - CRITICAL for security
         if not is_saas_admin:
@@ -176,17 +180,19 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     error_detail = {'detail': '; '.join(error_messages), 'errors': serializer.errors}
                 return Response(error_detail, status=status.HTTP_400_BAD_REQUEST)
             
-            staff = serializer.save()
+            # Use perform_create so tenant is always injected from request context.
+            self.perform_create(serializer)
+            staff = serializer.instance
             headers = self.get_success_headers(serializer.data)
-            logger.info(f"Staff created successfully")
-            
+            logger.info("Staff created successfully")
+
             # Create notification for new staff (Square POS-like)
             try:
                 from apps.notifications.services import NotificationService
                 NotificationService.notify_staff_added(staff)
             except Exception as e:
                 logger.error(f"Failed to create staff notification: {str(e)}")
-            
+
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         except DRFValidationError as e:
             logger.error(f"Validation error: {e.detail}")

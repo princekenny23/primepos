@@ -60,6 +60,8 @@ import {
   Truck,
   Trash2,
   Wallet,
+  Eye,
+  EyeOff,
 } from "lucide-react"
 import { useShift } from "@/contexts/shift-context"
 import { saleService } from "@/lib/services/saleService"
@@ -162,6 +164,7 @@ export function RetailPOS() {
   const [pendingRowAction, setPendingRowAction] = useState<PosRowAction | null>(null)
   const [rowActionUsername, setRowActionUsername] = useState("")
   const [rowActionPassword, setRowActionPassword] = useState("")
+  const [showRowActionPassword, setShowRowActionPassword] = useState(false)
   const [isVerifyingRowAction, setIsVerifyingRowAction] = useState(false)
   const [transactionLocked, setTransactionLocked] = useState(false)
   const [initiatedSaleId, setInitiatedSaleId] = useState("")
@@ -1770,14 +1773,29 @@ export function RetailPOS() {
               <label htmlFor="retail-row-action-password" className="text-sm font-medium leading-none">
                 Password
               </label>
-              <Input
-                id="retail-row-action-password"
-                type="password"
-                value={rowActionPassword}
-                onChange={(event) => setRowActionPassword(event.target.value)}
-                placeholder="Enter password"
-                disabled={isVerifyingRowAction}
-              />
+              <div className="relative">
+                <Input
+                  id="retail-row-action-password"
+                  type={showRowActionPassword ? "text" : "password"}
+                  value={rowActionPassword}
+                  onChange={(event) => setRowActionPassword(event.target.value)}
+                  placeholder="Enter password"
+                  disabled={isVerifyingRowAction}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRowActionPassword(!showRowActionPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  disabled={isVerifyingRowAction}
+                >
+                  {showRowActionPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter>

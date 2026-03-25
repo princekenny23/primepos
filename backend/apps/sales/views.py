@@ -2487,6 +2487,38 @@ class DeviceViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         device.save(update_fields=['api_key_hash', 'api_key_revoked', 'api_key_revoked_at', 'updated_at'])
         return Response({'revoked': True, 'device': PrintDeviceSerializer(device).data})
 
+    @action(detail=True, methods=['post'], url_path='unpair', permission_classes=[IsAuthenticated, HasTenantModuleAccess])
+    def unpair(self, request, pk=None):
+        """Hard-unpair a connector from outlet routing while preserving device record."""
+        user, tenant = self._resolve_authenticated_user_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant context is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        device = self.get_object()
+        if device.tenant_id != tenant.id and not getattr(user, 'is_saas_admin', False):
+            return Response({'detail': 'Unauthorized for this device.'}, status=status.HTTP_403_FORBIDDEN)
+
+        # Mark linked cloud-printer endpoints as inactive for safety.
+        Printer.objects.filter(device=device).update(is_active=False, updated_at=timezone.now())
+
+        # Remove outlet/device routing and mark device inactive.
+        device.outlet = None
+        device.printer_identifier = ''
+        device.is_active = False
+        device.last_seen_at = timezone.now()
+        device.clear_pairing_code()
+        device.save(update_fields=[
+            'outlet',
+            'printer_identifier',
+            'is_active',
+            'last_seen_at',
+            'pairing_code',
+            'pairing_expires_at',
+            'updated_at',
+        ])
+
+        return Response({'unpaired': True, 'device': PrintDeviceSerializer(device).data})
+
     @action(
         detail=False,
         methods=['post'],

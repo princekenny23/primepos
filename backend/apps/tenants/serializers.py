@@ -63,7 +63,7 @@ class TenantSerializer(serializers.ModelSerializer):
     def get_users(self, obj):
         """Get users for this tenant with their role and permission information"""
         # Use a simplified serializer to avoid circular dependency
-        users = obj.users.select_related('tenant').prefetch_related('staff_profile__role').all()
+        users = obj.users.select_related('tenant').prefetch_related('staff_profiles__role').all()
         result = []
         
         for user in users:

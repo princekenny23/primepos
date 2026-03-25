@@ -18,23 +18,36 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CreditCard, User } from "lucide-react"
+import { CreditCard } from "lucide-react"
 import { useState } from "react"
 import { useToast } from "@/components/ui/use-toast"
+import { tabService } from "@/lib/services/barTabService"
+import { useBusinessStore } from "@/stores/businessStore"
 
 interface OpenTabModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onTabOpened?: () => void
 }
 
-export function OpenTabModal({ open, onOpenChange }: OpenTabModalProps) {
+export function OpenTabModal({ open, onOpenChange, onTabOpened }: OpenTabModalProps) {
   const { toast } = useToast()
+  const { currentOutlet } = useBusinessStore()
   const [isOpening, setIsOpening] = useState(false)
   const [customerName, setCustomerName] = useState("")
   const [customerPhone, setCustomerPhone] = useState("")
   const [bartender, setBartender] = useState("")
 
   const handleOpenTab = async () => {
+    if (!currentOutlet?.id) {
+      toast({
+        title: "Outlet Required",
+        description: "Select an outlet before opening a tab.",
+        variant: "destructive",
+      })
+      return
+    }
+
     if (!customerName.trim()) {
       toast({
         title: "Customer Name Required",
@@ -46,18 +59,36 @@ export function OpenTabModal({ open, onOpenChange }: OpenTabModalProps) {
 
     setIsOpening(true)
 
-    // In production, this would call API
-    setTimeout(() => {
+    try {
+      await tabService.open({
+        customer_name: customerName.trim(),
+        customer_phone: customerPhone.trim(),
+        notes: bartender ? `Assigned bartender: ${bartender}` : "",
+      })
+
       setIsOpening(false)
       toast({
         title: "Tab Opened",
-        description: "Tab has been opened successfully.",
+        description: `A new tab has been opened for ${customerName.trim()} in ${currentOutlet.name}.`,
       })
       setCustomerName("")
       setCustomerPhone("")
       setBartender("")
       onOpenChange(false)
-    }, 1000)
+      onTabOpened?.()
+    } catch (error: any) {
+      setIsOpening(false)
+      const description =
+        error?.data?.detail ||
+        error?.message ||
+        "Failed to open the tab. Please try again."
+
+      toast({
+        title: "Open Tab Failed",
+        description,
+        variant: "destructive",
+      })
+    }
   }
 
   return (
@@ -97,15 +128,15 @@ export function OpenTabModal({ open, onOpenChange }: OpenTabModalProps) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="bartender">Bartender</Label>
+            <Label htmlFor="bartender">Bartender Note</Label>
             <Select value={bartender} onValueChange={setBartender}>
               <SelectTrigger id="bartender">
-                <SelectValue placeholder="Select bartender" />
+                <SelectValue placeholder="Optional staff note" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="jane">Jane Bartender</SelectItem>
-                <SelectItem value="john">John Waiter</SelectItem>
-                <SelectItem value="bob">Bob Staff</SelectItem>
+                <SelectItem value="Jane Bartender">Jane Bartender</SelectItem>
+                <SelectItem value="John Waiter">John Waiter</SelectItem>
+                <SelectItem value="Bob Staff">Bob Staff</SelectItem>
               </SelectContent>
             </Select>
           </div>

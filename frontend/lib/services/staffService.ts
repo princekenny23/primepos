@@ -19,6 +19,16 @@ export interface Staff {
     is_active?: boolean
   }>
   outlet_ids?: number[] // For write operations
+  outlet_roles?: Array<{
+    outlet_id: number
+    role_id: number | null
+  }>
+  outlet_role_assignments?: Array<{
+    outlet_id: number
+    outlet_name?: string
+    role_id: number | null
+    role_name?: string
+  }>
   role?: {
     id: string
     name: string

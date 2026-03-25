@@ -11,14 +11,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Table,
   TableBody,
@@ -27,37 +21,82 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { CreditCard, DollarSign, Check } from "lucide-react"
-import { useState } from "react"
+import { CreditCard, Check } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 import { useToast } from "@/components/ui/use-toast"
+import { tabService, type CloseTabData, type Tab, type TabListItem } from "@/lib/services/barTabService"
+import { useBusinessStore } from "@/stores/businessStore"
 
 interface CloseTabModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  tab: any
+  tab: TabListItem | null
+  onTabClosed?: () => void
 }
 
-export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
+export function CloseTabModal({ open, onOpenChange, tab, onTabClosed }: CloseTabModalProps) {
   const { toast } = useToast()
+  const { currentBusiness } = useBusinessStore()
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isLoadingTab, setIsLoadingTab] = useState(false)
+  const [tabDetails, setTabDetails] = useState<Tab | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<string>("cash")
   const [amount, setAmount] = useState<string>("")
+  const [notes, setNotes] = useState("")
 
-  if (!tab) return null
+  useEffect(() => {
+    if (!open || !tab?.id) {
+      setTabDetails(null)
+      return
+    }
 
-  // Mock tab items
-  const tabItems = [
-    { name: "Vodka Shot", quantity: 3, price: 8.00, total: 24.00 },
-    { name: "Beer", quantity: 2, price: 5.00, total: 10.00 },
-    { name: "Cocktail", quantity: 1, price: 12.00, total: 12.00 },
-  ]
+    let isMounted = true
 
-  const subtotal = tabItems.reduce((sum, item) => sum + item.total, 0)
-  const tax = subtotal * 0.1
-  const total = subtotal + tax
+    const loadTab = async () => {
+      setIsLoadingTab(true)
+      try {
+        const response = await tabService.get(tab.id)
+        if (isMounted) {
+          setTabDetails(response)
+        }
+      } catch (error: any) {
+        if (isMounted) {
+          setTabDetails(null)
+          toast({
+            title: "Failed to Load Tab",
+            description: error?.data?.detail || error?.message || "Could not load the selected tab.",
+            variant: "destructive",
+          })
+          onOpenChange(false)
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingTab(false)
+        }
+      }
+    }
+
+    void loadTab()
+
+    return () => {
+      isMounted = false
+    }
+  }, [open, tab?.id, onOpenChange, toast])
+
+  const activeItems = useMemo(() => {
+    return (tabDetails?.items || []).filter((item) => !item.is_voided)
+  }, [tabDetails])
+
+  const subtotal = Number(tabDetails?.subtotal || 0)
+  const tax = Number(tabDetails?.tax || 0)
+  const total = Number(tabDetails?.total || 0)
   const change = parseFloat(amount || "0") - total
 
   const handleCloseTab = async () => {
+    if (!tabDetails?.id) {
+      return
+    }
+
     if (!paymentMethod) {
       toast({
         title: "Payment Method Required",
@@ -78,18 +117,40 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
 
     setIsProcessing(true)
 
-    // In production, this would call API
-    setTimeout(() => {
+    try {
+      const payload: CloseTabData = {
+        payment_method: paymentMethod as CloseTabData["payment_method"],
+        notes: notes.trim(),
+      }
+
+      if (paymentMethod === "cash") {
+        payload.cash_received = parseFloat(amount)
+      }
+
+      const response = await tabService.close(tabDetails.id, payload)
+
       setIsProcessing(false)
       toast({
         title: "Tab Closed",
-        description: `Tab ${tab.tabNumber} has been closed and payment processed.`,
+        description: `Tab ${response.tab.tab_number} closed. Receipt ${response.sale.receipt_number} created.`,
       })
       setPaymentMethod("cash")
       setAmount("")
+      setNotes("")
+      setTabDetails(null)
       onOpenChange(false)
-    }, 1500)
+      onTabClosed?.()
+    } catch (error: any) {
+      setIsProcessing(false)
+      toast({
+        title: "Close Tab Failed",
+        description: error?.data?.error || error?.data?.detail || error?.message || "Failed to close the tab.",
+        variant: "destructive",
+      })
+    }
   }
+
+  if (!tab) return null
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -97,7 +158,7 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CreditCard className="h-5 w-5" />
-            Close Tab - {tab.tabNumber}
+            Close Tab - {tab.tab_number}
           </DialogTitle>
           <DialogDescription>
             Settle payment and close the tab
@@ -105,9 +166,19 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
         </DialogHeader>
         
         <div className="space-y-4 py-4">
+          {isLoadingTab ? (
+            <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+              Loading tab details...
+            </div>
+          ) : !tabDetails ? (
+            <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+              Tab details are not available.
+            </div>
+          ) : (
+            <>
           <div className="p-3 bg-muted rounded-lg">
             <p className="text-sm text-muted-foreground">Customer</p>
-            <p className="font-medium">{tab.customer}</p>
+            <p className="font-medium">{tabDetails.customer_display || tabDetails.customer_name || "Walk-in"}</p>
           </div>
 
           {/* Tab Items */}
@@ -123,13 +194,19 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tabItems.map((item, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell className="font-medium">{item.name}</TableCell>
+                {activeItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                      No active items on this tab.
+                    </TableCell>
+                  </TableRow>
+                ) : activeItems.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell className="font-medium">{item.product_name}</TableCell>
                     <TableCell>{item.quantity}</TableCell>
-                    <TableCell>${item.price.toFixed(2)}</TableCell>
+                    <TableCell>{(currentBusiness?.currencySymbol || "MWK")} {Number(item.price).toFixed(2)}</TableCell>
                     <TableCell className="font-semibold">
-                      ${item.total.toFixed(2)}
+                      {(currentBusiness?.currencySymbol || "MWK")} {Number(item.total).toFixed(2)}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -141,24 +218,25 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
           <div className="p-3 bg-muted rounded-lg space-y-1">
             <div className="flex justify-between text-sm">
               <span>Subtotal:</span>
-              <span>MWK {subtotal.toFixed(2)}</span>
+              <span>{currentBusiness?.currencySymbol || "MWK"} {subtotal.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span>Tax (10%):</span>
-              <span>MWK {tax.toFixed(2)}</span>
+              <span>Tax:</span>
+              <span>{currentBusiness?.currencySymbol || "MWK"} {tax.toFixed(2)}</span>
             </div>
             <div className="flex justify-between font-bold text-lg pt-2 border-t">
               <span>Total:</span>
-              <span>MWK {total.toFixed(2)}</span>
+              <span>{currentBusiness?.currencySymbol || "MWK"} {total.toFixed(2)}</span>
             </div>
           </div>
 
           {/* Payment */}
           <Tabs value={paymentMethod} onValueChange={setPaymentMethod}>
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="cash">Cash</TabsTrigger>
               <TabsTrigger value="card">Card</TabsTrigger>
-              <TabsTrigger value="tab">Keep Tab</TabsTrigger>
+              <TabsTrigger value="mobile">Mobile</TabsTrigger>
+              <TabsTrigger value="credit">Credit</TabsTrigger>
             </TabsList>
 
             <TabsContent value="cash" className="space-y-2 mt-4">
@@ -173,7 +251,7 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
               />
               {amount && parseFloat(amount) >= total && (
                 <p className="text-sm font-medium text-green-600">
-                  Change: ${change.toFixed(2)}
+                  Change: {currentBusiness?.currencySymbol || "MWK"} {change.toFixed(2)}
                 </p>
               )}
             </TabsContent>
@@ -184,12 +262,30 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
               </p>
             </TabsContent>
 
-            <TabsContent value="tab" className="space-y-2 mt-4">
+            <TabsContent value="mobile" className="space-y-2 mt-4">
               <p className="text-sm text-muted-foreground">
-                Keep the tab open for later payment
+                Record this tab as paid via mobile money.
+              </p>
+            </TabsContent>
+
+            <TabsContent value="credit" className="space-y-2 mt-4">
+              <p className="text-sm text-muted-foreground">
+                Close the tab as credit. The backend will mark the sale unpaid and assign a default due date.
               </p>
             </TabsContent>
           </Tabs>
+
+          <div className="space-y-2">
+            <Label htmlFor="close-tab-notes">Notes</Label>
+            <Textarea
+              id="close-tab-notes"
+              placeholder="Optional settlement notes"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+          </div>
+            </>
+          )}
         </div>
 
         <DialogFooter>
@@ -198,7 +294,7 @@ export function CloseTabModal({ open, onOpenChange, tab }: CloseTabModalProps) {
           </Button>
           <Button
             onClick={handleCloseTab}
-            disabled={isProcessing || (paymentMethod === "cash" && (!amount || parseFloat(amount) < total))}
+            disabled={isLoadingTab || !tabDetails || isProcessing || (paymentMethod === "cash" && (!amount || parseFloat(amount) < total))}
             className="bg-green-600 hover:bg-green-700"
           >
             {isProcessing ? "Processing..." : (

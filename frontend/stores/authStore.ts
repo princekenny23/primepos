@@ -60,6 +60,7 @@ export const useAuthStore = create<AuthState>()(
             localStorage.removeItem("authToken")
             localStorage.removeItem("refreshToken")
             localStorage.removeItem("primepos-auth")
+            localStorage.removeItem("primepos-business")
           }
         }
       },

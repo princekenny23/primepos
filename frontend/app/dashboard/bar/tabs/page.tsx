@@ -18,31 +18,35 @@ import { Plus, Search, CreditCard, Clock, DollarSign } from "lucide-react"
 import { useState, useEffect } from "react"
 import { OpenTabModal } from "@/components/modals/open-tab-modal"
 import { CloseTabModal } from "@/components/modals/close-tab-modal"
-import { tabService } from "@/lib/services/tabService"
+import { tabService } from "@/lib/services/barTabService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useRealAPI } from "@/lib/utils/api-config"
-import type { Tab } from "@/lib/services/tabService"
+import type { TabListItem } from "@/lib/services/barTabService"
 
 export default function TabsPage() {
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const [searchTerm, setSearchTerm] = useState("")
   const [showOpenTab, setShowOpenTab] = useState(false)
   const [showCloseTab, setShowCloseTab] = useState(false)
-  const [selectedTab, setSelectedTab] = useState<Tab | null>(null)
-  const [tabs, setTabs] = useState<Tab[]>([])
+  const [selectedTab, setSelectedTab] = useState<TabListItem | null>(null)
+  const [tabs, setTabs] = useState<TabListItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [refreshKey, setRefreshKey] = useState(0)
   const useReal = useRealAPI()
 
   useEffect(() => {
     const loadTabs = async () => {
-      if (!currentBusiness) return
+      if (!currentBusiness || !currentOutlet?.id) {
+        setTabs([])
+        setIsLoading(false)
+        return
+      }
       
       setIsLoading(true)
       try {
         if (useReal) {
           const response = await tabService.list({
-            tenant: currentBusiness.id,
-            outlet: currentOutlet?.id,
+            outlet: String(currentOutlet.id),
           })
           setTabs(response.results || [])
         } else {
@@ -57,12 +61,12 @@ export default function TabsPage() {
       }
     }
     
-    loadTabs()
-  }, [currentBusiness, currentOutlet, useReal])
+    void loadTabs()
+  }, [currentBusiness, currentOutlet, useReal, refreshKey])
 
   const filteredTabs = tabs.filter(tab =>
     tab.tab_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (tab.customer && tab.customer.toLowerCase().includes(searchTerm.toLowerCase()))
+    tab.customer_display.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   const openTabs = tabs.filter(t => t.status === "open")
@@ -70,15 +74,15 @@ export default function TabsPage() {
   
   const avgTabTime = openTabs.length > 0
     ? openTabs.reduce((sum, tab) => {
-        const openedDate = new Date(tab.opened)
+        const openedDate = new Date(tab.opened_at)
         const now = new Date()
         const diff = now.getTime() - openedDate.getTime()
         return sum + diff
       }, 0) / openTabs.length / (1000 * 60 * 60) // Convert to hours
     : 0
 
-  const getTimeOpen = (opened: string) => {
-    const openedDate = new Date(opened)
+  const getTimeOpen = (openedAt: string) => {
+    const openedDate = new Date(openedAt)
     const now = new Date()
     const diff = now.getTime() - openedDate.getTime()
     const hours = Math.floor(diff / (1000 * 60 * 60))
@@ -199,11 +203,11 @@ export default function TabsPage() {
                   filteredTabs.map((tab) => (
                     <TableRow key={tab.id}>
                       <TableCell className="font-medium">{tab.tab_number}</TableCell>
-                      <TableCell>{tab.customer || "Walk-in"}</TableCell>
+                      <TableCell>{tab.customer_display || tab.customer_name || "Walk-in"}</TableCell>
                       <TableCell>
-                        {new Date(tab.opened).toLocaleString()}
+                        {new Date(tab.opened_at).toLocaleString()}
                       </TableCell>
-                      <TableCell>{tab.items}</TableCell>
+                      <TableCell>{tab.item_count}</TableCell>
                       <TableCell className="font-semibold">
                         {currentBusiness?.currencySymbol || "MWK"} {tab.total.toFixed(2)}
                       </TableCell>
@@ -211,15 +215,15 @@ export default function TabsPage() {
                         {tab.status === "open" ? (
                           <div className="flex items-center gap-1 text-sm text-muted-foreground">
                             <Clock className="h-3 w-3" />
-                            {getTimeOpen(tab.opened)}
+                            {getTimeOpen(tab.opened_at)}
                           </div>
                         ) : (
                           <span className="text-sm text-muted-foreground">
-                            {tab.closed && new Date(tab.closed).toLocaleTimeString()}
+                            Closed
                           </span>
                         )}
                       </TableCell>
-                      <TableCell>{tab.bartender || "N/A"}</TableCell>
+                      <TableCell>{tab.opened_by_name || "N/A"}</TableCell>
                       <TableCell>
                         <Badge variant={tab.status === "open" ? "default" : "secondary"}>
                           {tab.status}
@@ -253,11 +257,13 @@ export default function TabsPage() {
         <OpenTabModal
           open={showOpenTab}
           onOpenChange={setShowOpenTab}
+          onTabOpened={() => setRefreshKey((current) => current + 1)}
         />
         <CloseTabModal
           open={showCloseTab}
           onOpenChange={setShowCloseTab}
           tab={selectedTab}
+          onTabClosed={() => setRefreshKey((current) => current + 1)}
         />
       </div>
       </PageLayout>

@@ -12,6 +12,7 @@ export interface DataExchangeConfig {
   fields: DataField[]
   requiredFields: string[]
   defaultFormat: "xlsx" | "csv"
+  showFieldsInfo?: boolean
   filters?: {
     outlet?: boolean
     category?: boolean
@@ -431,10 +432,11 @@ export const dataExchangeConfigs: Record<string, DataExchangeConfig> = {
     fields: productsFields,
     requiredFields: ["product_name", "category", "retail_price"],
     defaultFormat: "xlsx",
+    showFieldsInfo: false,
     filters: {
-      outlet: true,
-      category: true,
-      status: true,
+      outlet: false,
+      category: false,
+      status: false,
     },
     apiEndpoints: {
       import: "/products/bulk-import/",

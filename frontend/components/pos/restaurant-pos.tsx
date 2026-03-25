@@ -65,7 +65,7 @@ import {
   Lock, RefreshCw, Users, ArrowRightLeft, Merge, Split, Clock, User,
   Table2, Armchair, List, AlertCircle, Check, Trash2,
   RotateCcw, Percent, Pencil,
-  Wallet, ShieldAlert, XCircle, Zap, History, ChefHat, Truck
+  Wallet, ShieldAlert, XCircle, Zap, History, ChefHat, Truck, Eye, EyeOff
 } from "lucide-react"
 import { Tag, PauseCircle } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
@@ -190,6 +190,7 @@ export function RestaurantPOS() {
   const [pendingRowAction, setPendingRowAction] = useState<PosRowAction | null>(null)
   const [rowActionUsername, setRowActionUsername] = useState("")
   const [rowActionPassword, setRowActionPassword] = useState("")
+  const [showRowActionPassword, setShowRowActionPassword] = useState(false)
   const [isVerifyingRowAction, setIsVerifyingRowAction] = useState(false)
 
   // Processing states
@@ -1595,7 +1596,7 @@ export function RestaurantPOS() {
                         <p>No products found</p>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-4 p-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-3">
                         {filteredProducts.map(product => (
                           <Card
                             key={product.id}
@@ -2474,30 +2475,62 @@ export function RestaurantPOS() {
               return
             }
 
+            setIsProcessing(true)
             try {
-              await saleService.finalizePayment(initiatedSaleId, {
+              const sale = await saleService.finalizePayment(initiatedSaleId, {
                 payment_method: paymentMethod as "cash" | "card" | "mobile" | "tab" | "credit",
                 cash_received: amount,
                 change,
               })
+
+              const saleAny = sale as any
+              const receiptNumber = saleAny._raw?.receipt_number || saleAny.receipt_number || sale.id
+
+              try {
+                await printReceipt(
+                  {
+                    cart: cart.map((i) => ({
+                      id: i.id,
+                      name: i.name,
+                      price: i.price,
+                      quantity: i.quantity,
+                      total: i.total,
+                    })),
+                    subtotal: Number(saleAny.subtotal ?? saleAny._raw?.subtotal ?? 0),
+                    discount: Number(saleAny.discount ?? saleAny._raw?.discount ?? 0),
+                    tax: Number(saleAny.tax ?? saleAny._raw?.tax ?? 0),
+                    total: Number(saleAny.total ?? saleAny._raw?.total ?? 0),
+                    sale,
+                  },
+                  outlet!.id
+                )
+              } catch (printError) {
+                console.warn("Print failed:", printError)
+              }
 
               setCart([])
               setSaleDiscount(null)
               setSelectedCustomer(null)
               setTransactionLocked(false)
               setInitiatedSaleId("")
+              setIsDeliveryRequired(false)
+              setShowPaymentModal(false)
 
               toast({
-                title: "Payment Processed",
-                description: `${method.charAt(0).toUpperCase() + method.slice(1)} payment completed successfully.`,
+                title: "Sale completed successfully",
+                description: `Receipt #${receiptNumber}`,
               })
             } catch (error: any) {
+              console.error("Quick sale error:", error)
               toast({
                 title: "Payment failed",
                 description: error?.message || "Unable to finalize payment.",
                 variant: "destructive",
               })
               return
+            } finally {
+              setIsProcessing(false)
+              setIsDeliveryRequired(false)
             }
           }
           setShowPaymentModal(false)
@@ -2842,14 +2875,29 @@ export function RestaurantPOS() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="restaurant-row-action-password">Password</Label>
-              <Input
-                id="restaurant-row-action-password"
-                type="password"
-                value={rowActionPassword}
-                onChange={(event) => setRowActionPassword(event.target.value)}
-                placeholder="Enter password"
-                disabled={isVerifyingRowAction}
-              />
+              <div className="relative">
+                <Input
+                  id="restaurant-row-action-password"
+                  type={showRowActionPassword ? "text" : "password"}
+                  value={rowActionPassword}
+                  onChange={(event) => setRowActionPassword(event.target.value)}
+                  placeholder="Enter password"
+                  disabled={isVerifyingRowAction}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRowActionPassword(!showRowActionPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  disabled={isVerifyingRowAction}
+                >
+                  {showRowActionPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
           <DialogFooter>

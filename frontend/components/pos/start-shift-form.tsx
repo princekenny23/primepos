@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon, Store, Calendar, CreditCard, DollarSign, FileText, Loader2 } from "lucide-react"
+import { Calendar as CalendarIcon, Store, Calendar, CreditCard, DollarSign, FileText, Loader2, Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -86,6 +86,7 @@ export function StartShiftForm({ onSuccess, redirectTo }: StartShiftFormProps = 
   const [showLoginConfirm, setShowLoginConfirm] = useState(false)
   const [confirmEmail, setConfirmEmail] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [isVerifyingUser, setIsVerifyingUser] = useState(false)
   const [errors, setErrors] = useState<FormErrors>({})
 
@@ -509,14 +510,29 @@ export function StartShiftForm({ onSuccess, redirectTo }: StartShiftFormProps = 
             </div>
             <div className="space-y-1">
               <Label htmlFor="shift-confirm-password">Password</Label>
-              <Input
-                id="shift-confirm-password"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                placeholder="Enter password"
-                disabled={isVerifyingUser}
-              />
+              <div className="relative">
+                <Input
+                  id="shift-confirm-password"
+                  type={showConfirmPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Enter password"
+                  disabled={isVerifyingUser}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  disabled={isVerifyingUser}
+                >
+                  {showConfirmPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 

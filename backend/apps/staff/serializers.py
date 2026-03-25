@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Role, Staff, Attendance
+from .models import Role, Staff, Attendance, StaffOutletRole
 from apps.accounts.serializers import UserSerializer
 from apps.accounts.models import User
 from apps.outlets.serializers import OutletSerializer
@@ -32,6 +32,14 @@ class StaffSerializer(serializers.ModelSerializer):
         default=list
     )
     role_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)  # For write operations
+    outlet_roles = serializers.ListField(
+        child=serializers.DictField(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+        default=list,
+    )
+    outlet_role_assignments = serializers.SerializerMethodField(read_only=True)
     
     # User creation fields (for creating new staff)
     name = serializers.CharField(write_only=True, required=False, allow_blank=True)
@@ -44,7 +52,8 @@ class StaffSerializer(serializers.ModelSerializer):
         model = Staff
         fields = (
             'id', 'user', 'user_id', 'tenant', 'outlets', 'outlet_ids',
-            'role', 'role_id', 'is_active', 'created_at', 'updated_at',
+            'role', 'role_id', 'outlet_roles', 'outlet_role_assignments',
+            'is_active', 'created_at', 'updated_at',
             'name', 'email', 'phone', 'password'  # User creation fields
         )
         read_only_fields = ('id', 'user', 'outlets', 'role', 'tenant', 'created_at', 'updated_at')
@@ -124,6 +133,82 @@ class StaffSerializer(serializers.ModelSerializer):
         
         return attrs
 
+    def validate_outlet_roles(self, value):
+        """Validate outlet_roles payload and tenant ownership."""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("outlet_roles must be a list")
+
+        request = self.context.get('request')
+        tenant = None
+        if request:
+            tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+
+        normalized = []
+        seen_outlets = set()
+        for row in value:
+            if not isinstance(row, dict):
+                raise serializers.ValidationError("Each outlet_roles entry must be an object")
+
+            outlet_id = row.get('outlet_id')
+            role_id = row.get('role_id')
+
+            try:
+                outlet_id = int(outlet_id)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError("Each outlet_roles entry requires a valid outlet_id")
+
+            if outlet_id in seen_outlets:
+                raise serializers.ValidationError(f"Duplicate outlet_id in outlet_roles: {outlet_id}")
+            seen_outlets.add(outlet_id)
+
+            if role_id in [None, '']:
+                parsed_role_id = None
+            else:
+                try:
+                    parsed_role_id = int(role_id)
+                except (TypeError, ValueError):
+                    raise serializers.ValidationError(
+                        f"Invalid role_id for outlet {outlet_id}: {role_id}"
+                    )
+
+            normalized.append({
+                'outlet_id': outlet_id,
+                'role_id': parsed_role_id,
+            })
+
+        if tenant and normalized:
+            from apps.outlets.models import Outlet
+            outlet_ids = [r['outlet_id'] for r in normalized]
+            outlets = Outlet.objects.filter(id__in=outlet_ids, tenant=tenant)
+            if outlets.count() != len(outlet_ids):
+                raise serializers.ValidationError(
+                    "One or more outlet_ids in outlet_roles do not belong to your tenant"
+                )
+
+            role_ids = [r['role_id'] for r in normalized if r['role_id'] is not None]
+            if role_ids:
+                roles = Role.objects.filter(id__in=role_ids, tenant=tenant)
+                if roles.count() != len(set(role_ids)):
+                    raise serializers.ValidationError(
+                        "One or more role_ids in outlet_roles do not belong to your tenant"
+                    )
+
+        return normalized
+
+    def get_outlet_role_assignments(self, obj):
+        assignments = obj.outlet_roles.select_related('outlet', 'role').all()
+        return [
+            {
+                'outlet_id': item.outlet_id,
+                'outlet_name': item.outlet.name if item.outlet else None,
+                'role_id': item.role_id,
+                'role_name': item.role.name if item.role else None,
+            }
+            for item in assignments
+        ]
+
     @staticmethod
     def _map_staff_role_to_user_role(role_obj):
         if not role_obj:
@@ -144,6 +229,7 @@ class StaffSerializer(serializers.ModelSerializer):
         from .models import Role
         
         outlet_ids = validated_data.pop('outlet_ids', None) or []
+        outlet_roles = validated_data.pop('outlet_roles', None) or []
         user_id = validated_data.pop('user_id', None)
         role = validated_data.pop('role', None)
         role_id = validated_data.pop('role_id', None)  # Also check for role_id from frontend
@@ -238,13 +324,54 @@ class StaffSerializer(serializers.ModelSerializer):
                             )
                         raise serializers.ValidationError(f"Error creating user: {str(e)}")
                 
-                # Check if staff profile already exists for this user
-                # Note: OneToOneField means a user can only have ONE staff profile globally
-                if Staff.objects.filter(user=user).exists():
-                    existing_staff = Staff.objects.get(user=user)
-                    raise serializers.ValidationError(
-                        f"This user already has a staff profile for tenant '{existing_staff.tenant.name}'"
-                    )
+                # Allow one staff profile per tenant (same user can exist in different tenants).
+                # If it already exists, treat create as an upsert to attach/update outlet roles.
+                existing_staff = Staff.objects.filter(user=user, tenant=tenant).first()
+                if existing_staff:
+                    # Apply profile-level role if provided.
+                    if role_id is not None:
+                        try:
+                            existing_staff.role_id = int(role_id)
+                        except (ValueError, TypeError):
+                            existing_staff.role_id = None
+
+                    # Allow create payload to toggle active status for existing profile.
+                    if 'is_active' in validated_data:
+                        existing_staff.is_active = bool(validated_data.get('is_active'))
+
+                    existing_staff.save()
+
+                    # Upsert per-outlet role assignments if provided; fallback to outlet_ids.
+                    if outlet_roles:
+                        for row in outlet_roles:
+                            StaffOutletRole.objects.update_or_create(
+                                staff=existing_staff,
+                                outlet_id=row['outlet_id'],
+                                defaults={
+                                    'role_id': row['role_id'] if row['role_id'] is not None else existing_staff.role_id,
+                                },
+                            )
+                    elif outlet_ids:
+                        outlets = Outlet.objects.filter(id__in=outlet_ids, tenant=tenant)
+                        if outlets.count() != len(outlet_ids):
+                            raise serializers.ValidationError(
+                                "One or more outlets do not belong to your tenant"
+                            )
+                        for outlet in outlets:
+                            StaffOutletRole.objects.update_or_create(
+                                staff=existing_staff,
+                                outlet=outlet,
+                                defaults={'role_id': existing_staff.role_id},
+                            )
+
+                    # Keep accounts_user.role synchronized with assigned staff role.
+                    if not user.is_saas_admin:
+                        mapped_role = self._map_staff_role_to_user_role(existing_staff.role)
+                        if user.role != mapped_role:
+                            user.role = mapped_role
+                            user.save(update_fields=['role'])
+
+                    return existing_staff
                 
                 # Create staff - ensure role_id is an integer or None
                 # Remove 'role' from validated_data if it exists (shouldn't, but be safe)
@@ -277,14 +404,26 @@ class StaffSerializer(serializers.ModelSerializer):
                         user.role = mapped_role
                         user.save(update_fields=['role'])
                 
-                # Assign outlets
-                if outlet_ids:
+                # Assign per-outlet roles if provided; otherwise fallback to outlet_ids + profile role.
+                if outlet_roles:
+                    for row in outlet_roles:
+                        StaffOutletRole.objects.create(
+                            staff=staff,
+                            outlet_id=row['outlet_id'],
+                            role_id=row['role_id'] if row['role_id'] is not None else staff.role_id,
+                        )
+                elif outlet_ids:
                     outlets = Outlet.objects.filter(id__in=outlet_ids, tenant=tenant)
                     if outlets.count() != len(outlet_ids):
                         raise serializers.ValidationError(
                             "One or more outlets do not belong to your tenant"
                         )
-                    staff.outlets.set(outlets)
+                    for outlet in outlets:
+                        StaffOutletRole.objects.create(
+                            staff=staff,
+                            outlet=outlet,
+                            role_id=staff.role_id,
+                        )
                 
                 return staff
         except serializers.ValidationError:
@@ -295,6 +434,7 @@ class StaffSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update staff member"""
         outlet_ids = validated_data.pop('outlet_ids', None)
+        outlet_roles = validated_data.pop('outlet_roles', None)
         role_id = validated_data.pop('role_id', None)
         role = validated_data.pop('role', None)
         
@@ -326,11 +466,26 @@ class StaffSerializer(serializers.ModelSerializer):
                 user.role = mapped_role
                 user.save(update_fields=['role'])
         
-        # Update outlets if provided
-        if outlet_ids is not None:
+        # Update outlet-role assignments if provided
+        if outlet_roles is not None:
+            # Replace assignments atomically at serializer scope
+            instance.outlet_roles.all().delete()
+            for row in outlet_roles:
+                StaffOutletRole.objects.create(
+                    staff=instance,
+                    outlet_id=row['outlet_id'],
+                    role_id=row['role_id'] if row['role_id'] is not None else instance.role_id,
+                )
+        elif outlet_ids is not None:
             from apps.outlets.models import Outlet
             outlets = Outlet.objects.filter(id__in=outlet_ids, tenant=instance.tenant)
-            instance.outlets.set(outlets)
+            instance.outlet_roles.all().delete()
+            for outlet in outlets:
+                StaffOutletRole.objects.create(
+                    staff=instance,
+                    outlet=outlet,
+                    role_id=instance.role_id,
+                )
         
         return instance
 

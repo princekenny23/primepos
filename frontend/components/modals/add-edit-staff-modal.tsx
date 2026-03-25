@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { User, Mail, Phone, Shield, MapPin } from "lucide-react"
+  import { User, Mail, Phone, Shield, MapPin, Eye, EyeOff } from "lucide-react"
 import { useState, useEffect, useCallback } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { staffService, roleService, type Staff, type Role } from "@/lib/services/staffService"
@@ -39,6 +39,8 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
   const { currentBusiness } = useBusinessStore()
   const { outlets } = useTenant()
   const [isLoading, setIsLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [roles, setRoles] = useState<Role[]>([])
   const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string; email: string }>>([])
   const [formData, setFormData] = useState({
@@ -197,20 +199,23 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
         // Update existing staff
         const updateData: any = {}
         
-        // Only include outlet_ids if there are outlets selected
-        if (formData.outlet_ids.length > 0) {
-          updateData.outlet_ids = formData.outlet_ids.map(id => parseInt(id))
-        } else {
-          // If no outlets selected, send empty array to clear outlets
-          updateData.outlet_ids = []
-        }
-        
-        // Only include role if one is selected
+        // Keep tenant-level fallback role; can be null.
         if (formData.role_id && formData.role_id.trim()) {
           updateData.role_id = parseInt(formData.role_id)
         } else {
-          // Clear role if none selected
           updateData.role_id = null
+        }
+
+        // Per-outlet role assignment payload.
+        // For this modal, selected role is applied to each selected outlet.
+        if (formData.outlet_ids.length > 0) {
+          updateData.outlet_roles = formData.outlet_ids.map((id) => ({
+            outlet_id: parseInt(id),
+            role_id: formData.role_id && formData.role_id.trim() ? parseInt(formData.role_id) : null,
+          }))
+        } else {
+          // Empty list clears outlet assignments
+          updateData.outlet_roles = []
         }
         
         await staffService.update(staff.id, updateData)
@@ -235,19 +240,31 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
           staffData.phone = formData.phone.trim()
         }
         
-        // Only include outlet_ids if there are outlets selected
+        // Only include outlet_roles if there are outlets selected.
         if (formData.outlet_ids && formData.outlet_ids.length > 0) {
-          staffData.outlet_ids = formData.outlet_ids
+          const normalizedOutletIds = formData.outlet_ids
             .filter(id => id && id !== '')
             .map(id => parseInt(String(id)))
             .filter(id => !isNaN(id))
+
+          staffData.outlet_roles = normalizedOutletIds.map((outletId) => ({
+            outlet_id: outletId,
+            role_id: null,
+          }))
         }
         
-        // Only include role if one is selected (not empty string)
+        // Keep tenant-level fallback role and mirror it to outlet_roles where applicable.
         if (formData.role_id && formData.role_id.trim() && formData.role_id !== "none") {
           const roleId = parseInt(formData.role_id)
           if (!isNaN(roleId)) {
             staffData.role_id = roleId
+
+            if (Array.isArray(staffData.outlet_roles)) {
+              staffData.outlet_roles = staffData.outlet_roles.map((assignment: any) => ({
+                ...assignment,
+                role_id: roleId,
+              }))
+            }
           }
         }
         
@@ -482,28 +499,56 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
               <>
                 <div className="space-y-2">
                   <Label htmlFor="password">Password *</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    required
-                    placeholder="Minimum 8 characters"
-                    minLength={8}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      required
+                      placeholder="Minimum 8 characters"
+                      minLength={8}
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="confirmPassword">Confirm Password *</Label>
-                  <Input
-                    id="confirmPassword"
-                    type="password"
-                    value={formData.confirmPassword}
-                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                    required
-                    placeholder="Confirm password"
-                    minLength={8}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="confirmPassword"
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={formData.confirmPassword}
+                      onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                      required
+                      placeholder="Confirm password"
+                      minLength={8}
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
                 </div>
               </>
             )}

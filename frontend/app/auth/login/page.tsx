@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/stores/authStore"
 import { useBusinessStore } from "@/stores/businessStore"
 import { tenantService } from "@/lib/services/tenantService"
-import { User, Lock } from "lucide-react"
+import { User, Lock, Eye, EyeOff } from "lucide-react"
 import { Card } from "@/components/ui/card"
 
 export default function LoginPage() {
@@ -17,6 +17,7 @@ export default function LoginPage() {
   const setCurrentBusiness = useBusinessStore((state) => state.setCurrentBusiness)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showPassword, setShowPassword] = useState(false)
 
   const getPostLoginRoute = (businessType: string | undefined, isAdminUser: boolean): string => {
     if (!isAdminUser) return "/dashboard/pos"
@@ -195,14 +196,14 @@ export default function LoginPage() {
                 )}
                 
                 <div className="space-y-2">
-                  <Label htmlFor="identifier" className="text-gray-700">Email or Username</Label>
+                  <Label htmlFor="identifier" className="text-gray-700">Username</Label>
                   <div className="relative">
                     <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input 
                       id="identifier" 
                       name="identifier" 
                       type="text" 
-                      placeholder="Enter your email or username" 
+                      placeholder="Enter your username" 
                       required 
                       disabled={isLoading}
                       className="pl-10"
@@ -217,12 +218,24 @@ export default function LoginPage() {
                     <Input 
                       id="password" 
                       name="password" 
-                      type="password" 
+                      type={showPassword ? "text" : "password"} 
                       placeholder="Enter password" 
                       required 
                       disabled={isLoading}
-                      className="pl-10"
+                      className="pl-10 pr-10"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                      disabled={isLoading}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
                   </div>
                 </div>
                 

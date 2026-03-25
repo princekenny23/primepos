@@ -45,8 +45,16 @@ export function SubNavbar({
   const handleRefresh = async () => {
     setIsRefreshing(true)
     
-    // Dispatch a custom event that pages can listen to for refreshing their data
-    window.dispatchEvent(new CustomEvent('system-refresh'))
+    // Dispatch refresh events that client pages/components can subscribe to.
+    window.dispatchEvent(new CustomEvent("system-refresh"))
+    window.dispatchEvent(
+      new CustomEvent("subnav-refresh", {
+        detail: {
+          pathname,
+          timestamp: Date.now(),
+        },
+      })
+    )
     
     // Also trigger a router refresh to update any server-side data
     router.refresh()

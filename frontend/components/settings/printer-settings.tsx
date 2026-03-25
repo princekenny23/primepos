@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { useToast } from "@/components/ui/use-toast"
 
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
+const PA_HEARTBEAT_WINDOW_MS = 90_000
 type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
 type WizardStep = 1 | 2 | 3
@@ -30,11 +31,26 @@ async function localAgentFetch(path: string, init?: RequestInit): Promise<Respon
   return response
 }
 
+function isLiveOutletConnector(device: any, outletId: number): boolean {
+  const pk = String(device?.id || "").trim()
+  const deviceId = String(device?.device_id || "").trim()
+  if (!pk || !deviceId) return false
+
+  const rawOutletId = typeof device?.outlet === "object" ? device?.outlet?.id : device?.outlet
+  const deviceOutletId = Number(rawOutletId)
+  if (!Number.isFinite(deviceOutletId) || deviceOutletId !== outletId) return false
+
+  if (device?.is_active !== true) return false
+
+  const lastSeenMs = device?.last_seen_at ? new Date(device.last_seen_at).getTime() : NaN
+  return Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs <= PA_HEARTBEAT_WINDOW_MS
+}
+
 async function resolveActiveConnectorForOutlet(outletId: number): Promise<{ pk: string; deviceId: string } | null> {
   try {
     const devicesRaw: any = await api.get(`/devices/?outlet=${outletId}&is_active=true`)
     const devices = Array.isArray(devicesRaw) ? devicesRaw : (devicesRaw.results || [])
-    const firstDevice = devices[0]
+    const firstDevice = devices.find((device: any) => isLiveOutletConnector(device, outletId))
     const pk = String(firstDevice?.id || "").trim()
     const deviceId = String(firstDevice?.device_id || "").trim()
     if (!pk || !deviceId) return null
@@ -60,6 +76,7 @@ export function PrinterSettings() {
   const [connected, setConnected] = useState(false)
   const [step, setStep] = useState<WizardStep>(1)
   const [isConnecting, setIsConnecting] = useState(false)
+  const [isDisconnecting, setIsDisconnecting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [printers, setPrinters] = useState<string[]>([])
   const [selectedPrinter, setSelectedPrinter] = useState<string>("")
@@ -79,6 +96,12 @@ export function PrinterSettings() {
     () => Array.from(new Set([...(printers || []), ...extraPrinters])),
     [printers, extraPrinters]
   )
+
+  const rememberPrinterName = (printerName?: string | null) => {
+    const normalized = String(printerName || "").trim()
+    if (!normalized) return
+    setExtraPrinters((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]))
+  }
 
   const { currentOutlet, outlets, setCurrentOutlet } = useBusinessStore()
   const activeOutlets = useMemo(
@@ -243,8 +266,36 @@ export function PrinterSettings() {
   }
 
   const disconnectAgent = async () => {
-    setConnected(false)
-    toast({ title: "Disconnected", description: "Print setup disconnected." })
+    setIsDisconnecting(true)
+    try {
+      const connectorPk = String(pairedDevicePk || "").trim()
+      if (connectorPk) {
+        await api.post(`/devices/${connectorPk}/revoke-api-key/`, {})
+        await api.post(`/devices/${connectorPk}/unpair/`, {})
+      }
+
+      setConnected(false)
+      setPairedDevicePk("")
+      setPairingStatusMessage("")
+      setPairingCode("")
+      setPairingDeviceId("")
+      setStep(1)
+
+      toast({
+        title: "Disconnected",
+        description: connectorPk
+          ? "Connector API key revoked and outlet routing unpaired."
+          : "Print setup disconnected.",
+      })
+    } catch (err: any) {
+      toast({
+        title: "Disconnect failed",
+        description: err?.message || "Could not revoke connector API key.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDisconnecting(false)
+    }
   }
 
   const scanPrinters = async (silent = false) => {
@@ -274,6 +325,7 @@ export function PrinterSettings() {
         if (!selectedPrinter && combined.length > 0) {
           const next = combined[0]
           setSelectedPrinter(next)
+          rememberPrinterName(next)
           if (typeof window !== "undefined") {
             localStorage.setItem(getOutletStorageKey(outletId), next)
           }
@@ -311,6 +363,7 @@ export function PrinterSettings() {
       if (!selectedPrinter && combined.length > 0) {
         const next = combined[0]
         setSelectedPrinter(next)
+        rememberPrinterName(next)
         if (typeof window !== "undefined") {
           localStorage.setItem(getOutletStorageKey(outletId), next)
         }
@@ -419,6 +472,7 @@ export function PrinterSettings() {
       const next = def ? String(def.identifier || def.name) : ""
       if (next) {
         setSelectedPrinter(next)
+        rememberPrinterName(next)
         if (typeof window !== "undefined") {
           localStorage.setItem(getOutletStorageKey(outletId), next)
         }
@@ -430,7 +484,10 @@ export function PrinterSettings() {
 
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem(getOutletStorageKey(outletId)) || localStorage.getItem("defaultPrinter") || ""
-      if (stored) setSelectedPrinter(stored)
+      if (stored) {
+        setSelectedPrinter(stored)
+        rememberPrinterName(stored)
+      }
     }
   }
 
@@ -590,6 +647,7 @@ export function PrinterSettings() {
       if (typeof window !== "undefined") {
         localStorage.setItem(getOutletStorageKey(outletId), selectedPrinter)
       }
+      rememberPrinterName(selectedPrinter)
 
       const connectorPk = pairedDevicePk || (await resolveActiveConnectorForOutlet(outletId))?.pk || ""
 
@@ -675,6 +733,10 @@ export function PrinterSettings() {
           <div className="font-medium">Current outlet</div>
           <div className="text-sm">{currentOutlet?.name || "No outlet selected"}</div>
           <div className="text-xs text-muted-foreground">Connector status: {connected ? "Connected" : "Disconnected"}</div>
+          <div className="text-xs text-muted-foreground">Selected printer: {selectedPrinter || "No printer selected"}</div>
+          {!!selectedPrinter && connected && (
+            <div className="text-xs text-green-600">Connected printer ready: {selectedPrinter}</div>
+          )}
           <div className="text-xs text-muted-foreground">Localhost uses direct local printing. Cloud uses backend queue + connector polling.</div>
         </div>
 
@@ -687,7 +749,9 @@ export function PrinterSettings() {
             <Button onClick={connectAgent} disabled={isConnecting || isAutoPairing}>
               {isConnecting || isAutoPairing ? "Connecting..." : "Connect"}
             </Button>
-            <Button variant="outline" onClick={disconnectAgent} disabled={!connected}>Disconnect</Button>
+            <Button variant="outline" onClick={disconnectAgent} disabled={!connected || isDisconnecting}>
+              {isDisconnecting ? "Disconnecting..." : "Disconnect"}
+            </Button>
           </div>
         </div>
 

@@ -56,7 +56,7 @@ class Command(BaseCommand):
         for user in users:
             try:
                 # Check if staff profile exists
-                if hasattr(user, 'staff_profile'):
+                if user.staff_profiles.filter(tenant=user.tenant).exists():
                     staff_skipped += 1
                     continue
                 

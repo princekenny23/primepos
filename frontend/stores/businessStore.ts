@@ -143,8 +143,8 @@ export const useBusinessStore = create<BusinessState>()(
               : null
 
             const preferredOutlet =
-              currentMatch ||
               storedMatch ||
+              currentMatch ||
               tenantOutlets.find((o: any) => o.isActive) ||
               tenantOutlets[0]
 

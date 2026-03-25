@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import {
   Dialog,
   DialogContent,
@@ -52,6 +52,35 @@ export function DataExchangeModal({
   const [format, setFormat] = useState<"xlsx" | "csv">(config.defaultFormat)
   const [selectedFilters, setSelectedFilters] = useState<Record<string, any>>({})
   const [result, setResult] = useState<any>(null)
+
+  const resetFileHandlingState = useCallback(() => {
+    setFile(null)
+    setResult(null)
+    setSelectedFilters({})
+    setFormat(config.defaultFormat)
+    setIsLoading(false)
+  }, [config.defaultFormat])
+
+  useEffect(() => {
+    const handleSubnavRefresh = () => {
+      if (!open) return
+      resetFileHandlingState()
+    }
+
+    window.addEventListener("system-refresh", handleSubnavRefresh)
+    window.addEventListener("subnav-refresh", handleSubnavRefresh)
+
+    return () => {
+      window.removeEventListener("system-refresh", handleSubnavRefresh)
+      window.removeEventListener("subnav-refresh", handleSubnavRefresh)
+    }
+  }, [open, resetFileHandlingState])
+
+  useEffect(() => {
+    if (!open) {
+      resetFileHandlingState()
+    }
+  }, [open, resetFileHandlingState])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -362,9 +391,18 @@ export function DataExchangeModal({
     }
   }
 
+  const hasEnabledFilters =
+    !!config.filters && Object.values(config.filters).some(Boolean)
+  const isCompactProductsLayout =
+    config.entityType === "products" && !hasEnabledFilters && config.showFieldsInfo === false
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
+      <DialogContent
+        className={`max-h-[85vh] flex flex-col ${
+          isCompactProductsLayout ? "max-w-sm" : "max-w-md"
+        }`}
+      >
         <DialogHeader>
           <DialogTitle>
             {type === "import" ? "Import" : "Export"} {config.entityType}
@@ -376,7 +414,11 @@ export function DataExchangeModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 overflow-y-auto flex-1 pr-3">
+        <div
+          className={`overflow-y-auto flex-1 ${
+            isCompactProductsLayout ? "space-y-2 pr-1" : "space-y-3 pr-3"
+          }`}
+        >
           {/* Format Selection */}
           <div className="space-y-2">
             <Label>File Format</Label>
@@ -394,11 +436,11 @@ export function DataExchangeModal({
           </div>
 
           {/* Filters Section */}
-          {config.filters && Object.keys(config.filters).length > 0 && (
+          {hasEnabledFilters && (
             <div className="border-t pt-2 space-y-2">
               <p className="text-xs font-medium text-muted-foreground">Filters</p>
 
-              {config.filters.outlet && outlets.length > 0 && (
+              {config.filters?.outlet && outlets.length > 0 && (
                 <div className="space-y-1">
                   <Label className="text-xs">Outlet</Label>
                   <Select
@@ -425,7 +467,7 @@ export function DataExchangeModal({
                 </div>
               )}
 
-              {config.filters.category && categories.length > 0 && (
+              {config.filters?.category && categories.length > 0 && (
                 <div className="space-y-1">
                   <Label className="text-xs">Category</Label>
                   <Select
@@ -452,7 +494,7 @@ export function DataExchangeModal({
                 </div>
               )}
 
-              {config.filters.status && (
+              {config.filters?.status && (
                 <div className="space-y-1">
                   <Label className="text-xs">Status</Label>
                   <Select
@@ -479,7 +521,11 @@ export function DataExchangeModal({
           {type === "import" && (
             <div className="border-t pt-2 space-y-1.5">
               <Label className="text-xs">File to Import</Label>
-              <div className="border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+              <div
+                className={`border-2 border-dashed rounded-lg text-center hover:border-primary/50 transition-colors ${
+                  isCompactProductsLayout ? "p-4" : "p-6"
+                }`}
+              >
                 <input
                   type="file"
                   accept=".xlsx,.xls,.csv"
@@ -501,33 +547,35 @@ export function DataExchangeModal({
           )}
 
           {/* Fields Info */}
-          <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-2 rounded text-xs space-y-1">
-            <p className="font-medium text-blue-900 dark:text-blue-200">
-              Fields ({config.requiredFields.length} required):
-            </p>
-            <div className="space-y-0.5 max-h-32 overflow-y-auto text-[11px]">
-              {config.fields.map((f) => (
-                <div key={f.name} className="flex items-start gap-1">
-                  {f.required ? (
-                    <span className="text-red-600 font-bold min-w-3">*</span>
-                  ) : (
-                    <span className="text-gray-400 min-w-3">•</span>
-                  )}
-                  <span className="flex-1">
-                    <span className="font-medium">{f.label}</span>
-                    {f.description && (
-                      <span className="text-gray-500 text-[10px] block leading-tight">
-                        {f.description}
-                      </span>
+          {config.showFieldsInfo !== false && (
+            <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-2 rounded text-xs space-y-1">
+              <p className="font-medium text-blue-900 dark:text-blue-200">
+                Fields ({config.requiredFields.length} required):
+              </p>
+              <div className="space-y-0.5 max-h-32 overflow-y-auto text-[11px]">
+                {config.fields.map((f) => (
+                  <div key={f.name} className="flex items-start gap-1">
+                    {f.required ? (
+                      <span className="text-red-600 font-bold min-w-3">*</span>
+                    ) : (
+                      <span className="text-gray-400 min-w-3">•</span>
                     )}
-                  </span>
-                </div>
-              ))}
+                    <span className="flex-1">
+                      <span className="font-medium">{f.label}</span>
+                      {f.description && (
+                        <span className="text-gray-500 text-[10px] block leading-tight">
+                          {f.description}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                * = Required field
+              </p>
             </div>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              * = Required field
-            </p>
-          </div>
+          )}
 
           {/* Results */}
           {result && (

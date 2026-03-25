@@ -10,6 +10,8 @@ import {
   User,
   LogOut,
   Clock,
+  Eye,
+  EyeOff,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -70,12 +72,14 @@ interface DashboardLayoutProps {
 import { getIndustrySidebarConfig, fullNavigation, type NavigationItem } from "@/lib/utils/sidebar"
 
 export function DashboardLayout({ children, showSubNavbar = true }: DashboardLayoutProps) {
+  const PA_HEARTBEAT_WINDOW_MS = 90_000
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [agentStatus, setAgentStatus] = useState<"checking" | "connected" | "disconnected">("checking")
   const [switchAuthOpen, setSwitchAuthOpen] = useState(false)
   const [pendingOutletId, setPendingOutletId] = useState<string | null>(null)
   const [switchUsername, setSwitchUsername] = useState("")
   const [switchPassword, setSwitchPassword] = useState("")
+  const [showSwitchPassword, setShowSwitchPassword] = useState(false)
   const [isVerifyingSwitch, setIsVerifyingSwitch] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
@@ -94,6 +98,21 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
     if (typeof window === "undefined") return false
     const host = String(window.location.hostname || "").toLowerCase()
     return host === "localhost" || host === "127.0.0.1" || host === "::1"
+  }
+
+  const isLiveOutletConnector = (device: any, outletId: number) => {
+    const id = String(device?.id || "").trim()
+    const deviceId = String(device?.device_id || "").trim()
+    if (!id || !deviceId) return false
+
+    const rawOutletId = typeof device?.outlet === "object" ? device?.outlet?.id : device?.outlet
+    const deviceOutletId = Number(rawOutletId)
+    if (!Number.isFinite(deviceOutletId) || deviceOutletId !== outletId) return false
+
+    if (device?.is_active !== true) return false
+
+    const lastSeenMs = device?.last_seen_at ? new Date(device.last_seen_at).getTime() : NaN
+    return Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs <= PA_HEARTBEAT_WINDOW_MS
   }
 
   const checkConnectorStatus = async () => {
@@ -116,13 +135,9 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
 
       const devicesRaw: any = await api.get(`/devices/?outlet=${outletId}&is_active=true`)
       const devices = Array.isArray(devicesRaw) ? devicesRaw : (devicesRaw.results || [])
-      const hasLinkedConnector = devices.some((device: any) => {
-        const id = String(device?.id || "").trim()
-        const deviceId = String(device?.device_id || "").trim()
-        return Boolean(id && deviceId)
-      })
+      const hasLiveConnector = devices.some((device: any) => isLiveOutletConnector(device, outletId))
 
-      setAgentStatus(hasLinkedConnector ? "connected" : "disconnected")
+      setAgentStatus(hasLiveConnector ? "connected" : "disconnected")
     } catch {
       setAgentStatus("disconnected")
     }
@@ -554,14 +569,29 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
             </div>
             <div className="space-y-1">
               <Label htmlFor="switch-dashboard-password">Password</Label>
-              <Input
-                id="switch-dashboard-password"
-                type="password"
-                value={switchPassword}
-                onChange={(event) => setSwitchPassword(event.target.value)}
-                placeholder="Enter your password"
-                disabled={isVerifyingSwitch}
-              />
+              <div className="relative">
+                <Input
+                  id="switch-dashboard-password"
+                  type={showSwitchPassword ? "text" : "password"}
+                  value={switchPassword}
+                  onChange={(event) => setSwitchPassword(event.target.value)}
+                  placeholder="Enter your password"
+                  disabled={isVerifyingSwitch}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSwitchPassword(!showSwitchPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  disabled={isVerifyingSwitch}
+                >
+                  {showSwitchPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 

@@ -17,7 +17,7 @@ const barOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   },
   {
     id: "tables",
-    title: "Bar Tables",
+    title: "bar tables",
     titleKey: "pos.bar.tables",
     href: "/dashboard/bar/tables",
     icon: Table2,
