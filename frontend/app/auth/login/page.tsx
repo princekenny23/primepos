@@ -8,8 +8,10 @@ import { useRouter } from "next/navigation"
 import { useAuthStore } from "@/stores/authStore"
 import { useBusinessStore } from "@/stores/businessStore"
 import { tenantService } from "@/lib/services/tenantService"
-import { User, Lock, Eye, EyeOff } from "lucide-react"
-import { Card } from "@/components/ui/card"
+import {
+  User, Lock, Eye, EyeOff,
+  LayoutDashboard, ShoppingBag, Monitor, Package, Package2, Building2, Settings as SettingsIcon, Wine, Store, Bell
+} from "lucide-react"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -97,19 +99,9 @@ export default function LoginPage() {
             const matchedOutlet = allOutlets.find((outlet) => String(outlet.id) === assignedOutletIds[0])
             if (matchedOutlet) {
               setSelectedOutlet(matchedOutlet.id)
-              router.push(nextRoute)
-              return
             }
-          }
-
-          if (assignedOutletIds.length === 0 || assignedOutletIds.length > 1) {
-            router.push(`/auth/select-outlet?next=${encodeURIComponent(nextRoute)}`)
-            return
-          }
-
-          if (assignedOutletIds.length === 1) {
-            router.push(`/auth/select-outlet?next=${encodeURIComponent(nextRoute)}`)
-            return
+          } else if (allOutlets.length > 0) {
+            setSelectedOutlet(allOutlets[0].id)
           }
 
           router.push(nextRoute)
@@ -138,17 +130,12 @@ export default function LoginPage() {
           const matchedOutlet = allOutlets.find((outlet) => String(outlet.id) === assignedOutletIds[0])
           if (matchedOutlet) {
             setSelectedOutlet(matchedOutlet.id)
-            router.push(nextRoute)
-            return
           }
+        } else if (allOutlets.length > 0) {
+          setSelectedOutlet(allOutlets[0].id)
         }
 
-        if (assignedOutletIds.length === 0 || assignedOutletIds.length > 1) {
-          router.push(`/auth/select-outlet?next=${encodeURIComponent(nextRoute)}`)
-          return
-        }
-
-        router.push(`/auth/select-outlet?next=${encodeURIComponent(nextRoute)}`)
+        router.push(nextRoute)
         return
       } catch (error) {
         console.error("Tenant recovery failed:", error)
@@ -175,108 +162,140 @@ export default function LoginPage() {
     }
   }
 
+  const bgNavItems = [
+    { icon: LayoutDashboard, label: "Dashboard" },
+    { icon: ShoppingBag,     label: "Sales" },
+    { icon: Monitor,         label: "Sales / POS" },
+    { icon: Package,         label: "Inventory" },
+    { icon: Package2,        label: "Distribution" },
+    { icon: Building2,       label: "Office" },
+    { icon: SettingsIcon,    label: "Settings" },
+    { icon: Wine,            label: "Bar" },
+  ]
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-8 bg-gray-50">
-      <Card className="w-full max-w-5xl shadow-xl border-0">
-        <div className="flex">
-          {/* Left Section - Login Form */}
-          <div className="flex-1 p-8 bg-white">
-            <div className="max-w-md mx-auto">
-              {/* Title */}
-              <div className="text-center mb-8">
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">Login</h1>
-                <p className="text-gray-600">Powering Smart Business</p>
-              </div>
-
-              <form onSubmit={handleLogin} className="space-y-5">
-                {error && (
-                  <div className="p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md">
-                    {error}
-                  </div>
-                )}
-                
-                <div className="space-y-2">
-                  <Label htmlFor="identifier" className="text-gray-700">Username</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input 
-                      id="identifier" 
-                      name="identifier" 
-                      type="text" 
-                      placeholder="Enter your username" 
-                      required 
-                      disabled={isLoading}
-                      className="pl-10"
-                    />
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="text-gray-700">Password</Label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input 
-                      id="password" 
-                      name="password" 
-                      type={showPassword ? "text" : "password"} 
-                      placeholder="Enter password" 
-                      required 
-                      disabled={isLoading}
-                      className="pl-10 pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                      disabled={isLoading}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-                
-                <Button 
-                  type="submit" 
-                  className="w-full bg-blue-900 hover:bg-blue-950 text-white h-11 text-base font-medium" 
-                  disabled={isLoading}
-                >
-                  {isLoading ? "Signing in..." : "Login"}
-                </Button>
-              </form>
-            </div>
+    <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-gray-100">
+      {/* Real app shell — sidebar + topnav, non-interactive */}
+      <div className="absolute inset-0 pointer-events-none select-none">
+        {/* Sidebar — matches real: w-20 bg-blue-900 */}
+        <div className="absolute left-0 top-0 bottom-0 w-20 bg-blue-900 flex flex-col z-10">
+          {/* Logo */}
+          <div className="px-2 py-3 flex items-center justify-center">
+            <img src="/icon.jpg" alt="PrimePOS" className="h-10 w-10 rounded-md object-cover" />
           </div>
-
-          {/* Right Section - Branding Info (Blue Background) */}
-          <div className="hidden lg:flex flex-1 items-center justify-center p-8 bg-blue-900">
-            <div className="max-w-md space-y-6 text-white">
-              {/* Logo */}
-              <div className="flex justify-center">
-                <img
-                  src="/icon.jpg"
-                  alt="PrimePOS"
-                  width={128}
-                  height={128}
-                  className="h-20 w-20 rounded-2xl object-cover shadow-lg"
-                />
+          {/* Nav items */}
+          <nav className="flex-1 p-2 space-y-1 overflow-hidden border-r border-blue-800">
+            {bgNavItems.map((item, i) => (
+              <div
+                key={i}
+                className={`flex flex-col items-center justify-center gap-1.5 px-2 py-3 rounded-lg min-h-[72px] ${
+                  i === 0 ? "bg-white text-blue-900" : "text-blue-100"
+                }`}
+              >
+                <item.icon className="h-5 w-5 flex-shrink-0" />
+                <span className="text-[10px] leading-tight text-center">{item.label}</span>
               </div>
-              
-              {/* Description */}
-              <div className="space-y-4">
-                <h2 className="text-3xl font-bold text-white">PrimePOS - Smart Point of Sale for Modern Businesses</h2>
-                <p className="text-base text-white/90 leading-relaxed">
-                  Track sales, manage inventory, control outlets, and grow your business with ease. PrimePOS gives you a secure system to run your business operations-all in one place.
-                </p>
-              </div>
+            ))}
+          </nav>
+        </div>
 
-            
+        {/* Topnav — matches real: bg-blue-900 text-white h-14 left-20 */}
+        <div className="absolute top-0 left-20 right-0 h-14 bg-blue-900 border-b border-blue-800 flex items-center px-6 gap-4 z-10">
+          <div className="text-sm font-medium text-white opacity-70">PrimePOS</div>
+          <div className="flex items-center gap-2 text-blue-200 text-sm opacity-70">
+            <Store className="h-4 w-4" />
+            <span>Main Outlet</span>
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+            <div className="flex items-center gap-1.5 border border-blue-600 rounded-full px-3 py-1 text-xs text-white opacity-60">
+              <span className="h-2 w-2 rounded-full bg-green-400 inline-block" />
+              PA Connected
+            </div>
+            <Bell className="h-5 w-5 text-blue-200 opacity-60" />
+            <div className="h-8 w-8 rounded-full bg-blue-700 flex items-center justify-center opacity-70">
+              <User className="h-4 w-4 text-white" />
             </div>
           </div>
         </div>
-      </Card>
+      </div>
+
+      {/* Very subtle overlay so modal stands out */}
+      <div className="absolute inset-0 bg-white/20 backdrop-blur-[1px]" />
+
+      {/* Login modal */}
+      <div className="relative z-10 w-full max-w-md mx-auto px-4">
+        <div className="rounded-2xl bg-blue-900 shadow-2xl border border-blue-800 overflow-hidden">
+          {/* Header band */}
+          <div className="px-8 pt-8 pb-6 text-center">
+            <img
+              src="/icon.jpg"
+              alt="PrimePOS"
+              className="h-14 w-14 rounded-xl mx-auto mb-4 object-cover shadow-md ring-2 ring-white/20"
+            />
+            <h1 className="text-2xl font-bold text-white">Welcome to PrimePOS</h1>
+            <p className="text-blue-200 text-sm mt-1">Smart tools for smart businesses</p>
+          </div>
+
+          {/* Form area */}
+          <div className="bg-white px-8 py-7 rounded-t-2xl">
+            <form onSubmit={handleLogin} className="space-y-5">
+              {error && (
+                <div className="p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md">
+                  {error}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="identifier" className="text-gray-700 text-sm font-medium">Username</Label>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="identifier"
+                    name="identifier"
+                    type="text"
+                    placeholder="Enter your username"
+                    required
+                    disabled={isLoading}
+                    className="pl-10 bg-white border-gray-200 focus:border-blue-900 focus:ring-blue-900/20"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-gray-700 text-sm font-medium">Password</Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Enter password"
+                    required
+                    disabled={isLoading}
+                    className="pl-10 pr-10 bg-white border-gray-200 focus:border-blue-900 focus:ring-blue-900/20"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    disabled={isLoading}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full bg-blue-900 hover:bg-blue-950 text-white h-11 text-base font-semibold rounded-xl mt-1"
+                disabled={isLoading}
+              >
+                {isLoading ? "Signing in..." : "Login"}
+              </Button>
+            </form>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
