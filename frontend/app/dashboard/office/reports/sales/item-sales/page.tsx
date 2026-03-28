@@ -83,7 +83,7 @@ const DATE_PRESETS = [
 
 export default function ItemSalesPage() {
   const { t } = useI18n()
-  const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { toast } = useToast()
 
   const [showDateModal, setShowDateModal] = useState(false)
@@ -96,21 +96,7 @@ export default function ItemSalesPage() {
       end: endOfMonth(now),
     }
   })
-  const [selectedOutlet, setSelectedOutlet] = useState<string>("all")
-
-  const [productReport, setProductReport] = useState<ProductReportData[]>([])
-
-  const outletOptions = useMemo(() => {
-    if (!outlets?.length) return []
-    return outlets.map((outlet) => ({ id: String(outlet.id), name: outlet.name }))
-  }, [outlets])
-
-  useEffect(() => {
-    if (!currentOutlet) return
-    if (selectedOutlet === "all" && outletOptions.length === 1) {
-      setSelectedOutlet(String(currentOutlet.id))
-    }
-  }, [currentOutlet, outletOptions.length, selectedOutlet])
+const [productReport, setProductReport] = useState<ProductReportData[]>([])
 
   const formatCurrency = useCallback(
     (value: number) => {
@@ -159,7 +145,7 @@ export default function ItemSalesPage() {
   const loadReportData = useCallback(async () => {
     if (!currentBusiness) return
 
-    const outletParam = selectedOutlet !== "all" ? selectedOutlet : undefined
+    const outletParam = currentOutlet ? String(currentOutlet.id) : undefined
     const startDate = format(dateRange.start, "yyyy-MM-dd")
     const endDate = format(dateRange.end, "yyyy-MM-dd")
 
@@ -182,14 +168,14 @@ export default function ItemSalesPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, dateRange.end, dateRange.start, selectedOutlet, t, toast])
+  }, [currentBusiness, currentOutlet, dateRange.end, dateRange.start, t, toast])
 
   useEffect(() => {
     loadReportData()
   }, [loadReportData])
 
   const handleExport = async (formatType: "xlsx" | "pdf") => {
-    const outletParam = selectedOutlet !== "all" ? selectedOutlet : undefined
+    const outletParam = currentOutlet ? String(currentOutlet.id) : undefined
     const startDate = format(dateRange.start, "yyyy-MM-dd")
     const endDate = format(dateRange.end, "yyyy-MM-dd")
     const endpoint = formatType === "xlsx" ? apiEndpoints.reports.productsXlsx : apiEndpoints.reports.productsPdf
@@ -240,20 +226,6 @@ export default function ItemSalesPage() {
               <h2 className="text-xl font-semibold">Item Sales</h2>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Select value={selectedOutlet} onValueChange={setSelectedOutlet}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="All outlets" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All outlets</SelectItem>
-                  {outletOptions.map((outlet) => (
-                    <SelectItem key={outlet.id} value={outlet.id}>
-                      {outlet.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
               <Button variant="outline" onClick={() => setShowDateModal(true)}>
                 <CalendarDays className="mr-2 h-4 w-4" />
                 {DATE_PRESETS.find((preset) => preset.id === datePreset)?.label || "Custom"}

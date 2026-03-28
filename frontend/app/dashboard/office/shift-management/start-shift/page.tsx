@@ -5,19 +5,13 @@ import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { StartShiftForm } from "@/components/pos/start-shift-form"
-import { useToast } from "@/components/ui/use-toast"
 import { CheckCircle2, Store, Calendar, CreditCard, DollarSign, Info } from "lucide-react"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 
 export default function StartShiftPage() {
   const router = useRouter()
-  const { toast } = useToast()
 
   const handleSuccess = () => {
-    toast({
-      title: "Shift Started",
-      description: "Your shift has been started successfully.",
-    })
     router.push("/dashboard/office/shift-management")
   }
 

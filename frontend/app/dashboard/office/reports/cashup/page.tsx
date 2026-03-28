@@ -15,13 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
+import type { DataExchangeConfig } from "@/lib/utils/data-exchange-config"
 import {
   Table,
   TableBody,
@@ -47,7 +42,7 @@ import {
   subDays,
   subMonths,
 } from "date-fns"
-import { CalendarDays, RefreshCw } from "lucide-react"
+import { CalendarDays, FileSpreadsheet, RefreshCw } from "lucide-react"
 import {
   Bar,
   BarChart,
@@ -102,6 +97,7 @@ export default function CashupReportPage() {
   const { toast } = useToast()
 
   const [showDateModal, setShowDateModal] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [datePreset, setDatePreset] = useState("thisMonth")
   const [dateRange, setDateRange] = useState<DateRange>(() => {
@@ -297,6 +293,35 @@ export default function CashupReportPage() {
 
   const headerRangeLabel = `${format(dateRange.start, "MMM dd, yyyy")} - ${format(dateRange.end, "MMM dd, yyyy")}`
 
+  const cashupExportConfig: DataExchangeConfig = {
+    entityType: "reports",
+    fields: [
+      { name: "shiftId", label: "Shift #", type: "number", required: true },
+      { name: "operatingDate", label: "Date", type: "string", required: true },
+      { name: "cashier", label: "Cashier", type: "string", required: false },
+      { name: "till", label: "Till", type: "string", required: false },
+      { name: "closingCash", label: "Closing Balance", type: "number", required: true },
+      { name: "totalSales", label: "Total Sales", type: "number", required: true },
+      { name: "totalExpense", label: "Total Expense", type: "number", required: true },
+      { name: "difference", label: "Difference", type: "number", required: true },
+    ],
+    requiredFields: ["shiftId", "operatingDate", "totalSales"],
+    defaultFormat: "xlsx",
+    filters: { outlet: false, dateRange: true },
+    apiEndpoints: { import: "/reports/cashup/", export: "/reports/cashup/export/" },
+  }
+
+  const exportRows = rows.map((row) => ({
+    shiftId: row.shiftId,
+    operatingDate: row.operatingDate,
+    cashier: row.cashier || "",
+    till: row.till || "",
+    closingCash: row.closingCash,
+    totalSales: row.totalSales,
+    totalExpense: row.totalExpense,
+    difference: row.difference,
+  }))
+
   return (
     <DashboardLayout>
       <PageLayout
@@ -310,41 +335,19 @@ export default function CashupReportPage() {
               <h2 className="text-xl font-semibold">Cashup Report</h2>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <Select value={selectedOutlet} onValueChange={setSelectedOutlet}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="All outlets" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All outlets</SelectItem>
-                  {outletOptions.map((outlet) => (
-                    <SelectItem key={outlet.id} value={outlet.id}>
-                      {outlet.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
               <Button variant="outline" onClick={() => setShowDateModal(true)}>
                 <CalendarDays className="mr-2 h-4 w-4" />
                 {DATE_PRESETS.find((preset) => preset.id === datePreset)?.label || "Custom"}
               </Button>
 
+              <Button variant="outline" onClick={() => setShowExportModal(true)}>
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Export Data
+              </Button>
+
               <Button variant="ghost" onClick={loadReportData} disabled={isLoading}>
                 <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
                 Refresh
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  console.log("Current state:", {
-                    selectedOutlet,
-                    currentOutlet,
-                    dateRange,
-                  })
-                }}
-              >
-                Log State
               </Button>
             </div>
           </div>
@@ -437,19 +440,18 @@ export default function CashupReportPage() {
                   <TableHead className="text-right">Close Balance</TableHead>
                   <TableHead className="text-right">Total Sales</TableHead>
                   <TableHead className="text-right">Total Expense</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground">
                       Loading cashup data...
                     </TableCell>
                   </TableRow>
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground">
                       No cashup data found for the selected range.
                     </TableCell>
                   </TableRow>
@@ -469,15 +471,6 @@ export default function CashupReportPage() {
                       <TableCell className="text-right">{formatCurrency(row.closingCash)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(row.totalSales)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(row.totalExpense)}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => console.log("View cashup", row.shiftId)}
-                        >
-                          View
-                        </Button>
-                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -541,6 +534,14 @@ export default function CashupReportPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <DataExchangeModal
+        open={showExportModal}
+        onOpenChange={setShowExportModal}
+        type="export"
+        config={cashupExportConfig}
+        data={exportRows}
+        outlets={outletOptions.map((outlet) => ({ id: outlet.id, name: outlet.name }))}
+      />
     </DashboardLayout>
   )
 }

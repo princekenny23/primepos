@@ -65,7 +65,6 @@ export default function DriversPage() {
       setAddDriverOpen(false)
       await loadData()
       setCurrentPage(1)
-      toast({ title: "Driver created", description: "Driver added successfully." })
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to create driver", variant: "destructive" })
     }

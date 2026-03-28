@@ -238,11 +238,6 @@ export default function NewPurchaseOrderPage() {
 
       const createdPO = await purchaseOrderService.create(purchaseOrderData)
       
-      toast({
-        title: "Success",
-        description: "Purchase order created successfully",
-      })
-
       // Redirect to view the created purchase order
       router.push(`/dashboard/inventory/suppliers/purchases/${createdPO.id}`)
     } catch (error: any) {

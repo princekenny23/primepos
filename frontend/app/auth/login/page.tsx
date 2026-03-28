@@ -10,7 +10,7 @@ import { useBusinessStore } from "@/stores/businessStore"
 import { tenantService } from "@/lib/services/tenantService"
 import {
   User, Lock, Eye, EyeOff,
-  LayoutDashboard, ShoppingBag, Monitor, Package, Package2, Building2, Settings as SettingsIcon, Wine, Store, Bell
+  LayoutDashboard, ShoppingBag, Monitor, Package, Building2, Settings as SettingsIcon, CircleDot, Store, Bell
 } from "lucide-react"
 
 export default function LoginPage() {
@@ -163,14 +163,13 @@ export default function LoginPage() {
   }
 
   const bgNavItems = [
-    { icon: LayoutDashboard, label: "Dashboard" },
+    { icon: CircleDot,       label: "Core" },
+    { icon: LayoutDashboard, label: "Dash" },
     { icon: ShoppingBag,     label: "Sales" },
-    { icon: Monitor,         label: "Sales / POS" },
+    { icon: Monitor,         label: "POS" },
     { icon: Package,         label: "Inventory" },
-    { icon: Package2,        label: "Distribution" },
     { icon: Building2,       label: "Office" },
     { icon: SettingsIcon,    label: "Settings" },
-    { icon: Wine,            label: "Bar" },
   ]
 
   return (

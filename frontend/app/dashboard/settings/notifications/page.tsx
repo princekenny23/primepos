@@ -101,10 +101,6 @@ export default function NotificationsPage() {
     try {
       await notificationService.markAllRead()
       setNotifications(prev => prev.map(n => ({ ...n, read: true })))
-      toast({
-        title: "Success",
-        description: "All notifications marked as read",
-      })
     } catch (error) {
       console.error("Failed to mark all as read:", error)
     }

@@ -361,7 +361,6 @@ export function SingleProductPOS() {
           total: it.total || (it.quantity || 0) * (it.price || 0),
         }))
         await printReceipt({ cart: receiptCartItems, subtotal: fullSale.subtotal || cartTotal, discount: fullSale.discount || 0, tax: fullSale.tax || 0, total: fullSale.total || cartTotal, sale: fullSale }, currentOutlet!.id)
-        toast({ title: 'Printed receipt', description: `Receipt ${fullSale.id} sent to printer.` })
       } catch (err: any) {
         console.warn('Auto-print failed in SingleProductPOS:', err)
         // Non-blocking

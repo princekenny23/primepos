@@ -1,8 +1,8 @@
 # PrimePOS - Professional SaaS Multi-Tenant POS System
 
 **Maturity Level**: Production Ready (MVP+)  
-**Version**: 1.0.0  
-**Last Updated**: February 17, 2026  
+**Version**: 1.1.0  
+**Last Updated**: March 28, 2026  
 **Target Users**: Retail stores, restaurants, bars, wholesale businesses in Africa/Global  
 **Deployment**: Render (Backend) + Vercel (Frontend)  
 
@@ -10,14 +10,16 @@
 
 PrimePOS is a **full-stack, multi-tenant SaaS Point of Sale system** designed to serve small and medium-sized businesses. It supports multiple business types (retail, restaurant, bar, wholesale) with a **single unified codebase** that scales per tenant with configurable features (tax, pricing, outlets, staff limits).
 
-**Recent Progress (Feb 2026):**
-- ✅ Outlet business type selection per outlet (independent of tenant type)
-- ✅ Outlet-specific settings (posMode, receiptTemplate, taxEnabled, taxRate, etc.)
-- ✅ Outlet-aware POS routing (restaurant/bar/retail pages gated by outlet posMode)
-- ✅ Outlet-specific dashboard layouts and navigation
-- ✅ Inventory filtering by outlet across all pages (purchases, stock control, expiry, stock-taking, returns)
-- ✅ Contact field display fixes in settings UI
-- ✅ All code pushed to GitHub (primepos-v1.0)
+**Recent Progress (Mar 2026):**
+- ✅ Removed all success toast/popup notifications across 26+ frontend files (errors preserved)
+- ✅ Added system actions menu (vertical dots) to navbar — Refresh & Sync All
+- ✅ Reports — Cashup: removed Action column, Log State button, outlet filter dropdown; added Export Data button
+- ✅ Reports — Stock Valuation: removed outlet & category filters; replaced with single date-range button + preset modal
+- ✅ Reports — Sales (all tabs): outlet filter dropdown removed; reports auto-scoped to current outlet via store
+- ✅ Outlet filtering now implicit — all reports use `currentOutlet` automatically, no manual selection required
+- ✅ Accessibility fixes — radio inputs in tax-pricing settings now have proper title attributes
+- ✅ System User Guide & Training Playbook created (`docs/SYSTEM_USER_GUIDE_AND_TRAINING_PLAYBOOK.md`)
+- ✅ All code pushed to GitHub
 
 ### What PrimePOS Does
 ✅ **Multi-Tenant SaaS**: Each customer isolated, independent configuration  

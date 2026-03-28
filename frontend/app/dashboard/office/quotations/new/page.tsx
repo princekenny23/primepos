@@ -227,10 +227,6 @@ export default function NewQuotationPage() {
       const result = await quotationService.create(quotationData)
       console.log("Quotation created successfully:", result)
 
-      toast({
-        title: "Quotation Created",
-        description: "Quotation has been created successfully.",
-      })
       router.push("/dashboard/office/quotations")
     } catch (error: any) {
       console.error("Failed to create quotation:", error)
@@ -276,12 +272,6 @@ export default function NewQuotationPage() {
         return
       }
 
-      // Show loading toast
-      toast({
-        title: "Generating PDF",
-        description: "Please wait while we generate your quotation PDF...",
-      })
-
       // Capture the preview content as canvas
       const canvas = await html2canvas.default(previewRef.current, {
         useCORS: true,
@@ -303,11 +293,6 @@ export default function NewQuotationPage() {
 
       // Save PDF
       pdf.save(filename)
-
-      toast({
-        title: "PDF Downloaded",
-        description: "Quotation PDF has been downloaded successfully.",
-      })
     } catch (error: any) {
       console.error("Failed to download quotation PDF:", error)
       toast({

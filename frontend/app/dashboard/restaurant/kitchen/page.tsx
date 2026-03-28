@@ -103,10 +103,6 @@ export default function KitchenPage() {
     try {
       if (useReal) {
         await kitchenService.updateItemStatus(kotId, itemId, newStatus)
-        toast({
-          title: "Status Updated",
-          description: "Item status has been updated successfully.",
-        })
         // Reload orders
         await loadKitchenOrders()
       }

@@ -7,10 +7,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Mail, Bell, ExternalLink } from "lucide-react"
 import { useState } from "react"
 import Link from "next/link"
-import { useToast } from "@/components/ui/use-toast"
 
 export function NotificationsTab() {
-  const { toast } = useToast()
   const [isSaving, setIsSaving] = useState(false)
 
   const emailNotifications = [
@@ -30,10 +28,6 @@ export function NotificationsTab() {
     setIsSaving(true)
     setTimeout(() => {
       setIsSaving(false)
-      toast({
-        title: "Settings Saved",
-        description: "Notification preferences have been updated successfully.",
-      })
     }, 1000)
   }
 

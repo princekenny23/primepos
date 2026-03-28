@@ -278,7 +278,6 @@ export default function StockTakingHistoryPage() {
     try {
       await inventoryService.deleteStockTake(pendingDelete.id)
       setAllStockTakes((prev) => prev.filter((st) => st.id !== pendingDelete.id))
-      toast({ title: "Deleted", description: "Stock take session deleted." })
     } catch (error: any) {
       toast({
         title: "Delete failed",

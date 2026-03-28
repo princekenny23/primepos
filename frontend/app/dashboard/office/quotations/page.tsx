@@ -225,10 +225,6 @@ export default function QuotationsPage() {
     try {
       await quotationService.delete(quotationToDelete)
       
-      toast({
-        title: "Quotation Deleted",
-        description: "Quotation has been deleted successfully.",
-      })
       loadQuotations()
     } catch (error: any) {
       toast({
@@ -350,7 +346,6 @@ export default function QuotationsPage() {
         valid_until: editForm.valid_until,
         notes: editForm.notes || undefined,
       })
-      toast({ title: "Quotation Updated", description: "Changes saved successfully." })
       setShowEditDialog(false)
       setEditingQuotation(null)
       loadQuotations()
@@ -368,12 +363,6 @@ export default function QuotationsPage() {
         import("jspdf"),
         import("html2canvas"),
       ])
-
-      // Show loading toast
-      toast({
-        title: "Generating PDF",
-        description: "Please wait while we generate your quotation PDF...",
-      })
 
       // Create a temporary container for PDF generation
       const tempDiv = document.createElement("div")
@@ -492,11 +481,6 @@ export default function QuotationsPage() {
 
       // Save PDF
       pdf.save(filename)
-
-      toast({
-        title: "PDF Downloaded",
-        description: "Quotation PDF has been downloaded successfully.",
-      })
     } catch (error: any) {
       console.error("Failed to download quotation PDF:", error)
       toast({
@@ -620,11 +604,6 @@ export default function QuotationsPage() {
 
       const quotationText = htmlToText(quotationHTML)
       await printTextViaAgent(quotationText)
-
-      toast({
-        title: "Printed",
-        description: "Quotation has been sent to printer.",
-      })
     } catch (error: any) {
       console.error("Failed to print quotation:", error)
       toast({

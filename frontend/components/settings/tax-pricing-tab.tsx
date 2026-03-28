@@ -7,10 +7,8 @@ import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Percent } from "lucide-react"
 import { useState } from "react"
-import { useToast } from "@/components/ui/use-toast"
 
 export function TaxPricingTab() {
-  const { toast } = useToast()
   const [isSaving, setIsSaving] = useState(false)
   const [enableVAT, setEnableVAT] = useState(true)
   const [enableServiceCharge, setEnableServiceCharge] = useState(false)
@@ -19,10 +17,6 @@ export function TaxPricingTab() {
     setIsSaving(true)
     setTimeout(() => {
       setIsSaving(false)
-      toast({
-        title: "Settings Saved",
-        description: "Tax and pricing settings have been updated successfully.",
-      })
     }, 1000)
   }
 
@@ -105,6 +99,7 @@ export function TaxPricingTab() {
                 type="radio"
                 id="tax-inclusive"
                 name="price-display"
+                title="Tax Inclusive"
                 defaultChecked
                 className="h-4 w-4"
               />
@@ -117,6 +112,7 @@ export function TaxPricingTab() {
                 type="radio"
                 id="tax-exclusive"
                 name="price-display"
+                title="Tax Exclusive"
                 className="h-4 w-4"
               />
               <Label htmlFor="tax-exclusive" className="cursor-pointer">

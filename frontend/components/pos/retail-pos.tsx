@@ -789,8 +789,6 @@ export function RetailPOS() {
         try {
           const outletId = typeof currentOutlet!.id === 'string' ? parseInt(String(currentOutlet!.id), 10) : currentOutlet!.id
           await printReceipt({ cart: receiptCartItems, subtotal: fullSale.subtotal ?? subtotal, discount: fullSale.discount ?? discount, tax: fullSale.tax ?? tax, total: fullSale.total ?? total, sale: fullSale }, outletId)
-          // optional: show a subtle toast on success
-          toast({ title: "Printed receipt", description: `Receipt ${receiptNumber} sent to printer.` })
         } catch (err: any) {
           // Non-blocking failure - inform user but don't interrupt flow
           console.error("Auto-print failed:", err)
@@ -1228,7 +1226,6 @@ export function RetailPOS() {
                           }
 
                           addCartWithDetails(p, undefined, undefined, 1)
-                          toast({ title: "Added to cart", description: `${p.name} added via barcode` })
                           setSearchTerm("")
                           setShowSearchDropdown(false)
                           return

@@ -79,10 +79,6 @@ export default function TablesPage() {
 
     try {
       await tableService.delete(selectedTable.id)
-      toast({
-        title: "Table Deleted",
-        description: `${selectedTable.number} has been removed.`,
-      })
       setShowDeleteConfirm(false)
       setSelectedTable(null)
       loadTables()

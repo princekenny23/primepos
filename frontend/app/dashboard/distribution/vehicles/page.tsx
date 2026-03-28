@@ -65,7 +65,6 @@ export default function VehiclesPage() {
       setAddVehicleOpen(false)
       await loadRows()
       setCurrentPage(1)
-      toast({ title: "Vehicle created", description: "Vehicle added successfully." })
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to create vehicle", variant: "destructive" })
     }

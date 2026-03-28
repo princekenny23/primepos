@@ -126,7 +126,6 @@ export default function DeliveriesPage() {
       setAssignOrderId(null)
       await loadRows()
       setCurrentPage(1)
-      toast({ title: "Assigned", description: "Driver and vehicle assigned successfully." })
     } catch (error: any) {
       toast({ title: "Error", description: error.message || "Failed to assign delivery order", variant: "destructive" })
     } finally {

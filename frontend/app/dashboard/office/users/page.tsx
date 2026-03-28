@@ -219,10 +219,6 @@ export default function AccountsPage() {
 
     try {
       await roleService.delete(String(roleToDelete.id))
-      toast({
-        title: "Role Deleted",
-        description: "Role has been deleted successfully.",
-      })
       setShowDeleteRoleDialog(false)
       setRoleToDelete(null)
       loadRoles()
@@ -916,10 +912,6 @@ export default function AccountsPage() {
 
                 try {
                   await userService.delete(userToDelete)
-                  toast({
-                    title: "User Deleted",
-                    description: "User has been deleted successfully.",
-                  })
                   loadUsers()
                   setShowDeleteDialog(false)
                   setUserToDelete(null)
@@ -976,10 +968,6 @@ export default function AccountsPage() {
 
                 try {
                   await staffService.delete(String(staffToDelete.id))
-                  toast({
-                    title: "Staff Deleted",
-                    description: "Staff member has been deleted successfully.",
-                  })
                   setShowDeleteStaffDialog(false)
                   setStaffToDelete(null)
                   loadStaff()

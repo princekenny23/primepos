@@ -114,11 +114,6 @@ export function BusinessInfoTab() {
       
       // Reload business data to reflect changes
       await setCurrentBusiness(currentTenant.id)
-      
-      toast({
-        title: "Settings Saved",
-        description: "Business information has been updated successfully. The POS interface will update on next navigation.",
-      })
     } catch (error: any) {
       console.error("Failed to save business info:", error)
       toast({
@@ -373,10 +368,6 @@ export function BusinessInfoTab() {
         currentLogo={logoUrl || undefined}
         onSuccess={(newLogoUrl) => {
           setLogoUrl(newLogoUrl)
-          toast({
-            title: "Logo Updated",
-            description: "Your business logo has been updated successfully.",
-          })
         }}
       />
     </Card>

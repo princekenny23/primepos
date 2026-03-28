@@ -26,22 +26,12 @@ export default function LanguageSettingsPage() {
 
   const handleSave = async () => {
     if (selectedLocale === locale) {
-      toast({
-        title: t("settings.messages.saved"),
-        description: t("settings.language.current") + ": " + LOCALES.find(l => l.code === selectedLocale)?.nativeName,
-      })
       return
     }
 
     setIsSaving(true)
     try {
       await setLocale(selectedLocale)
-      toast({
-        title: locale === "en" ? "Language Changed" : "Chilankhulo Chasinthidwa",
-        description: selectedLocale === "en" 
-          ? "Language changed to English" 
-          : "Chilankhulo chasinthidwa kukhala Chichewa",
-      })
     } catch (error) {
       toast({
         title: t("common.messages.error"),

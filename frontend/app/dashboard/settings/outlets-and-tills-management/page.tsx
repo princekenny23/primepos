@@ -123,11 +123,6 @@ export default function OutletsAndTillsManagementPage() {
       
       // Also refresh the page data
       router.refresh()
-      
-      toast({
-        title: "Refreshed",
-        description: "Data has been refreshed",
-      })
     } catch (error: any) {
       console.error("Failed to refresh:", error)
       toast({
@@ -154,10 +149,6 @@ export default function OutletsAndTillsManagementPage() {
     setIsSwitching(outletId)
     try {
       await switchOutlet(outletId)
-      toast({
-        title: "Success",
-        description: `Switched to ${outlets.find(o => String(o.id) === outletId)?.name || 'outlet'}`,
-      })
       // Refresh outlets to update current outlet badge
       if (loadOutlets && currentBusiness?.id) {
         await loadOutlets(currentBusiness.id)
@@ -191,10 +182,6 @@ export default function OutletsAndTillsManagementPage() {
 
     try {
       await tillService.delete(deletingTill.id)
-      toast({
-        title: "Till Deleted",
-        description: "Till has been deleted successfully.",
-      })
       setDeletingTill(null)
       loadTills()
     } catch (error: any) {

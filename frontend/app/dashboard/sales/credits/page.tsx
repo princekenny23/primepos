@@ -371,7 +371,6 @@ export default function CreditsPage() {
         customer: customer.id,
         outlet: outletId,
       })
-      toast({ title: "Customer assigned", description: "Customer linked to sale." })
       setShowAssignCustomerModal(false)
       setAssignSale(null)
       loadCredits()
@@ -410,11 +409,6 @@ export default function CreditsPage() {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("sale-completed"))
       }
-
-      toast({
-        title: "Payment recorded",
-        description: "Receivable updated successfully.",
-      })
 
       setShowPaymentModal(false)
       setSelectedSale(null)

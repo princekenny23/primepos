@@ -160,10 +160,6 @@ export default function NewExpensePage() {
         shift_id: formData.shift_id || undefined,
       })
 
-      toast({
-        title: "Expense Created",
-        description: "Expense has been created successfully.",
-      })
       router.push("/dashboard/office/expenses")
     } catch (error: any) {
       toast({

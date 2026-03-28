@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -8,12 +8,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Table,
   TableBody,
@@ -22,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { FileSpreadsheet, Printer, RefreshCw } from "lucide-react"
+import { CalendarDays, FileSpreadsheet, Printer, RefreshCw } from "lucide-react"
 import { useI18n } from "@/contexts/i18n-context"
 import { useBusinessStore } from "@/stores/businessStore"
 import { apiEndpoints } from "@/lib/api"
@@ -32,42 +33,49 @@ import {
   type InventoryValuationReport,
 } from "@/lib/services/reportService"
 import { useToast } from "@/components/ui/use-toast"
-import { format } from "date-fns"
+import {
+  format,
+  isValid,
+  parseISO,
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  endOfWeek,
+  startOfYear,
+  endOfYear,
+  subDays,
+  subMonths,
+} from "date-fns"
+
+type DateRange = {
+  start: Date
+  end: Date
+}
+
+const DATE_PRESETS = [
+  { id: "today", label: "Today" },
+  { id: "yesterday", label: "Yesterday" },
+  { id: "last7", label: "Last 7 days" },
+  { id: "last30", label: "Last 30 days" },
+  { id: "thisWeek", label: "This week" },
+  { id: "thisMonth", label: "This month" },
+  { id: "lastMonth", label: "Last month" },
+  { id: "thisYear", label: "This year" },
+]
 
 export default function StockValuationReportPage() {
   const { t } = useI18n()
-  const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
+  const { currentBusiness } = useBusinessStore()
   const { toast } = useToast()
 
   const [isLoading, setIsLoading] = useState(true)
-  const [report, setReport] = useState<InventoryValuationReport | null>(null)
-  const [startDate, setStartDate] = useState(() => {
+  const [showDateModal, setShowDateModal] = useState(false)
+  const [datePreset, setDatePreset] = useState("thisMonth")
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
     const now = new Date()
-    return format(new Date(now.getFullYear(), now.getMonth(), 1), "yyyy-MM-dd")
+    return { start: startOfMonth(now), end: endOfMonth(now) }
   })
-  const [endDate, setEndDate] = useState(() => format(new Date(), "yyyy-MM-dd"))
-  const [selectedOutlet, setSelectedOutlet] = useState<string>("all")
-  const [selectedCategory, setSelectedCategory] = useState<string>("all")
-
-  const outletOptions = useMemo(() => {
-    if (!outlets?.length) return []
-    return outlets.map((outlet) => ({ id: String(outlet.id), name: outlet.name }))
-  }, [outlets])
-
-  useEffect(() => {
-    if (!currentOutlet) return
-    if (selectedOutlet === "all" && outletOptions.length === 1) {
-      setSelectedOutlet(String(currentOutlet.id))
-    }
-  }, [currentOutlet, outletOptions.length, selectedOutlet])
-
-  const categoryOptions = useMemo(() => {
-    if (!report?.categories?.length) return []
-    return report.categories.map((category) => ({
-      id: String(category.id),
-      name: category.name,
-    }))
-  }, [report?.categories])
+  const [report, setReport] = useState<InventoryValuationReport | null>(null)
 
   const formatCurrency = useCallback(
     (value: number) => {
@@ -80,17 +88,33 @@ export default function StockValuationReportPage() {
     [currentBusiness]
   )
 
+  const applyPreset = useCallback((presetId: string) => {
+    const now = new Date()
+    let next: DateRange
+    switch (presetId) {
+      case "today": next = { start: now, end: now }; break
+      case "yesterday": next = { start: subDays(now, 1), end: subDays(now, 1) }; break
+      case "last7": next = { start: subDays(now, 6), end: now }; break
+      case "last30": next = { start: subDays(now, 29), end: now }; break
+      case "thisWeek": next = { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) }; break
+      case "lastMonth": { const lm = subMonths(now, 1); next = { start: startOfMonth(lm), end: endOfMonth(lm) }; break }
+      case "thisYear": next = { start: startOfYear(now), end: endOfYear(now) }; break
+      case "thisMonth":
+      default: next = { start: startOfMonth(now), end: endOfMonth(now) }; break
+    }
+    setDatePreset(presetId)
+    setDateRange(next)
+  }, [])
+
   const loadReportData = useCallback(async () => {
-    const outletParam = selectedOutlet !== "all" ? selectedOutlet : undefined
-    const categoryParam = selectedCategory !== "all" ? selectedCategory : undefined
+    const startDate = format(dateRange.start, "yyyy-MM-dd")
+    const endDate = format(dateRange.end, "yyyy-MM-dd")
 
     setIsLoading(true)
     try {
       const response = await reportService.getInventoryValuation({
-        outlet: outletParam,
         start_date: startDate,
         end_date: endDate,
-        category: categoryParam,
       })
       setReport(response)
     } catch (error) {
@@ -103,11 +127,15 @@ export default function StockValuationReportPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [endDate, selectedCategory, selectedOutlet, startDate, t, toast])
+  }, [dateRange.end, dateRange.start, t, toast])
 
   useEffect(() => {
     loadReportData()
   }, [loadReportData])
+
+  const startDate = format(dateRange.start, "yyyy-MM-dd")
+  const endDate = format(dateRange.end, "yyyy-MM-dd")
+  const headerRangeLabel = `${format(dateRange.start, "MMM dd, yyyy")} - ${format(dateRange.end, "MMM dd, yyyy")}`
 
   const handleExportXlsx = async () => {
     try {
@@ -171,10 +199,8 @@ export default function StockValuationReportPage() {
       await reportService.downloadReport(
         apiEndpoints.reports.inventoryValuationPdf,
         {
-          outlet: selectedOutlet !== "all" ? selectedOutlet : "",
           start_date: startDate,
           end_date: endDate,
-          category: selectedCategory !== "all" ? selectedCategory : "",
         },
         `stock-valuation-${startDate}-to-${endDate}.pdf`
       )
@@ -205,73 +231,24 @@ export default function StockValuationReportPage() {
           </div>
         }
       >
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-base">Filters</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-2">
-              <Label htmlFor="outlet">Outlet</Label>
-              <Select value={selectedOutlet} onValueChange={setSelectedOutlet}>
-                <SelectTrigger id="outlet">
-                  <SelectValue placeholder="All outlets" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All outlets</SelectItem>
-                  {outletOptions.map((outlet) => (
-                    <SelectItem key={outlet.id} value={outlet.id}>
-                      {outlet.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <div className="sticky top-0 z-30 mb-6 border-b bg-background/95 backdrop-blur">
+          <div className="flex flex-col gap-4 px-2 py-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm text-muted-foreground">{headerRangeLabel}</div>
+              <h2 className="text-xl font-semibold">Stock Valuation</h2>
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                <SelectTrigger id="category">
-                  <SelectValue placeholder="All categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {categoryOptions.map((category) => (
-                    <SelectItem key={category.id} value={category.id}>
-                      {category.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="startDate">Start date</Label>
-              <Input
-                id="startDate"
-                type="date"
-                value={startDate}
-                onChange={(event) => setStartDate(event.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="endDate">End date</Label>
-              <Input
-                id="endDate"
-                type="date"
-                value={endDate}
-                onChange={(event) => setEndDate(event.target.value)}
-              />
-            </div>
-
-            <div className="flex items-end gap-2 lg:col-span-4">
-              <Button onClick={loadReportData} disabled={isLoading}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                {isLoading ? t("common.status.loading") : t("common.actions.refresh")}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={() => setShowDateModal(true)}>
+                <CalendarDays className="mr-2 h-4 w-4" />
+                {DATE_PRESETS.find((p) => p.id === datePreset)?.label || "Custom"}
+              </Button>
+              <Button variant="ghost" onClick={loadReportData} disabled={isLoading}>
+                <RefreshCw className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+                Refresh
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 mb-6">
           <Card className="border-l-4 border-blue-500 bg-blue-50/40">
@@ -467,6 +444,59 @@ export default function StockValuationReportPage() {
           </CardContent>
         </Card>
       </PageLayout>
+
+      <Dialog open={showDateModal} onOpenChange={setShowDateModal}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Choose date range</DialogTitle>
+            <DialogDescription>Quick presets apply instantly. Use custom dates for exact ranges.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 md:grid-cols-2">
+            {DATE_PRESETS.map((preset) => (
+              <Button
+                key={preset.id}
+                variant={preset.id === datePreset ? "default" : "outline"}
+                onClick={() => applyPreset(preset.id)}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>From</Label>
+              <Input
+                type="date"
+                value={format(dateRange.start, "yyyy-MM-dd")}
+                onChange={(event) => {
+                  const next = parseISO(event.target.value)
+                  if (isValid(next)) {
+                    setDatePreset("custom")
+                    setDateRange((prev) => ({ ...prev, start: next }))
+                  }
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>To</Label>
+              <Input
+                type="date"
+                value={format(dateRange.end, "yyyy-MM-dd")}
+                onChange={(event) => {
+                  const next = parseISO(event.target.value)
+                  if (isValid(next)) {
+                    setDatePreset("custom")
+                    setDateRange((prev) => ({ ...prev, end: next }))
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDateModal(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   )
 }

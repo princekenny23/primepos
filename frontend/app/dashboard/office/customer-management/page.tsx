@@ -132,10 +132,6 @@ export default function CustomerManagementPage() {
       // TODO: Implement delete in customerService when backend supports it
       // await customerService.delete(customerToDelete)
       setCustomers(customers.filter(c => c.id !== customerToDelete))
-      toast({
-        title: "Customer Deleted",
-        description: "Customer has been deleted successfully.",
-      })
       setShowDelete(false)
       setCustomerToDelete(null)
     } catch (error: any) {

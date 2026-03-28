@@ -131,15 +131,6 @@ export function PrinterSettings() {
     } catch {
       // ignore localStorage failures
     }
-    toast({
-      title: "Print mode updated",
-      description:
-        next === "bluetooth_usb_thermal_printer_plus"
-          ? "Receipts will open Android share for Bluetooth-USB Thermal Printer+."
-          : next === "agent"
-            ? "Receipts will always use cloud connector delivery via backend."
-            : "Auto mode enabled: Android uses Bluetooth-USB Thermal Printer+, desktop uses cloud connector delivery.",
-    })
   }
 
   useEffect(() => {
@@ -212,10 +203,6 @@ export function PrinterSettings() {
         setConnected(true)
         setStep((prev) => (prev < 2 ? 2 : prev))
         await scanPrinters(true)
-        toast({
-          title: "Connected",
-          description: "Local print connector is reachable and ready.",
-        })
       } else {
         await api.get(apiEndpoints.printers.list)
         if (!currentOutlet) {
@@ -239,10 +226,6 @@ export function PrinterSettings() {
         if (isLinked) {
           setStep((prev) => (prev < 2 ? 2 : prev))
           await scanPrinters(true)
-          toast({
-            title: "Connected",
-            description: "Cloud connector is linked and online for this outlet.",
-          })
         } else {
           toast({
             title: "Cloud reachable",
@@ -280,13 +263,6 @@ export function PrinterSettings() {
       setPairingCode("")
       setPairingDeviceId("")
       setStep(1)
-
-      toast({
-        title: "Disconnected",
-        description: connectorPk
-          ? "Connector API key revoked and outlet routing unpaired."
-          : "Print setup disconnected.",
-      })
     } catch (err: any) {
       toast({
         title: "Disconnect failed",
@@ -331,7 +307,6 @@ export function PrinterSettings() {
           }
         }
         if (!silent) {
-          toast({ title: "Printers loaded", description: `${combined.length} local printer(s) found.` })
         }
         return
       }
@@ -369,7 +344,6 @@ export function PrinterSettings() {
         }
       }
       if (!silent) {
-        toast({ title: "Printers loaded", description: `${combined.length} connector-synced printer(s) found.` })
       }
     } catch (err: any) {
       toast({ title: "Search failed", description: (err && err.message) || String(err), variant: "destructive" })
@@ -406,13 +380,11 @@ export function PrinterSettings() {
             jobName: "PrimePOS Test Print",
           }),
         })
-        toast({ title: "Test print sent", description: `Sent test print directly to ${selectedPrinter}.` })
         return
       }
 
       const connector = await resolveActiveConnectorForOutlet(outletId)
       await enqueueBackendTestPrint(outletId, selectedPrinter, connector?.deviceId || "")
-      toast({ title: "Test print queued", description: `Queued test print for ${selectedPrinter}.` })
     } catch (err: any) {
       console.error("Test print failed", err)
       toast({ title: "Test print failed", description: err?.message || String(err), variant: "destructive" })
@@ -428,13 +400,11 @@ export function PrinterSettings() {
           title: "PrimePOS Receipt Test",
           text,
         })
-        toast({ title: "Bluetooth-USB Thermal Printer+ test started", description: "Choose Bluetooth-USB Thermal Printer+ in the Android share sheet." })
         return
       }
 
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text)
-        toast({ title: "Copied to clipboard", description: "Open Bluetooth-USB Thermal Printer+ and paste to print." })
         return
       }
 
@@ -454,7 +424,6 @@ export function PrinterSettings() {
     const merged = Array.from(new Set([...extraPrinters, normalized]))
     setExtraPrinters(merged)
     setManualPrinter("")
-    toast({ title: "Printer added", description: `${normalized}` })
   }
 
   const getOutletStorageKey = (outletId?: number | string | null) =>
@@ -538,7 +507,6 @@ export function PrinterSettings() {
         setPairedDevicePk(devicePk)
         setConnected(true)
         if (!silent) {
-          toast({ title: "Connector linked", description: "Active connector device found for this outlet." })
         }
       } else if (!silent) {
         setConnected(false)
@@ -598,7 +566,6 @@ export function PrinterSettings() {
       setConnected(true)
       setPairingStatusMessage("Connector paired successfully.")
       setStep((prev) => (prev < 2 ? 2 : prev))
-      toast({ title: "Connector paired", description: "Cloud connector linked to this outlet." })
       await scanPrinters(true)
     } catch (err: any) {
       setPairingStatusMessage("")
@@ -685,8 +652,6 @@ export function PrinterSettings() {
       }
 
       setLastAssignedOutletName(currentOutlet.name)
-      toast({ title: "Assigned", description: `${selectedPrinter} is now default for ${currentOutlet.name}.` })
-
       // Printer configuration intentionally stays separate from device pairing.
     } catch (err: any) {
       console.error("Error saving printer", err)
@@ -719,7 +684,6 @@ export function PrinterSettings() {
     setPairingCode("")
     setPairingStatusMessage("")
     setStep(connected ? 2 : 1)
-    toast({ title: "Outlet switched", description: `Now configuring ${nextOutlet.name}. Click Search Printers.` })
   }
 
   return (

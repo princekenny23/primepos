@@ -12,8 +12,15 @@ import {
   Clock,
   Eye,
   EyeOff,
+  EllipsisVertical,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -179,10 +186,6 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
       await authService.verifyCredentials(switchUsername.trim(), switchPassword)
       await switchOutlet(pendingOutletId)
       closeSwitchAuth()
-      toast({
-        title: "Outlet switched",
-        description: "Dashboard outlet switched successfully.",
-      })
     } catch (error: any) {
       toast({
         title: "Verification failed",
@@ -520,8 +523,34 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                 triggerClassName="text-white hover:bg-blue-800 hover:text-white"
                 unreadRingClassName="border-white/90"
               />
-              <Button 
-                variant="ghost" 
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white hover:bg-blue-800 hover:text-white"
+                    title="System actions"
+                  >
+                    <EllipsisVertical className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-40">
+                  <DropdownMenuItem onClick={() => router.refresh()}>
+                    Refresh
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      if (typeof window !== "undefined") {
+                        window.location.reload()
+                      }
+                    }}
+                  >
+                    Sync all
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                variant="ghost"
                 size="icon"
                 className="text-white hover:bg-blue-800 hover:text-white"
                 onClick={async () => {

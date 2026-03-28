@@ -188,10 +188,6 @@ export default function ExpensesPage() {
     try {
       await expenseService.delete(expenseToDelete)
       
-      toast({
-        title: "Expense Deleted",
-        description: "Expense has been deleted successfully.",
-      })
       loadExpenses()
     } catch (error: any) {
       toast({

@@ -681,7 +681,6 @@ export default function StockControlPage() {
           String(r.id) === String(returnItem.id) ? { ...r, status: "returned" } : r
         )
       )
-      toast({ title: "Completed", description: "Supplier return marked as returned." })
     } catch (error: any) {
       toast({
         title: "Complete failed",
@@ -866,7 +865,6 @@ export default function StockControlPage() {
         )
       }
 
-      toast({ title: "Updated", description: "Changes saved successfully." })
       setDetailsDialogOpen(false)
     } catch (error: any) {
       toast({
