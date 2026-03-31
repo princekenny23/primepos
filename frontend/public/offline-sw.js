@@ -1,4 +1,4 @@
-const CACHE_VERSION = "primepos-offline-v1"
+const CACHE_VERSION = "primepos-offline-v2"
 const APP_SHELL_CACHE = `${CACHE_VERSION}-shell`
 const READ_CACHE = `${CACHE_VERSION}-read`
 const APP_SHELL_ASSETS = ["/", "/icon.jpg"]
@@ -27,7 +27,10 @@ function isReadApiRequest(requestUrl) {
   return (
     requestUrl.pathname.includes("/api/v1/products") ||
     requestUrl.pathname.includes("/api/v1/customers") ||
-    requestUrl.pathname.includes("/api/v1/settings")
+    requestUrl.pathname.includes("/api/v1/settings") ||
+    requestUrl.pathname.includes("/api/v1/shifts") ||
+    requestUrl.pathname.includes("/api/v1/devices") ||
+    requestUrl.pathname.includes("/api/v1/notifications")
   )
 }
 
@@ -56,7 +59,36 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
+  // For same-origin assets (JS/CSS/HTML): cache-first, then network, then offline fallback
+  const isSameOrigin = url.origin === self.location.origin
+  if (isSameOrigin) {
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached
+        return fetch(request)
+          .then((response) => {
+            const cloned = response.clone()
+            caches.open(APP_SHELL_CACHE).then((cache) => cache.put(request, cloned)).catch(() => undefined)
+            return response
+          })
+          .catch(() =>
+            new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain" } })
+          )
+      })
+    )
+    return
+  }
+
+  // Cross-origin requests we don't explicitly handle: try network, return offline response on failure
   event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request))
+    caches.match(request).then((cached) => {
+      if (cached) return cached
+      return fetch(request).catch(() =>
+        new Response(JSON.stringify({ detail: "Offline" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        })
+      )
+    })
   )
 })
