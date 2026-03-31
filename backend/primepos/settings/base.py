@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'apps.quotations',
     'apps.bar',
     'apps.distribution',
+    'apps.sync',
     'apps.admin.apps.AdminConfig',  # Use explicit config to avoid label conflict
 ]
 
@@ -232,6 +233,10 @@ CORS_ALLOW_HEADERS = [
     'x-outlet-id',  # Custom header for outlet data isolation
     'x-tenant-id',  # Custom header for tenant context
 ]
+
+# Offline sync feature flags (disabled by default)
+OFFLINE_MODE_ENABLED = config('OFFLINE_MODE_ENABLED', default=False, cast=bool)
+OFFLINE_MODE_PHASE = config('OFFLINE_MODE_PHASE', default=0, cast=int)
 
 # QZ Tray signing configuration
 # Set these in environment for production. Example:

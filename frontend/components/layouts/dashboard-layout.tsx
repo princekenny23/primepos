@@ -19,6 +19,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -55,6 +56,7 @@ import { canAccessTenantPath, hasDistributionAccess, isTenantFeatureEnabled } fr
 import { useToast } from "@/components/ui/use-toast"
 import { authService } from "@/lib/services/authService"
 import { api } from "@/lib/api"
+import { OfflineStatusPill } from "@/components/offline/offline-status-pill"
 
 // Navigation translation keys mapping
 const navTranslationKeys: Record<string, string> = {
@@ -523,6 +525,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                 triggerClassName="text-white hover:bg-blue-800 hover:text-white"
                 unreadRingClassName="border-white/90"
               />
+              <OfflineStatusPill />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -547,21 +550,20 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                   >
                     Sync all
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="text-red-600 focus:text-red-600"
+                    onClick={async () => {
+                      const { logout } = useAuthStore.getState()
+                      await logout()
+                      router.push("/auth/login")
+                    }}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" />
+                    Logout
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-white hover:bg-blue-800 hover:text-white"
-                onClick={async () => {
-                  const { logout } = useAuthStore.getState()
-                  await logout()
-                  router.push("/auth/login")
-                }}
-                title="Logout"
-              >
-                <LogOut className="h-5 w-5" />
-              </Button>
             </div>
           </div>
           {showSubNavbar && <SubNavbar />}

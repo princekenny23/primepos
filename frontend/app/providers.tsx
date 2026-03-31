@@ -6,6 +6,7 @@ import { RoleProvider } from "@/contexts/role-context"
 import { ShiftProvider } from "@/contexts/shift-context"
 import { I18nProvider } from "@/contexts/i18n-context"
 import { useAuthStore } from "@/stores/authStore"
+import { OfflineBootstrap } from "@/components/offline/offline-bootstrap"
 
 function AuthHydrator() {
   const refreshUser = useAuthStore((state) => state.refreshUser)
@@ -33,6 +34,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <I18nProvider>
         <RoleProvider>
           <ShiftProvider>
+            <OfflineBootstrap />
             <AuthHydrator />
             {children}
           </ShiftProvider>

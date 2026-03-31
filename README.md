@@ -21,6 +21,24 @@ PrimePOS is a **full-stack, multi-tenant SaaS Point of Sale system** designed to
 - ✅ System User Guide & Training Playbook created (`docs/SYSTEM_USER_GUIDE_AND_TRAINING_PLAYBOOK.md`)
 - ✅ All code pushed to GitHub
 
+### Offline Mode Rollout Status (Mar 2026)
+- ✅ Phase 0 implemented (feature flags, offline status store, backend sync route scaffolding)
+- ✅ Phase 1 implemented (service worker registration + read cache strategy skeleton)
+- ✅ Phase 2 foundation implemented (offline outbox queue, idempotent server event persistence, cursor-based pull scaffold)
+- ✅ Existing business logic untouched by default (offline remains disabled until flags are enabled)
+
+Offline implementation + testing guide:
+- `docs/OFFLINE_MODE_README.md`
+
+Enable flags when ready:
+- Frontend: `NEXT_PUBLIC_OFFLINE_MODE_ENABLED=true`, `NEXT_PUBLIC_OFFLINE_MODE_PHASE=1`
+- Backend: `OFFLINE_MODE_ENABLED=true`, `OFFLINE_MODE_PHASE=1`
+
+Phase controls:
+- `0`: disabled (default, no runtime behavior change)
+- `1`: read-only offline foundation (status indicator + service worker cache)
+- `2+`: reserved for transactional outbox sync rollout
+
 ### What PrimePOS Does
 ✅ **Multi-Tenant SaaS**: Each customer isolated, independent configuration  
 ✅ **Point of Sale**: Fast checkout, multiple payment methods (cash, card, mobile money)  

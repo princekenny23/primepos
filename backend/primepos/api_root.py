@@ -80,6 +80,11 @@ def api_root(request):
                 'tenants': '/api/v1/admin/tenants/',
                 'analytics': '/api/v1/admin/analytics/',
             },
+            'sync': {
+                'status': '/api/v1/sync/status/',
+                'push_batch': '/api/v1/sync/push-batch/',
+                'pull_changes': '/api/v1/sync/pull-changes/',
+            },
         },
         'documentation': 'Visit /admin/ for Django admin interface',
     })

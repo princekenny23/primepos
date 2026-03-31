@@ -133,6 +133,12 @@ export default function AdminDashboard() {
           </div>
           <div className="flex gap-2">
             <Button variant="outline" asChild>
+              <Link href="/admin/sync">
+                <TrendingUp className="mr-2 h-4 w-4" />
+                Sync Monitor
+              </Link>
+            </Button>
+            <Button variant="outline" asChild>
               <Link href="/admin/tenants">
                 <Users className="mr-2 h-4 w-4" />
                 Manage Tenants

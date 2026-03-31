@@ -5,6 +5,10 @@
  * Update NEXT_PUBLIC_API_URL in your .env file to point to your backend.
  */
 
+import { offlineConfig } from "@/lib/offline/config"
+import { enqueueOutboxEvent, getPendingOutboxCount } from "@/lib/offline/outbox-db"
+import { useOfflineStore } from "@/stores/offlineStore"
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://primepos-5mf6.onrender.com/api/v1"
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://primepos-5mf6.onrender.com/api/v1"
 
@@ -104,6 +108,10 @@ export class ApiClient {
         ...options.headers,
       },
     }
+
+    const method = String(options.method || "GET").toUpperCase()
+    const isWriteMethod = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE"
+    const eventType = `${method.toLowerCase()}:${endpoint}`
     
     // Log request (without sensitive data)
     if (endpoint.includes('login')) {
@@ -148,6 +156,66 @@ export class ApiClient {
         }
       } catch (error) {
         // Silently fail if localStorage is not available
+      }
+    }
+
+    // Phase 2 offline queue path for writes (safe: disabled by default)
+    if (
+      typeof window !== "undefined" &&
+      offlineConfig.isPhaseAtLeast(2) &&
+      isWriteMethod &&
+      !isAuthEndpoint &&
+      !window.navigator.onLine
+    ) {
+      try {
+        const userRaw = localStorage.getItem("primepos-auth")
+        const businessRaw = localStorage.getItem("primepos-business")
+        const outletId = localStorage.getItem("currentOutletId") || ""
+
+        let tenantId = ""
+        let userId = ""
+
+        if (businessRaw) {
+          const parsedBusiness = JSON.parse(businessRaw)
+          tenantId = String(parsedBusiness?.state?.currentBusiness?.id || "")
+        }
+        if (userRaw) {
+          const parsedUser = JSON.parse(userRaw)
+          userId = String(parsedUser?.state?.user?.id || "")
+        }
+
+        if (tenantId && outletId && userId) {
+          const payload = options.body
+            ? (() => {
+                try {
+                  return JSON.parse(String(options.body))
+                } catch {
+                  return String(options.body)
+                }
+              })()
+            : null
+
+          await enqueueOutboxEvent({
+            tenant_id: tenantId,
+            outlet_id: outletId,
+            user_id: userId,
+            event_type: eventType,
+            payload,
+          })
+
+          const pending = await getPendingOutboxCount().catch(() => 0)
+          useOfflineStore.getState().setPendingCount(pending)
+          useOfflineStore.getState().setLastSyncError(null)
+
+          return {
+            offline_queued: true,
+            endpoint,
+            method,
+            detail: "Action queued offline and will sync when online.",
+          } as T
+        }
+      } catch (queueError) {
+        // If queueing fails, continue to normal request path for visibility.
       }
     }
 
@@ -337,6 +405,51 @@ export class ApiClient {
         
         // Network errors (Failed to fetch)
         if (error.message === "Failed to fetch" || error.name === "TypeError") {
+          if (
+            typeof window !== "undefined" &&
+            offlineConfig.isPhaseAtLeast(2) &&
+            isWriteMethod &&
+            !isAuthEndpoint
+          ) {
+            try {
+              const userRaw = localStorage.getItem("primepos-auth")
+              const businessRaw = localStorage.getItem("primepos-business")
+              const outletId = localStorage.getItem("currentOutletId") || ""
+              const tenantId = businessRaw ? String(JSON.parse(businessRaw)?.state?.currentBusiness?.id || "") : ""
+              const userId = userRaw ? String(JSON.parse(userRaw)?.state?.user?.id || "") : ""
+
+              if (tenantId && outletId && userId) {
+                const payload = options.body
+                  ? (() => {
+                      try {
+                        return JSON.parse(String(options.body))
+                      } catch {
+                        return String(options.body)
+                      }
+                    })()
+                  : null
+
+                await enqueueOutboxEvent({
+                  tenant_id: tenantId,
+                  outlet_id: outletId,
+                  user_id: userId,
+                  event_type: eventType,
+                  payload,
+                })
+                const pending = await getPendingOutboxCount().catch(() => 0)
+                useOfflineStore.getState().setPendingCount(pending)
+                return {
+                  offline_queued: true,
+                  endpoint,
+                  method,
+                  detail: "Action queued after network failure and will sync when online.",
+                } as T
+              }
+            } catch {
+              // fall through to normal network error message
+            }
+          }
+
           errorMsg = "Unable to connect to the server. Please check if the backend server is running and accessible."
           console.error("Network error - Backend may be down:", {
             endpoint: url,
@@ -641,6 +754,12 @@ export const apiEndpoints = {
     approve: (id: string) => `/purchase-returns/${id}/approve/`,
     complete: (id: string) => `/purchase-returns/${id}/complete/`,
   },
+  // Offline Sync
+  sync: {
+    status: "/sync/status/",
+    pushBatch: "/sync/push-batch/",
+    pullChanges: "/sync/pull-changes/",
+  },
   // Inventory
   inventory: {
     movements: "/inventory/movements/",
@@ -693,6 +812,9 @@ export const apiEndpoints = {
   admin: {
     tenants: "/admin/tenants/",
     analytics: "/admin/analytics/",
+    syncHealth: "/admin/sync/health/",
+    syncRejectedEvents: "/admin/sync/rejected-events/",
+    syncRequeue: "/admin/sync/requeue/",
   },
   // Activity Logs
   activityLogs: {
