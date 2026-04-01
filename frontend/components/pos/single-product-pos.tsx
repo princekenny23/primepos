@@ -339,6 +339,8 @@ export function SingleProductPOS() {
 
     setIsProcessingPayment(true)
     try {
+      const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+
       const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
 
       if (isOfflineCheckout) {
@@ -413,8 +415,6 @@ export function SingleProductPOS() {
       if (!initiatedSaleId) {
         throw new Error("No initiated transaction found. Click Pay again.")
       }
-
-      const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
       const sale = await saleService.finalizePayment(initiatedSaleId, {
         payment_method: paymentMethod as any,
