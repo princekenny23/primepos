@@ -610,6 +610,14 @@ export function RetailPOS() {
         notes: "Transaction initiated from POS pay screen.",
       })
 
+      if ((initiated as any)?.offline_queued) {
+        toast({
+          title: "Checkout queued offline",
+          description: (initiated as any)?.detail || "Transaction will sync when internet returns.",
+        })
+        return
+      }
+
       setInitiatedSaleId(String(initiated.id))
       setTransactionLocked(true)
       setShowPaymentMethod(true)

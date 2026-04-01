@@ -1,4 +1,5 @@
 import { api, apiEndpoints } from "@/lib/api"
+import { offlineConfig } from "@/lib/offline/config"
 import type { Sale } from "@/lib/types"
 
 // Sale with backend metadata such as nested detail fields and discount info
@@ -89,6 +90,13 @@ export interface InitiatePaymentData {
   discount?: number
   total?: number
   notes?: string
+}
+
+export interface OfflineQueuedResult {
+  offline_queued: true
+  endpoint?: string
+  method?: string
+  detail?: string
 }
 
 // Transform backend sale to frontend format
@@ -276,8 +284,24 @@ export const saleService = {
     return transformSale(response)
   },
 
-  async initiatePayment(data: InitiatePaymentData): Promise<SaleWithMetadata> {
+  async initiatePayment(data: InitiatePaymentData): Promise<SaleWithMetadata | OfflineQueuedResult> {
+    if (typeof window !== "undefined" && !window.navigator.onLine && !offlineConfig.isPhaseAtLeast(2)) {
+      throw new Error(
+        "You are offline. Checkout start requires internet in offline phase 1. Switch to phase 2 to queue write operations."
+      )
+    }
+
     const response = await api.post<any>(`/sales/initiate-payment/`, data)
+
+    if (response?.offline_queued) {
+      return {
+        offline_queued: true,
+        endpoint: response?.endpoint,
+        method: response?.method,
+        detail: response?.detail || "Checkout request queued offline. Reconnect to sync and complete payment.",
+      }
+    }
+
     return transformSale(response)
   },
 
