@@ -99,6 +99,10 @@ export interface OfflineQueuedResult {
   detail?: string
 }
 
+export function isOfflineQueuedResult(value: SaleWithMetadata | OfflineQueuedResult): value is OfflineQueuedResult {
+  return Boolean((value as OfflineQueuedResult)?.offline_queued)
+}
+
 // Transform backend sale to frontend format
 function transformSale(backendSale: any): Sale {
   const paymentMethod = (backendSale.payment_method || backendSale.paymentMethod || "cash") as string
