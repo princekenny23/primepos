@@ -741,6 +741,12 @@ export function RetailPOS() {
     setIsProcessingPayment(true)
 
     try {
+      // Calculate totals - round to 2 decimal places to avoid floating point precision issues
+      const paymentSubtotal = Math.round(cartSubtotal * 100) / 100
+      const paymentDiscount = Math.round(discountAmount * 100) / 100
+      const paymentTax = 0 // TODO: Calculate tax if needed
+      const paymentTotal = Math.round((paymentSubtotal - paymentDiscount + paymentTax) * 100) / 100
+
       const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
 
       if (isOfflineCheckout) {
@@ -761,16 +767,16 @@ export function RetailPOS() {
               price: Math.round(item.price * 100) / 100,
               notes: item.notes || "",
             })),
-            subtotal,
-            tax,
-            discount,
+            subtotal: paymentSubtotal,
+            tax: paymentTax,
+            discount: paymentDiscount,
             discount_type: saleDiscount?.type,
             discount_reason: saleDiscount?.reason,
-            total,
+            total: paymentTotal,
             payment_method: "cash",
             notes: "Offline cash sale completed from POS pay screen.",
           },
-          cashReceived: Number(amount || total),
+          cashReceived: Number(amount || paymentTotal),
           changeGiven: Number(change || 0),
           customerName: selectedCustomer?.name || null,
           items: cart.map((item, idx) => ({
@@ -837,12 +843,6 @@ export function RetailPOS() {
         throw new Error("No initiated transaction found. Click PAY to start again.")
       }
 
-      // Calculate totals - round to 2 decimal places to avoid floating point precision issues
-      const subtotal = Math.round(cartSubtotal * 100) / 100
-      const discount = Math.round(discountAmount * 100) / 100
-      const tax = 0 // TODO: Calculate tax if needed
-      const total = Math.round((subtotal - discount + tax) * 100) / 100
-
       // Finalize previously initiated sale
       const sale = await saleService.finalizePayment(initiatedSaleId, {
         payment_method: method,
@@ -899,7 +899,7 @@ export function RetailPOS() {
       ;(async () => {
         try {
           const outletId = typeof currentOutlet!.id === 'string' ? parseInt(String(currentOutlet!.id), 10) : currentOutlet!.id
-          await printReceipt({ cart: receiptCartItems, subtotal: fullSale.subtotal ?? subtotal, discount: fullSale.discount ?? discount, tax: fullSale.tax ?? tax, total: fullSale.total ?? total, sale: fullSale }, outletId)
+          await printReceipt({ cart: receiptCartItems, subtotal: fullSale.subtotal ?? paymentSubtotal, discount: fullSale.discount ?? paymentDiscount, tax: fullSale.tax ?? paymentTax, total: fullSale.total ?? paymentTotal, sale: fullSale }, outletId)
         } catch (err: any) {
           // Non-blocking failure - inform user but don't interrupt flow
           console.error("Auto-print failed:", err)
