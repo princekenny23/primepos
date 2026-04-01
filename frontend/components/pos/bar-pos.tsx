@@ -54,6 +54,8 @@ import { useAuthStore } from "@/stores/authStore"
 import { productService, categoryService } from "@/lib/services/productService"
 import { tabService, type Tab, type TabListItem, type BarTable, type TabItem } from "@/lib/services/barTabService"
 import { saleService } from "@/lib/services/saleService"
+import { offlineConfig } from "@/lib/offline/config"
+import { buildOfflinePrintableSale, completeOfflineCashSale } from "@/lib/offline/offline-sales"
 import { distributionService } from "@/lib/services/distributionService"
 import { authService } from "@/lib/services/authService"
 import { formatCurrency } from "@/lib/utils/currency"
@@ -787,6 +789,15 @@ export function BarPOS() {
 
     if (transactionLocked) {
       setShowPaymentModal(true)
+      return
+    }
+
+    if (typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine) {
+      setShowPaymentModal(true)
+      toast({
+        title: "Offline checkout",
+        description: "Cash sales can be completed offline and will sync automatically when internet returns.",
+      })
       return
     }
 
@@ -2285,13 +2296,88 @@ export function BarPOS() {
           if (currentTab) {
             handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "credit", amount, change)
           } else {
-            if (!initiatedSaleId) {
+            const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
+
+            if (!isOfflineCheckout && !initiatedSaleId) {
               toast({ title: "Error", description: "No initiated transaction found. Click Payment again.", variant: "destructive" })
               return
             }
 
             setIsProcessing(true)
             try {
+              if (isOfflineCheckout) {
+                if (paymentMethod !== "cash") {
+                  throw new Error("Only cash payments can be completed fully offline.")
+                }
+
+                const subtotal = Math.round(cartSubtotal * 100) / 100
+                const discount = Math.round(discountAmount * 100) / 100
+                const tax = 0
+                const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+                const offlineSale = await completeOfflineCashSale({
+                  saleData: {
+                    outlet: String(outlet!.id),
+                    shift: String(activeShift!.id),
+                    customer: selectedCustomer?.id || undefined,
+                    delivery_required: isDeliveryRequired,
+                    items_data: cart.map((item) => ({
+                      product_id: item.productId,
+                      unit_id: (item as any).unitId || undefined,
+                      quantity: item.quantity,
+                      price: Math.round(item.price * 100) / 100,
+                      notes: item.notes || "",
+                    })),
+                    subtotal,
+                    tax,
+                    discount,
+                    total,
+                    payment_method: "cash",
+                    notes: "Offline cash sale completed from Bar POS.",
+                  },
+                  cashReceived: Number(amount || total),
+                  changeGiven: Number(change || 0),
+                  customerName: selectedCustomer?.name || null,
+                  items: cart.map((item, idx) => ({
+                    id: String(item.id || `${item.productId}-${idx}`),
+                    name: item.name,
+                    price: Number(item.price || 0),
+                    quantity: Number(item.quantity || 0),
+                    total: Math.round(Number((item.price || 0) * (item.quantity || 0)) * 100) / 100,
+                  })),
+                })
+
+                try {
+                  await printReceipt(
+                    {
+                      cart: offlineSale.items,
+                      subtotal: offlineSale.subtotal,
+                      discount: offlineSale.discount,
+                      tax: offlineSale.tax,
+                      total: offlineSale.total,
+                      sale: buildOfflinePrintableSale(offlineSale),
+                    },
+                    outlet!.id
+                  )
+                } catch (printError) {
+                  console.warn("Offline print failed:", printError)
+                }
+
+                setCart([])
+                setSaleDiscount(null)
+                setSelectedCustomer(null)
+                setTransactionLocked(false)
+                setInitiatedSaleId("")
+                setIsDeliveryRequired(false)
+                setShowPaymentModal(false)
+
+                toast({
+                  title: "Offline sale completed",
+                  description: `Receipt #${offlineSale.receipt_number} created locally and queued for sync.`,
+                })
+                return
+              }
+
               const sale = await saleService.finalizePayment(initiatedSaleId, {
                 payment_method: paymentMethod as "cash" | "card" | "mobile" | "tab" | "credit",
                 cash_received: amount,

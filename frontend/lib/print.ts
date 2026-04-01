@@ -122,15 +122,26 @@ async function resolveDeviceIdForOutlet(outletId: number | string): Promise<stri
 }
 
 async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
-  const url = `${LOCAL_PRINT_PROXY_BASE}${path}`
   const headers = { ...buildAgentHeaders(), ...(init?.headers || {}) }
-  const response = await fetch(url, { ...init, headers })
-  if (!response.ok) {
-    const body = await response.text().catch(() => "")
-    console.error(`[Print Agent] ${path} failed:`, { status: response.status, body, url, headers })
-    throw new Error(`Local Print Agent error (${response.status}): ${body || response.statusText}`)
+  const targets = [`${LOCAL_PRINT_PROXY_BASE}${path}`, `${LOCAL_PRINT_AGENT_URL}${path}`]
+  let lastError: Error | null = null
+
+  for (const url of targets) {
+    try {
+      const response = await fetch(url, { ...init, headers })
+      if (!response.ok) {
+        const body = await response.text().catch(() => "")
+        console.error(`[Print Agent] ${path} failed:`, { status: response.status, body, url, headers })
+        lastError = new Error(`Local Print Agent error (${response.status}): ${body || response.statusText}`)
+        continue
+      }
+      return response
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("Local Print Agent request failed")
+    }
   }
-  return response
+
+  throw lastError || new Error("Local Print Agent is unavailable")
 }
 
 function escposBase64ToPrintableText(contentBase64: string): string {
@@ -315,7 +326,8 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
   if (typeof window === "undefined") throw new Error("Printing must be initiated from the browser")
   const channel = getPrintChannelPreference()
   const useMobileFlow = shouldUseBluetoothUsbThermalPrinterPlus(channel)
-  const shouldUseDirectLocalAgent = !useMobileFlow && isLocalhostBrowser()
+  const isOfflineBrowser = typeof navigator !== "undefined" && navigator.onLine === false
+  const shouldUseDirectLocalAgent = !useMobileFlow && (isLocalhostBrowser() || isOfflineBrowser)
   const shouldQueueForLocalAgent = !useMobileFlow && !shouldUseDirectLocalAgent
 
   const resolvedOutletId =

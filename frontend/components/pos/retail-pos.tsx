@@ -64,6 +64,8 @@ import {
   EyeOff,
 } from "lucide-react"
 import { useShift } from "@/contexts/shift-context"
+import { offlineConfig } from "@/lib/offline/config"
+import { buildOfflinePrintableSale, completeOfflineCashSale } from "@/lib/offline/offline-sales"
 import { saleService } from "@/lib/services/saleService"
 import { distributionService } from "@/lib/services/distributionService"
 import { authService } from "@/lib/services/authService"
@@ -585,6 +587,15 @@ export function RetailPOS() {
       return
     }
 
+    if (typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine) {
+      setShowPaymentMethod(true)
+      toast({
+        title: "Offline checkout",
+        description: "Cash sales can be completed offline and will sync automatically when internet returns.",
+      })
+      return
+    }
+
     try {
       const subtotal = Math.round(cartSubtotal * 100) / 100
       const discount = Math.round(discountAmount * 100) / 100
@@ -730,6 +741,98 @@ export function RetailPOS() {
     setIsProcessingPayment(true)
 
     try {
+      const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
+
+      if (isOfflineCheckout) {
+        if (method !== "cash") {
+          throw new Error("Only cash payments can be completed fully offline.")
+        }
+
+        const offlineSale = await completeOfflineCashSale({
+          saleData: {
+            outlet: String(currentOutlet.id),
+            shift: String(activeShift.id),
+            customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+            delivery_required: isDeliveryRequired,
+            items_data: cart.map((item) => ({
+              product_id: String(item.productId),
+              unit_id: (item as any).unitId || undefined,
+              quantity: item.quantity,
+              price: Math.round(item.price * 100) / 100,
+              notes: item.notes || "",
+            })),
+            subtotal,
+            tax,
+            discount,
+            discount_type: saleDiscount?.type,
+            discount_reason: saleDiscount?.reason,
+            total,
+            payment_method: "cash",
+            notes: "Offline cash sale completed from POS pay screen.",
+          },
+          cashReceived: Number(amount || total),
+          changeGiven: Number(change || 0),
+          customerName: selectedCustomer?.name || null,
+          items: cart.map((item, idx) => ({
+            id: String(item.id || `${item.productId}-${idx}`),
+            name: item.name,
+            price: Number(item.price || 0),
+            quantity: Number(item.quantity || 0),
+            total: Math.round(Number((item.price || 0) * (item.quantity || 0)) * 100) / 100,
+          })),
+        })
+
+        const receiptCartItems = offlineSale.items.map((item) => ({
+          ...item,
+          discount: 0,
+        }))
+
+        clearCart()
+        setSelectedCustomer(null)
+        setSaleDiscount(null)
+        setIsDeliveryRequired(false)
+        setTransactionLocked(false)
+        setInitiatedSaleId("")
+
+        toast({
+          title: "Offline sale completed",
+          description: `Receipt #${offlineSale.receipt_number} created locally and queued for sync.`,
+        })
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("sale-completed", {
+            detail: {
+              saleId: offlineSale.local_sale_id,
+              receiptNumber: offlineSale.receipt_number,
+              offline: true,
+            },
+          }))
+        }
+
+        ;(async () => {
+          try {
+            const outletId = typeof currentOutlet.id === "string" ? parseInt(String(currentOutlet.id), 10) : currentOutlet.id
+            await printReceipt({
+              cart: receiptCartItems,
+              subtotal: offlineSale.subtotal,
+              discount: offlineSale.discount,
+              tax: offlineSale.tax,
+              total: offlineSale.total,
+              sale: buildOfflinePrintableSale(offlineSale),
+            }, outletId)
+          } catch (err: any) {
+            console.error("Offline print failed:", err)
+            toast({
+              title: "Print failed",
+              description: err?.message || "Unable to print offline receipt. Check local printer connectivity.",
+              variant: "destructive",
+            })
+          }
+        })()
+
+        return
+      }
+
       if (!initiatedSaleId) {
         throw new Error("No initiated transaction found. Click PAY to start again.")
       }

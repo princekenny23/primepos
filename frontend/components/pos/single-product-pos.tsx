@@ -18,6 +18,8 @@ import { productService } from "@/lib/services/productService"
 import { formatCurrency } from "@/lib/utils/currency"
 import { PaymentPopup } from "@/components/pos/payment-popup"
 // Receipt preview removed from POS terminal
+import { offlineConfig } from "@/lib/offline/config"
+import { buildOfflinePrintableSale, completeOfflineCashSale } from "@/lib/offline/offline-sales"
 import { printReceipt } from "@/lib/print"
 // printReceiptAuto removed; using receipt preview modal
 import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
@@ -207,6 +209,15 @@ export function SingleProductPOS() {
       return
     }
 
+    if (typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine) {
+      setShowPaymentMethod(true)
+      toast({
+        title: "Offline checkout",
+        description: "Cash sales can be completed offline and will sync automatically when internet returns.",
+      })
+      return
+    }
+
     void (async () => {
       try {
         const paymentTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -328,6 +339,77 @@ export function SingleProductPOS() {
 
     setIsProcessingPayment(true)
     try {
+      const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
+
+      if (isOfflineCheckout) {
+        if (paymentMethod !== "cash") {
+          throw new Error("Only cash payments can be completed fully offline.")
+        }
+
+        const offlineSale = await completeOfflineCashSale({
+          saleData: {
+            outlet: String(currentOutlet.id),
+            shift: String(activeShift.id),
+            customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+            items_data: cart.map((item) => ({
+              product_id: String(item.productId),
+              quantity: item.quantity,
+              price: item.price,
+            })),
+            subtotal: cartTotal,
+            tax: 0,
+            discount: 0,
+            total: cartTotal,
+            payment_method: "cash",
+            notes: "Offline cash sale completed from single product POS.",
+          },
+          cashReceived: Number(amount || cartTotal),
+          changeGiven: Math.max(0, Number(amount || cartTotal) - cartTotal),
+          customerName: selectedCustomer?.name || null,
+          items: cart.map((item) => ({
+            id: String(item.id),
+            name: item.name,
+            price: Number(item.price || 0),
+            quantity: Number(item.quantity || 0),
+            total: Math.round(Number((item.price || 0) * (item.quantity || 0)) * 100) / 100,
+          })),
+        })
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("sale-completed", {
+            detail: {
+              saleId: offlineSale.local_sale_id,
+              receiptNumber: offlineSale.receipt_number,
+              offline: true,
+            },
+          }))
+        }
+
+        clearCart()
+        setSelectedCustomer(null)
+        setTransactionLocked(false)
+        setInitiatedSaleId("")
+
+        try {
+          await printReceipt({
+            cart: offlineSale.items,
+            subtotal: offlineSale.subtotal,
+            discount: offlineSale.discount,
+            tax: offlineSale.tax,
+            total: offlineSale.total,
+            sale: buildOfflinePrintableSale(offlineSale),
+          }, currentOutlet.id)
+        } catch (err: any) {
+          console.warn("Offline print failed in SingleProductPOS:", err)
+        }
+
+        toast({
+          title: "Offline sale completed",
+          description: `Receipt #${offlineSale.receipt_number} created locally and queued for sync.`,
+        })
+        return
+      }
+
       if (!initiatedSaleId) {
         throw new Error("No initiated transaction found. Click Pay again.")
       }

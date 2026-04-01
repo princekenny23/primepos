@@ -1,6 +1,11 @@
 import { api, apiEndpoints } from "@/lib/api"
 import { offlineConfig } from "@/lib/offline/config"
 import {
+  markOfflineSaleFailed,
+  markOfflineSalesSynced,
+  markOfflineSalesSyncing,
+} from "@/lib/offline/offline-sales"
+import {
   getOutboxCounts,
   getPendingOutboxCount,
   listPendingOutboxEvents,
@@ -103,6 +108,7 @@ export async function flushPendingOutbox(limit = 50) {
 
   const clientEventIds = pending.map((event) => event.client_event_id)
   await markOutboxEventsSyncing(clientEventIds)
+  await markOfflineSalesSyncing(clientEventIds).catch(() => undefined)
 
   let response: any
   try {
@@ -110,6 +116,7 @@ export async function flushPendingOutbox(limit = 50) {
   } catch (error: any) {
     for (const clientEventId of clientEventIds) {
       await markOutboxEventFailed(clientEventId, error?.message || "Batch sync failed")
+      await markOfflineSaleFailed(clientEventId, error?.message || "Batch sync failed").catch(() => undefined)
     }
     const counts = await getOutboxCounts().catch(() => ({ pending: 0, deadLetter: 0, failed: 0 }))
     useOfflineStore.getState().setPendingCount(counts.pending)
@@ -129,10 +136,12 @@ export async function flushPendingOutbox(limit = 50) {
       continue
     }
     await markOutboxEventFailed(id, result.detail || "Sync rejected")
+    await markOfflineSaleFailed(id, result.detail || "Sync rejected").catch(() => undefined)
   }
 
   if (acceptedIds.size) {
     await removeOutboxEvents(Array.from(acceptedIds))
+    await markOfflineSalesSynced(Array.from(acceptedIds)).catch(() => undefined)
   }
 
   const counts = await getOutboxCounts().catch(() => ({ pending: 0, deadLetter: 0, failed: 0 }))

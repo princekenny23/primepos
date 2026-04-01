@@ -3,7 +3,7 @@ import { offlineConfig } from "@/lib/offline/config"
 import type { Sale } from "@/lib/types"
 
 // Sale with backend metadata such as nested detail fields and discount info
-type SaleWithMetadata = Sale & {
+export type SaleWithMetadata = Sale & {
   _raw?: any
   discount?: number
   discountType?: string | undefined
@@ -36,6 +36,8 @@ export interface CreateSaleData {
     price: number
     notes?: string
     kitchen_status?: string
+    unit_id?: string | number
+    variation_id?: string | number
   }>
   subtotal: number
   tax?: number
@@ -101,6 +103,65 @@ export interface OfflineQueuedResult {
 
 export function isOfflineQueuedResult(value: SaleWithMetadata | OfflineQueuedResult): value is OfflineQueuedResult {
   return Boolean((value as OfflineQueuedResult)?.offline_queued)
+}
+
+export function buildSaleCreatePayload(data: CreateSaleData): any {
+  const backendData: any = {
+    outlet: parseInt(String(data.outlet)),
+    shift: data.shift ? parseInt(String(data.shift)) : undefined,
+    customer: data.customer ? parseInt(String(data.customer)) : undefined,
+    items_data: data.items_data.map(item => ({
+      product_id: parseInt(String(item.product_id)),
+      variation_id: item.variation_id ? parseInt(String(item.variation_id)) : undefined,
+      unit_id: item.unit_id ? parseInt(String(item.unit_id)) : undefined,
+      quantity: item.quantity,
+      price: String(item.price),
+      notes: item.notes || "",
+      kitchen_status: item.kitchen_status || "pending",
+    })),
+    subtotal: String(data.subtotal),
+    tax: data.tax ? String(data.tax) : "0",
+    discount: data.discount ? String(data.discount) : "0",
+    total: String(data.total),
+    payment_method: data.payment_method,
+    notes: data.notes || "",
+  }
+
+  if (data.discount && data.discount > 0) {
+    if (data.discount_type) {
+      backendData.discount_type = data.discount_type
+    }
+    if (data.discount_reason) {
+      backendData.discount_reason = data.discount_reason
+    }
+  }
+
+  if (!backendData.shift) delete backendData.shift
+  if (!backendData.customer) delete backendData.customer
+
+  backendData.items_data = backendData.items_data.map((item: any) => {
+    if (!item.variation_id) delete item.variation_id
+    if (!item.unit_id) delete item.unit_id
+    return item
+  })
+
+  if (data.table_id) {
+    backendData.table_id = parseInt(data.table_id)
+  }
+  if (data.guests) {
+    backendData.guests = data.guests
+  }
+  if (data.priority) {
+    backendData.priority = data.priority
+  }
+  if (data.status) {
+    backendData.status = data.status
+  }
+  if (typeof data.delivery_required === "boolean") {
+    backendData.delivery_required = data.delivery_required
+  }
+
+  return backendData
 }
 
 // Transform backend sale to frontend format
@@ -188,57 +249,7 @@ export const saleService = {
   },
 
   async create(data: CreateSaleData): Promise<SaleWithMetadata> {
-    // Transform frontend data to backend format
-    // Ensure all IDs are integers
-    const backendData: any = {
-      outlet: parseInt(String(data.outlet)),
-      shift: data.shift ? parseInt(String(data.shift)) : undefined,
-      customer: data.customer ? parseInt(String(data.customer)) : undefined,
-      items_data: data.items_data.map(item => ({
-        product_id: parseInt(String(item.product_id)),
-        quantity: item.quantity,
-        price: String(item.price), // Backend expects string for DecimalField
-        notes: item.notes || "",
-        kitchen_status: item.kitchen_status || "pending",
-      })),
-      subtotal: String(data.subtotal), // Backend expects string for DecimalField
-      tax: data.tax ? String(data.tax) : "0",
-      discount: data.discount ? String(data.discount) : "0",
-      total: String(data.total), // Backend expects string for DecimalField
-      payment_method: data.payment_method,
-      notes: data.notes || "",
-    }
-    
-    // Add discount metadata if discount is applied
-    if (data.discount && data.discount > 0) {
-      if (data.discount_type) {
-        backendData.discount_type = data.discount_type
-      }
-      if (data.discount_reason) {
-        backendData.discount_reason = data.discount_reason
-      }
-    }
-    
-    // Remove undefined fields
-    if (!backendData.shift) delete backendData.shift
-    if (!backendData.customer) delete backendData.customer
-    
-    // Add restaurant-specific fields if provided
-    if (data.table_id) {
-      backendData.table_id = parseInt(data.table_id)
-    }
-    if (data.guests) {
-      backendData.guests = data.guests
-    }
-    if (data.priority) {
-      backendData.priority = data.priority
-    }
-    if (data.status) {
-      backendData.status = data.status
-    }
-    if (typeof data.delivery_required === "boolean") {
-      backendData.delivery_required = data.delivery_required
-    }
+    const backendData = buildSaleCreatePayload(data)
     
     console.log("Sending sale request to backend:", {
       endpoint: apiEndpoints.sales.create,
