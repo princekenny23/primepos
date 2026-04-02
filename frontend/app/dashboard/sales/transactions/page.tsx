@@ -286,12 +286,26 @@ export default function TransactionsPage() {
       }
     }
 
+    const handleOfflineSyncComplete = (event: Event) => {
+      const currentOutletId = outlet?.id || null
+      if (!currentOutletId) return
+
+      const detail = (event as CustomEvent)?.detail
+      const outletIds = Array.isArray(detail?.outletIds) ? detail.outletIds.map((id: unknown) => String(id)) : []
+
+      if (!outletIds.length || outletIds.includes(String(currentOutletId))) {
+        loadTransactions()
+      }
+    }
+
     window.addEventListener("sale-completed", handleSaleCreated)
+    window.addEventListener("offline-sync-complete", handleOfflineSyncComplete)
     window.addEventListener("focus", handleRefresh)
     document.addEventListener("visibilitychange", handleVisibility)
 
     return () => {
       window.removeEventListener("sale-completed", handleSaleCreated)
+      window.removeEventListener("offline-sync-complete", handleOfflineSyncComplete)
       window.removeEventListener("focus", handleRefresh)
       document.removeEventListener("visibilitychange", handleVisibility)
     }

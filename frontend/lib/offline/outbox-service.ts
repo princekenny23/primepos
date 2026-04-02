@@ -140,8 +140,23 @@ export async function flushPendingOutbox(limit = 50) {
   }
 
   if (acceptedIds.size) {
-    await removeOutboxEvents(Array.from(acceptedIds))
-    await markOfflineSalesSynced(Array.from(acceptedIds)).catch(() => undefined)
+    const acceptedIdList = Array.from(acceptedIds)
+    await removeOutboxEvents(acceptedIdList)
+    await markOfflineSalesSynced(acceptedIdList).catch(() => undefined)
+
+    if (typeof window !== "undefined") {
+      const acceptedIdSet = new Set(acceptedIdList)
+      const acceptedEvents = pending.filter((event) => acceptedIdSet.has(event.client_event_id))
+      window.dispatchEvent(
+        new CustomEvent("offline-sync-complete", {
+          detail: {
+            acceptedCount: acceptedIdList.length,
+            clientEventIds: acceptedIdList,
+            outletIds: Array.from(new Set(acceptedEvents.map((event) => String(event.outlet_id || "")).filter(Boolean))),
+          },
+        })
+      )
+    }
   }
 
   const counts = await getOutboxCounts().catch(() => ({ pending: 0, deadLetter: 0, failed: 0 }))
