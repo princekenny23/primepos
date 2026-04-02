@@ -163,27 +163,27 @@ export function PaymentPopup({
             )}
 
             {/* Transaction Summary */}
-            <div className="space-y-2 rounded bg-white p-3">
-              <div className="flex justify-between text-xs">
-                <span className="text-gray-600">Subtotal:</span>
-                <span className="font-medium text-gray-900">MWK {subtotal.toLocaleString()}</span>
+            <div className="space-y-3 rounded bg-white p-4 shadow-sm">
+              <div className="flex items-baseline justify-between">
+                <span className="text-base font-semibold text-gray-700">Subtotal:</span>
+                <span className="text-2xl font-extrabold text-gray-900">MWK {subtotal.toLocaleString()}</span>
               </div>
               {discount > 0 && (
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Discount:</span>
-                  <span className="font-medium text-red-600">-MWK {discount.toLocaleString()}</span>
+                  <span className="font-semibold text-red-600">-MWK {discount.toLocaleString()}</span>
                 </div>
               )}
               {tax > 0 && (
-                <div className="flex justify-between text-xs">
+                <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Tax:</span>
-                  <span className="font-medium text-gray-900">+MWK {tax.toLocaleString()}</span>
+                  <span className="font-semibold text-gray-900">+MWK {tax.toLocaleString()}</span>
                 </div>
               )}
-              <div className="border-t border-gray-200 pt-2">
-                <div className="flex justify-between">
-                  <span className="font-bold text-gray-900 text-sm">Total:</span>
-                  <span className="text-lg font-bold text-emerald-600">MWK {total.toLocaleString()}</span>
+              <div className="rounded-md border-2 border-emerald-200 bg-emerald-50 p-3">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-lg font-bold text-emerald-900">Total:</span>
+                  <span className="text-4xl font-extrabold text-emerald-700">MWK {total.toLocaleString()}</span>
                 </div>
               </div>
             </div>
