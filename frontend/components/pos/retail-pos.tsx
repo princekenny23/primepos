@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Select,
   SelectContent,
@@ -1242,22 +1241,17 @@ export function RetailPOS() {
           <div className="p-2 border-b space-y-1.5">
             <div className="flex items-center justify-between">
               <div className="font-semibold">Cart ({cartItemCount})</div>
-              <Tabs value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
-                <TabsList>
-                  <TabsTrigger
-                    value="retail"
-                    className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
-                  >
-                    Retail
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value="wholesale"
-                    className="data-[state=active]:bg-blue-900 data-[state=active]:text-white"
-                  >
-                    Wholesale
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
+              <div className="w-[160px]">
+                <Select value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Select sale type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="retail">Retail</SelectItem>
+                    <SelectItem value="wholesale">Wholesale</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Customer Selection */}
