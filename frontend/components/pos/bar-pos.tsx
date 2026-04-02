@@ -1783,9 +1783,9 @@ export function BarPOS() {
                 <span>-{formatCurrency(discountAmount, currentBusiness)}</span>
               </div>
             )}
-            <div className="flex justify-between font-bold text-xl">
+            <div className="flex items-baseline justify-between">
               <span>Total</span>
-              <span className="text-primary">{formatCurrency(currentTab?.total || cartSubtotal, currentBusiness)}</span>
+              <span className="text-3xl font-extrabold text-black">{formatCurrency(currentTab?.total || cartSubtotal, currentBusiness)}</span>
             </div>
             {currentTab?.is_over_limit && (
               <p className="text-xs text-destructive flex items-center gap-1">

@@ -692,7 +692,7 @@ export function SingleProductPOS() {
                       </div>
                       <div className="flex justify-between items-center border-t pt-2">
                         <span className="text-lg font-semibold">Total:</span>
-                        <span className="text-3xl font-bold text-primary">
+                        <span className="text-3xl font-extrabold text-black">
                           {formatCurrency(total, currentBusiness)}
                         </span>
                       </div>

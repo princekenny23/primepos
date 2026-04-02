@@ -63,9 +63,9 @@ export function PosCartSummary({
 
         <Separator className="my-2" />
 
-        <div className="flex justify-between text-base font-bold">
+        <div className="flex items-baseline justify-between">
           <span>Total:</span>
-          <span>MWK {total.toFixed(2)}</span>
+          <span className="text-3xl font-extrabold text-black">MWK {total.toFixed(2)}</span>
         </div>
       </div>
 

@@ -1662,7 +1662,7 @@ export function RetailPOS() {
                 )}
                 <div className="col-span-2 flex items-baseline justify-between border-t pt-2">
                   <span className="text-base font-bold">Total:</span>
-                  <span className="text-2xl font-extrabold text-blue-900">{formatCurrency(cartTotal, currentBusiness)}</span>
+                  <span className="text-3xl font-extrabold text-black">{formatCurrency(cartTotal, currentBusiness)}</span>
                 </div>
               </div>
 
