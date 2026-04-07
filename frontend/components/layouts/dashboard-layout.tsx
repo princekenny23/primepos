@@ -235,6 +235,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
     }
     if (itemName === "Inventory") return isTenantFeatureEnabled(user, "allow_inventory")
     if (itemName === "Distribution") return hasDistributionAccess(user)
+    if (itemName === "Storefront") return isTenantFeatureEnabled(user, "allow_storefront")
     if (itemName === "Office") return isTenantFeatureEnabled(user, "allow_office")
     if (itemName === "Settings") return isTenantFeatureEnabled(user, "allow_settings")
 

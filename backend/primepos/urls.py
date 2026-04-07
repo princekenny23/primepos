@@ -52,6 +52,7 @@ urlpatterns = [
     path('api/v1/', include('apps.quotations.urls')),
     path('api/v1/', include('apps.distribution.urls')),
     path('api/v1/', include('apps.sync.urls')),
+    path('api/v1/', include('apps.storefronts.urls')),
     path('api/v1/bar/', include('apps.bar.urls')),
     
 ]

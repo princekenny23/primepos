@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -128,6 +128,10 @@ export function PaymentPopup({
           }
         }}
       >
+        <DialogHeader className="sr-only">
+          <DialogTitle>Payment</DialogTitle>
+          <DialogDescription>Review items and complete checkout with your selected payment method.</DialogDescription>
+        </DialogHeader>
         <div className="flex h-full max-h-[90vh] flex-col md:max-h-[80vh] md:flex-row">
           {/* Left Column - Transaction Details */}
           <div className="flex-1 border-b border-gray-200 bg-gray-50 p-4 overflow-y-auto md:border-b-0 md:border-r">

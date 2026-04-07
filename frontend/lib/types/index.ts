@@ -39,6 +39,7 @@ export interface Outlet {
   businessType?: OutletBusinessType
   businessTypeDisplay?: string
   settings?: BusinessSettings
+  distributionActive?: boolean
   isActive: boolean
   createdAt: string
 }
@@ -64,6 +65,7 @@ export interface User {
       allow_inventory?: boolean
       allow_office?: boolean
       allow_settings?: boolean
+      allow_storefront?: boolean
       allow_sales_create?: boolean
       allow_sales_refund?: boolean
       allow_sales_reports?: boolean
@@ -87,6 +89,10 @@ export interface User {
       allow_settings_outlets?: boolean
       allow_settings_integrations?: boolean
       allow_settings_advanced?: boolean
+      allow_storefront_sites?: boolean
+      allow_storefront_orders?: boolean
+      allow_storefront_reports?: boolean
+      allow_storefront_settings?: boolean
     }
   } | string | number
   is_saas_admin?: boolean

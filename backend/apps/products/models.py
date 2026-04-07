@@ -67,6 +67,16 @@ class Product(models.Model):
     alcohol_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('100'))], help_text="Alcohol percentage for bar items")
     
     image = models.ImageField(upload_to='products/', blank=True, null=True)
+    new_stock_override = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Manual storefront new-stock override. Null uses automatic logic."
+    )
+    new_stock_override_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Optional expiry for manual storefront new-stock override."
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

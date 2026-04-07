@@ -76,7 +76,7 @@ class OutletSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'tenant', 'name', 'address', 'phone', 'email',
             'business_type', 'business_type_display', 'effective_business_type',
-            'settings', 'is_active', 'created_at', 'updated_at', 'tills'
+            'settings', 'distribution_active', 'is_active', 'created_at', 'updated_at', 'tills'
         )
         read_only_fields = ('id', 'tenant', 'created_at', 'updated_at', 'business_type_display', 'effective_business_type')
     

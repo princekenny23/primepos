@@ -375,7 +375,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                     }))
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="user_source">
                     <SelectValue placeholder="Select user source" />
                   </SelectTrigger>
                   <SelectContent>
@@ -402,7 +402,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                     }))
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="user_id">
                     <SelectValue placeholder="Choose an existing office user" />
                   </SelectTrigger>
                   <SelectContent>

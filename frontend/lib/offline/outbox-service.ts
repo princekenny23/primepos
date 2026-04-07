@@ -7,6 +7,7 @@ import {
 } from "@/lib/offline/offline-sales"
 import {
   getOutboxCounts,
+  markOutboxEventsPending,
   getPendingOutboxCount,
   listPendingOutboxEvents,
   markOutboxEventFailed,
@@ -31,9 +32,25 @@ type PushResult = {
   detail?: string
 }
 
+let serverSyncDisabled = false
+
+function isServerSyncDisabledError(error: any): boolean {
+  const status = Number(error?.status)
+  const detail = String(error?.data?.detail || error?.message || "").toLowerCase()
+  return status === 503 && detail.includes("offline sync is disabled")
+}
+
+function markServerSyncDisabled() {
+  serverSyncDisabled = true
+}
+
 export async function pushBatch(events: SyncPushEvent[]) {
   if (!offlineConfig.isPhaseAtLeast(2)) {
     return { skipped: true, reason: "Offline phase < 2" }
+  }
+
+  if (serverSyncDisabled) {
+    return { skipped: true, reason: "Offline sync disabled on server" }
   }
 
   const setSyncing = useOfflineStore.getState().setSyncing
@@ -47,6 +64,11 @@ export async function pushBatch(events: SyncPushEvent[]) {
     setLastSyncAt(new Date().toISOString())
     return response
   } catch (error: any) {
+    if (isServerSyncDisabledError(error)) {
+      markServerSyncDisabled()
+      setLastSyncError("Offline sync is disabled on server")
+      return { skipped: true, reason: "Offline sync disabled on server" }
+    }
     setLastSyncError(error?.message || "Push batch failed")
     throw error
   } finally {
@@ -57,6 +79,10 @@ export async function pushBatch(events: SyncPushEvent[]) {
 export async function pullChanges(cursor?: string) {
   if (!offlineConfig.isPhaseAtLeast(2)) {
     return { skipped: true, reason: "Offline phase < 2", changes: [] as any[] }
+  }
+
+  if (serverSyncDisabled) {
+    return { skipped: true, reason: "Offline sync disabled on server", changes: [] as any[] }
   }
 
   const setSyncing = useOfflineStore.getState().setSyncing
@@ -71,6 +97,11 @@ export async function pullChanges(cursor?: string) {
     setLastSyncAt(new Date().toISOString())
     return response
   } catch (error: any) {
+    if (isServerSyncDisabledError(error)) {
+      markServerSyncDisabled()
+      setLastSyncError("Offline sync is disabled on server")
+      return { skipped: true, reason: "Offline sync disabled on server", changes: [] as any[] }
+    }
     setLastSyncError(error?.message || "Pull changes failed")
     throw error
   } finally {
@@ -92,6 +123,10 @@ function toSyncPushEvent(event: OutboxEvent): SyncPushEvent {
 export async function flushPendingOutbox(limit = 50) {
   if (!offlineConfig.isPhaseAtLeast(2)) {
     return { skipped: true, reason: "Offline phase < 2" }
+  }
+
+  if (serverSyncDisabled) {
+    return { skipped: true, reason: "Offline sync disabled on server" }
   }
 
   if (typeof window !== "undefined" && !window.navigator.onLine) {
@@ -123,6 +158,21 @@ export async function flushPendingOutbox(limit = 50) {
     useOfflineStore.getState().setDeadLetterCount(counts.deadLetter)
     throw error
   }
+
+  if (response?.skipped) {
+    await markOutboxEventsPending(clientEventIds, response?.reason || "Sync skipped")
+    const counts = await getOutboxCounts().catch(() => ({ pending: 0, deadLetter: 0, failed: 0 }))
+    useOfflineStore.getState().setPendingCount(counts.pending)
+    useOfflineStore.getState().setDeadLetterCount(counts.deadLetter)
+    return {
+      skipped: true,
+      reason: response?.reason || "Sync skipped",
+      flushed: 0,
+      pendingCount: counts.pending,
+      deadLetterCount: counts.deadLetter,
+    }
+  }
+
   const results: PushResult[] = Array.isArray(response?.results) ? response.results : []
 
   const acceptedStatuses = new Set(["accepted", "accepted_placeholder", "duplicate"])

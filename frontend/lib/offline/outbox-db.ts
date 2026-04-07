@@ -150,6 +150,38 @@ export async function markOutboxEventsSyncing(clientEventIds: string[]): Promise
   )
 }
 
+export async function markOutboxEventsPending(clientEventIds: string[], errorMessage?: string): Promise<void> {
+  if (!clientEventIds.length) return
+  const db = await openDb()
+
+  await Promise.all(
+    clientEventIds.map(
+      (clientEventId) =>
+        new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(OUTBOX_STORE, "readwrite")
+          const store = tx.objectStore(OUTBOX_STORE)
+          const index = store.index("client_event_id")
+          const getReq = index.get(clientEventId)
+          getReq.onsuccess = () => {
+            const record = getReq.result as OutboxEvent | undefined
+            if (!record) {
+              resolve()
+              return
+            }
+            record.status = "pending"
+            if (errorMessage) {
+              record.last_error = errorMessage
+            }
+            const putReq = store.put(record)
+            putReq.onsuccess = () => resolve()
+            putReq.onerror = () => reject(putReq.error || new Error("Failed to reset event to pending"))
+          }
+          getReq.onerror = () => reject(getReq.error || new Error("Failed to load outbox event"))
+        })
+    )
+  )
+}
+
 export async function markOutboxEventFailed(clientEventId: string, errorMessage: string): Promise<void> {
   const db = await openDb()
   return new Promise((resolve, reject) => {

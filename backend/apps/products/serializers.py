@@ -120,6 +120,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'sku', 'barcode', 'retail_price', 'price', 'cost', 'cost_price', 
             'wholesale_price', 'wholesale_enabled', 'minimum_wholesale_quantity', 
             'stock', 'low_stock_threshold', 'unit', 'image', 'is_active', 
+            'new_stock_override', 'new_stock_override_until',
             'is_low_stock', 'selling_units', 'selling_units_data',
             'track_expiration', 'manufacturing_date', 'expiry_date',
             'preparation_time', 'volume_ml', 'alcohol_percentage',

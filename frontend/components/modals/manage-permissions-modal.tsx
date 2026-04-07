@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, ShoppingCart, Home, Package, Settings, DollarSign, AlertCircle, Truck } from "lucide-react"
+import { Loader2, ShoppingCart, Home, Package, Settings, DollarSign, AlertCircle, Truck, Store } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { adminService } from "@/lib/services/adminService"
 
@@ -28,6 +28,7 @@ interface TenantPermissions {
   allow_inventory: boolean
   allow_office: boolean
   allow_settings: boolean
+  allow_storefront: boolean
 
   // Sales Features
   allow_sales_create: boolean
@@ -61,6 +62,12 @@ interface TenantPermissions {
   allow_settings_outlets: boolean
   allow_settings_integrations: boolean
   allow_settings_advanced: boolean
+
+  // Storefront Features
+  allow_storefront_sites: boolean
+  allow_storefront_orders: boolean
+  allow_storefront_reports: boolean
+  allow_storefront_settings: boolean
 
   // Distribution Features
   allow_distribution_routes: boolean
@@ -96,6 +103,7 @@ export function ManagePermissionsModal({
     allow_inventory: true,
     allow_office: true,
     allow_settings: true,
+    allow_storefront: true,
 
     // Sales Features
     allow_sales_create: true,
@@ -130,6 +138,12 @@ export function ManagePermissionsModal({
     allow_settings_integrations: true,
     allow_settings_advanced: true,
 
+    // Storefront Features
+    allow_storefront_sites: true,
+    allow_storefront_orders: true,
+    allow_storefront_reports: true,
+    allow_storefront_settings: true,
+
     // Distribution Features
     allow_distribution_routes: true,
     allow_distribution_drivers: true,
@@ -162,6 +176,11 @@ export function ManagePermissionsModal({
           allow_distribution_orders: data.allow_distribution_orders ?? true,
           allow_distribution_tracking: data.allow_distribution_tracking ?? true,
           allow_distribution_reports: data.allow_distribution_reports ?? true,
+          allow_storefront: data.allow_storefront ?? true,
+          allow_storefront_sites: data.allow_storefront_sites ?? true,
+          allow_storefront_orders: data.allow_storefront_orders ?? true,
+          allow_storefront_reports: data.allow_storefront_reports ?? true,
+          allow_storefront_settings: data.allow_storefront_settings ?? true,
         }))
       }
     } catch (error: any) {
@@ -236,6 +255,14 @@ export function ManagePermissionsModal({
           allow_settings_outlets: false,
           allow_settings_integrations: false,
           allow_settings_advanced: false,
+        }))
+      } else if (key === 'allow_storefront') {
+        setPermissions(prev => ({
+          ...prev,
+          allow_storefront_sites: false,
+          allow_storefront_orders: false,
+          allow_storefront_reports: false,
+          allow_storefront_settings: false,
         }))
       } else if (key === 'has_distribution') {
         setPermissions(prev => ({
@@ -430,6 +457,27 @@ export function ManagePermissionsModal({
               <Card>
                 <CardHeader>
                   <div className="flex items-center gap-2">
+                    <Store className="h-5 w-5" />
+                    <div>
+                      <CardTitle className="text-lg">Storefront</CardTitle>
+                      <CardDescription>Online store and WhatsApp commerce</CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <PermissionSwitch
+                    id="allow_storefront"
+                    label="Enable Storefront App"
+                    checked={permissions.allow_storefront}
+                    onChange={(checked) => handleToggle('allow_storefront', checked)}
+                    description="Master switch for storefront pages, orders, and settings"
+                  />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
                     <Truck className="h-5 w-5" />
                     <div>
                       <CardTitle className="text-lg">Distribution</CardTitle>
@@ -450,7 +498,7 @@ export function ManagePermissionsModal({
             </TabsContent>
 
             <TabsContent value="features" className="space-y-4 mt-4">
-              {!permissions.allow_sales && !permissions.allow_pos && !permissions.allow_inventory && !permissions.allow_office && !permissions.allow_settings && !permissions.has_distribution && (
+              {!permissions.allow_sales && !permissions.allow_pos && !permissions.allow_inventory && !permissions.allow_office && !permissions.allow_settings && !permissions.allow_storefront && !permissions.has_distribution && (
                 <Card className="border-amber-500">
                   <CardContent className="pt-6">
                     <div className="flex items-center gap-2 text-amber-600">
@@ -652,6 +700,49 @@ export function ManagePermissionsModal({
                       checked={permissions.allow_settings_advanced}
                       onChange={(checked) => handleToggle('allow_settings_advanced', checked)}
                       disabled={!permissions.allow_settings}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Storefront Features */}
+              {permissions.allow_storefront && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Storefront Features</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    <PermissionSwitch
+                      id="allow_storefront_sites"
+                      label="Sites"
+                      checked={permissions.allow_storefront_sites}
+                      onChange={(checked) => handleToggle('allow_storefront_sites', checked)}
+                      disabled={!permissions.allow_storefront}
+                      description="Create and manage storefront sites"
+                    />
+                    <PermissionSwitch
+                      id="allow_storefront_orders"
+                      label="Online Orders"
+                      checked={permissions.allow_storefront_orders}
+                      onChange={(checked) => handleToggle('allow_storefront_orders', checked)}
+                      disabled={!permissions.allow_storefront}
+                      description="View and manage storefront orders"
+                    />
+                    <PermissionSwitch
+                      id="allow_storefront_reports"
+                      label="Storefront Reports"
+                      checked={permissions.allow_storefront_reports}
+                      onChange={(checked) => handleToggle('allow_storefront_reports', checked)}
+                      disabled={!permissions.allow_storefront}
+                      description="Performance and conversion analytics"
+                    />
+                    <PermissionSwitch
+                      id="allow_storefront_settings"
+                      label="Storefront Settings"
+                      checked={permissions.allow_storefront_settings}
+                      onChange={(checked) => handleToggle('allow_storefront_settings', checked)}
+                      disabled={!permissions.allow_storefront}
+                      description="Branding, catalog rules, and domains"
                     />
                   </CardContent>
                 </Card>

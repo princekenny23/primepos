@@ -82,6 +82,7 @@ import { useTenant } from "@/contexts/tenant-context"
 import { useToast } from "@/components/ui/use-toast"
 import { customerService, type Customer } from "@/lib/services/customerService"
 import { cn } from "@/lib/utils"
+import { isDistributionEnabledForOutlet } from "@/lib/utils/tenant-permissions"
 
 // ==================== Types ====================
 
@@ -126,6 +127,7 @@ export function RestaurantPOS() {
   const { activeShift } = useShift()
   const { toast } = useToast()
   const outlet = tenantOutlet || currentOutlet
+  const showDeliveryAction = isDistributionEnabledForOutlet(user, outlet)
 
   // ==================== State ====================
 
@@ -958,6 +960,14 @@ export function RestaurantPOS() {
   }
 
   const requestRowActionConfirmation = (action: PosRowAction) => {
+    if (action === "delivery" && !showDeliveryAction) {
+      toast({
+        title: "Distribution inactive",
+        description: "Delivery is available only when distribution is active for this outlet.",
+        variant: "destructive",
+      })
+      return
+    }
     setPendingRowAction(action)
     setRowActionUsername(user?.email || "")
     setRowActionPassword("")
@@ -1016,6 +1026,14 @@ export function RestaurantPOS() {
         await handleVoidSale()
         break
       case "delivery":
+        if (!showDeliveryAction) {
+          toast({
+            title: "Distribution inactive",
+            description: "Delivery is available only when distribution is active for this outlet.",
+            variant: "destructive",
+          })
+          break
+        }
         await handleSendToDeliveries()
         break
       default:
@@ -1787,15 +1805,17 @@ export function RestaurantPOS() {
                 <Lock className="h-4 w-4" />
                 Close
               </Button>
-              <Button
-                size="sm"
-                className="h-9 gap-2 bg-sky-600 text-white hover:bg-sky-700"
-                onClick={() => requestRowActionConfirmation("delivery")}
-                disabled={cart.length === 0}
-              >
-                <Truck className="h-4 w-4" />
-                Delivery
-              </Button>
+              {showDeliveryAction && (
+                <Button
+                  size="sm"
+                  className="h-9 gap-2 bg-sky-600 text-white hover:bg-sky-700"
+                  onClick={() => requestRowActionConfirmation("delivery")}
+                  disabled={cart.length === 0}
+                >
+                  <Truck className="h-4 w-4" />
+                  Delivery
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -1880,7 +1900,7 @@ export function RestaurantPOS() {
 
           {/* Cart Items - SCROLLABLE */}
           <ScrollArea className="flex-1 min-h-0">
-            <div className="p-3">
+            <div className="min-h-0 p-3">
             {cart.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
                 <Wine className="h-10 w-10 mb-2 opacity-50" />

@@ -85,6 +85,16 @@ def api_root(request):
                 'push_batch': '/api/v1/sync/push-batch/',
                 'pull_changes': '/api/v1/sync/pull-changes/',
             },
+            'storefronts': {
+                'resolve': '/api/v1/storefronts/resolve/?host=',
+                'config': '/api/v1/storefronts/{slug}/config/',
+                'categories': '/api/v1/storefronts/{slug}/categories/',
+                'products': '/api/v1/storefronts/{slug}/products/',
+                'product_detail': '/api/v1/storefronts/{slug}/products/{id}/',
+                'checkout_validate': '/api/v1/storefronts/{slug}/checkout/validate/',
+                'checkout_create_order': '/api/v1/storefronts/{slug}/checkout/create-order/',
+                'order_detail': '/api/v1/storefronts/{slug}/orders/{public_order_ref}/',
+            },
         },
         'documentation': 'Visit /admin/ for Django admin interface',
     })

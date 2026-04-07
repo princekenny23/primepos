@@ -169,5 +169,17 @@ class TenantPermissionsSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "Cannot enable settings features when Settings app is disabled"
                 )
+
+        # Storefront features depend on allow_storefront
+        if any([
+            data.get('allow_storefront_sites'),
+            data.get('allow_storefront_orders'),
+            data.get('allow_storefront_reports'),
+            data.get('allow_storefront_settings')
+        ]):
+            if not data.get('allow_storefront', getattr(self.instance, 'allow_storefront', True)):
+                raise serializers.ValidationError(
+                    "Cannot enable storefront features when Storefront app is disabled"
+                )
         
         return data

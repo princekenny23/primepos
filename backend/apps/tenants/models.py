@@ -115,6 +115,7 @@ class TenantPermissions(models.Model):
     allow_inventory = models.BooleanField(default=True, help_text='Enable Inventory app')
     allow_office = models.BooleanField(default=True, help_text='Enable Office app')
     allow_settings = models.BooleanField(default=True, help_text='Enable Settings app')
+    allow_storefront = models.BooleanField(default=True, help_text='Enable Storefront app')
     
     # Sales features
     allow_sales_create = models.BooleanField(default=True, help_text='Create new sales')
@@ -148,6 +149,12 @@ class TenantPermissions(models.Model):
     allow_settings_outlets = models.BooleanField(default=True, help_text='Manage outlets')
     allow_settings_integrations = models.BooleanField(default=True, help_text='Third-party integrations')
     allow_settings_advanced = models.BooleanField(default=True, help_text='Advanced settings')
+
+    # Storefront features
+    allow_storefront_sites = models.BooleanField(default=True, help_text='Manage storefront sites')
+    allow_storefront_orders = models.BooleanField(default=True, help_text='Manage storefront orders')
+    allow_storefront_reports = models.BooleanField(default=True, help_text='View storefront reports')
+    allow_storefront_settings = models.BooleanField(default=True, help_text='Manage storefront settings')
     
     # Metadata
     created_at = models.DateTimeField(auto_now_add=True)

@@ -100,11 +100,12 @@ export class ApiClient {
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`
     const isAuthEndpoint = endpoint.startsWith('/auth/')
+    const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData
     
     const config: RequestInit = {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(isFormDataBody ? {} : { "Content-Type": "application/json" }),
         ...options.headers,
       },
     }
@@ -504,21 +505,33 @@ export class ApiClient {
   async post<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: "POST",
-      body: data ? JSON.stringify(data) : undefined,
+      body: data
+        ? (typeof FormData !== "undefined" && data instanceof FormData
+            ? data
+            : JSON.stringify(data))
+        : undefined,
     })
   }
 
   async put<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: "PUT",
-      body: data ? JSON.stringify(data) : undefined,
+      body: data
+        ? (typeof FormData !== "undefined" && data instanceof FormData
+            ? data
+            : JSON.stringify(data))
+        : undefined,
     })
   }
 
   async patch<T>(endpoint: string, data?: unknown): Promise<T> {
     return this.request<T>(endpoint, {
       method: "PATCH",
-      body: data ? JSON.stringify(data) : undefined,
+      body: data
+        ? (typeof FormData !== "undefined" && data instanceof FormData
+            ? data
+            : JSON.stringify(data))
+        : undefined,
     })
   }
 

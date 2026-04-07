@@ -242,6 +242,29 @@ function transformProductToBackend(frontendProduct: Partial<Product>): any {
   return data
 }
 
+function buildProductRequestBody(frontendProduct: Partial<Product>): Record<string, any> | FormData {
+  const backendData = transformProductToBackend(frontendProduct)
+  const imageValue = (frontendProduct as any).image
+  const hasImageFile = typeof File !== "undefined" && imageValue instanceof File
+
+  if (!hasImageFile) {
+    return backendData
+  }
+
+  const formData = new FormData()
+  Object.entries(backendData).forEach(([key, value]) => {
+    if (value === undefined) return
+    if (value === null) {
+      formData.append(key, "")
+      return
+    }
+    formData.append(key, String(value))
+  })
+
+  formData.append("image", imageValue)
+  return formData
+}
+
 // Transform backend category to frontend format
 function transformCategory(backendCategory: any): Category {
   return {
@@ -326,24 +349,23 @@ export const productService = {
   },
 
   async create(data: Partial<Product>): Promise<Product> {
-    const backendData = transformProductToBackend(data)
-    console.log("Creating product via real API:", { endpoint: apiEndpoints.products.create, data: backendData })
+    const requestBody = buildProductRequestBody(data)
+    console.log("Creating product via real API:", { endpoint: apiEndpoints.products.create })
     try {
-      const response = await api.post<any>(apiEndpoints.products.create, backendData)
+      const response = await api.post<any>(apiEndpoints.products.create, requestBody)
       console.log("Product created successfully:", response)
       return transformProduct(response)
     } catch (error: any) {
       console.error("Product creation error:", error)
-      console.error("Backend data sent:", backendData)
       throw error
     }
   },
 
   async update(id: string, data: Partial<Product>): Promise<Product> {
-    const backendData = transformProductToBackend(data)
-    console.log("Updating product via real API:", { id, endpoint: apiEndpoints.products.update(id), data: backendData })
+    const requestBody = buildProductRequestBody(data)
+    console.log("Updating product via real API:", { id, endpoint: apiEndpoints.products.update(id) })
     try {
-      const response = await api.put<any>(apiEndpoints.products.update(id), backendData)
+      const response = await api.put<any>(apiEndpoints.products.update(id), requestBody)
       console.log("Product updated successfully:", response)
       return transformProduct(response)
     } catch (error: any) {

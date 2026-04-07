@@ -53,6 +53,8 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
   const [isLoading, setIsLoading] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [activeTab, setActiveTab] = useState<string>(initialTab)
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null)
+  const [selectedImagePreviewUrl, setSelectedImagePreviewUrl] = useState<string>("")
 
   // Determine business type
   const businessType = currentBusiness?.type || ""
@@ -152,6 +154,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         isActive: product.isActive !== undefined ? product.isActive : true,
         image: product.image || "",
       })
+      setSelectedImageFile(null)
 
       setUnits(product.units || product.selling_units || [])
 
@@ -198,6 +201,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         isActive: true,
         image: "",
       })
+      setSelectedImageFile(null)
       setUnits([])
       setPricingForm({
         cost: "",
@@ -231,6 +235,33 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
     setUnitForm({ name: "", conversion_factor: "1", retail_price: "", wholesale_price: "" })
     setEditingUnitIdx(null)
   }, [open, product, initialBarcode])
+
+  useEffect(() => {
+    if (!selectedImageFile) {
+      setSelectedImagePreviewUrl("")
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(selectedImageFile)
+    setSelectedImagePreviewUrl(objectUrl)
+
+    return () => {
+      URL.revokeObjectURL(objectUrl)
+    }
+  }, [selectedImageFile])
+
+  const resolveImageUrl = (url?: string) => {
+    if (!url) return ""
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:")) return url
+    if (url.startsWith("//")) return `https:${url}`
+    if (url.startsWith("/")) {
+      if (typeof window !== "undefined") {
+        return `${window.location.origin}${url}`
+      }
+      return url
+    }
+    return url
+  }
 
   // Handle add/edit unit
   const handleAddUnit = useCallback(() => {
@@ -340,7 +371,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         low_stock_threshold: parseInt(stockForm.low_stock_threshold) || 0,
         outletId: outletId,
         stock: parseInt(stockForm.opening_stock) || 0,
-        image: basicForm.image || undefined,
+        image: selectedImageFile || undefined,
         track_expiration: expiryForm.track_expiration,
         manufacturing_date: expiryForm.manufacturing_date || undefined,
         expiry_date: expiryForm.expiry_date || undefined,
@@ -494,6 +525,51 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                   placeholder="Product details"
                   className="w-full border rounded px-3 py-2 min-h-20"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="image">Product Image</Label>
+                <Input
+                  id="image"
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] || null
+                    setSelectedImageFile(file)
+                  }}
+                />
+                {selectedImagePreviewUrl ? (
+                  <div className="overflow-hidden rounded border">
+                    <img
+                      src={selectedImagePreviewUrl}
+                      alt="Selected product preview"
+                      className="h-40 w-full object-cover"
+                    />
+                  </div>
+                ) : basicForm.image ? (
+                  <div className="overflow-hidden rounded border">
+                    <img
+                      src={resolveImageUrl(basicForm.image)}
+                      alt="Current product"
+                      className="h-40 w-full object-cover"
+                    />
+                  </div>
+                ) : null}
+                {selectedImageFile ? (
+                  <div className="flex items-center justify-between rounded border p-2 text-sm">
+                    <span className="truncate pr-2">Selected: {selectedImageFile.name}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedImageFile(null)}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ) : basicForm.image ? (
+                  <p className="text-xs text-gray-500">Existing image will be kept unless a new file is selected.</p>
+                ) : null}
               </div>
 
               <div className="flex items-center space-x-2">

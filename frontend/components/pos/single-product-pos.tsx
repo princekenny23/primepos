@@ -14,6 +14,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card"
 import { usePOSStore } from "@/stores/posStore"
 import { useBusinessStore } from "@/stores/businessStore"
+import { useAuthStore } from "@/stores/authStore"
 import { productService } from "@/lib/services/productService"
 import { formatCurrency } from "@/lib/utils/currency"
 import { PaymentPopup } from "@/components/pos/payment-popup"
@@ -29,6 +30,7 @@ import { distributionService } from "@/lib/services/distributionService"
 import { useToast } from "@/components/ui/use-toast"
 import type { Customer } from "@/lib/services/customerService"
 import type { Product } from "@/lib/types"
+import { isDistributionEnabledForOutlet } from "@/lib/utils/tenant-permissions"
 import { Package, Plus, Minus, ShoppingCart, X, User, Tag, RotateCcw, Lock, Truck } from "lucide-react"
 
 interface ProductUnit {
@@ -41,6 +43,7 @@ interface ProductUnit {
 }
 
 export function SingleProductPOS() {
+  const { user } = useAuthStore()
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { cart, addToCart, updateCartItem, removeFromCart, clearCart } = usePOSStore()
   const { activeShift } = useShift()
@@ -59,6 +62,7 @@ export function SingleProductPOS() {
   // Receipt preview removed from POS terminal
   const [products, setProducts] = useState<Product[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
+  const showDeliveryAction = isDistributionEnabledForOutlet(user, currentOutlet)
 
   // Load products on mount
   useEffect(() => {
@@ -260,6 +264,15 @@ export function SingleProductPOS() {
   }
 
   const handleDelivery = async () => {
+    if (!showDeliveryAction) {
+      toast({
+        title: "Distribution inactive",
+        description: "Delivery is available only when distribution is active for this outlet.",
+        variant: "destructive",
+      })
+      return
+    }
+
     if (!currentBusiness || !currentOutlet || !activeShift) {
       toast({
         title: "Error",
@@ -715,7 +728,7 @@ export function SingleProductPOS() {
         </div>
 
         {/* Cart Sidebar */}
-        <div className="flex-1 lg:flex-none w-full lg:w-[520px] border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
+        <div className="flex-1 lg:flex-none w-full lg:w-[520px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
           <div className="p-4 border-b">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <ShoppingCart className="h-5 w-5" />
@@ -723,7 +736,7 @@ export function SingleProductPOS() {
             </h2>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">
             {cart.length === 0 ? (
               <div className="text-center text-muted-foreground py-8">
                 <ShoppingCart className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -818,17 +831,19 @@ export function SingleProductPOS() {
                 <Lock className="h-4 w-4" />
                 <span className="text-xs">Close</span>
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-2 text-sky-700"
-                disabled={cart.length === 0}
-                title="Delivery sale"
-                onClick={handleDelivery}
-              >
-                <Truck className="h-4 w-4" />
-                <span className="text-xs">Delivery</span>
-              </Button>
+              {showDeliveryAction && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-2 text-sky-700"
+                  disabled={cart.length === 0}
+                  title="Delivery sale"
+                  onClick={handleDelivery}
+                >
+                  <Truck className="h-4 w-4" />
+                  <span className="text-xs">Delivery</span>
+                </Button>
+              )}
             </div>
           </div>
 

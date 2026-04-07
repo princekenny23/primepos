@@ -75,6 +75,7 @@ import type { Product } from "@/lib/types"
 import { useI18n } from "@/contexts/i18n-context"
 import { ProductGrid } from "@/components/pos/product-grid-enhanced"
 import { CartItem as CartItemDisplay, CartSummary } from "@/components/pos/cart-item"
+import { isDistributionEnabledForOutlet } from "@/lib/utils/tenant-permissions"
 // Printing helper removed - reverted to receipt preview flow
 
 type SaleType = "retail" | "wholesale"
@@ -173,6 +174,7 @@ export function RetailPOS() {
   // Focus search on mount and after actions
   const searchInputRef = useRef<HTMLInputElement>(null)
   const paymentCloseByConfirmRef = useRef(false)
+  const showDeliveryAction = isDistributionEnabledForOutlet(user, currentOutlet)
 
   
 
@@ -1072,6 +1074,14 @@ export function RetailPOS() {
         await handleVoidSale()
         break
       case "delivery":
+        if (!showDeliveryAction) {
+          toast({
+            title: "Distribution inactive",
+            description: "Delivery is available only when distribution is active for this outlet.",
+            variant: "destructive",
+          })
+          break
+        }
         await handleDeliveryCheckout()
         break
       default:
@@ -1223,14 +1233,16 @@ export function RetailPOS() {
                 <Lock className="h-4 w-4" />
                 Close
               </Button>
-              <Button
-                size="sm"
-                className="h-9 gap-1 px-2.5 text-xs bg-sky-600 text-white hover:bg-sky-700 shrink-0"
-                onClick={() => requestRowActionConfirmation("delivery")}
-              >
-                <Truck className="h-4 w-4" />
-                Delivery
-              </Button>
+              {showDeliveryAction && (
+                <Button
+                  size="sm"
+                  className="h-9 gap-1 px-2.5 text-xs bg-sky-600 text-white hover:bg-sky-700 shrink-0"
+                  onClick={() => requestRowActionConfirmation("delivery")}
+                >
+                  <Truck className="h-4 w-4" />
+                  Delivery
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -1583,7 +1595,7 @@ export function RetailPOS() {
           </div>
 
           {/* Cart Items Table */}
-          <div className="flex-1 overflow-y-auto border-b">
+          <div className="min-h-0 flex-1 overflow-y-auto border-b">
             {cart.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
                 Cart is empty

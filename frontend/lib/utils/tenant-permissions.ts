@@ -24,6 +24,38 @@ export function hasDistributionAccess(user: User | null | undefined): boolean {
   return false
 }
 
+type OutletDistributionLike = {
+  distributionActive?: boolean
+  settings?: Record<string, any>
+}
+
+const isOutletDistributionActive = (outlet?: OutletDistributionLike | null): boolean => {
+  if (!outlet) return true
+
+  if (typeof outlet.distributionActive === "boolean") {
+    return outlet.distributionActive
+  }
+
+  const settings = outlet.settings
+  if (settings && typeof settings === "object") {
+    const fromSettings =
+      (settings as any).distribution_active ??
+      (settings as any).distributionActive
+    if (typeof fromSettings === "boolean") {
+      return fromSettings
+    }
+  }
+
+  return true
+}
+
+export function isDistributionEnabledForOutlet(
+  user: User | null | undefined,
+  outlet?: OutletDistributionLike | null
+): boolean {
+  return hasDistributionAccess(user) && isOutletDistributionActive(outlet)
+}
+
 export function isTenantFeatureEnabled(
   user: User | null | undefined,
   permissionKey: TenantPermissionKey
@@ -93,6 +125,14 @@ export function canAccessTenantPath(user: User | null | undefined, pathname: str
 
   if (pathname.startsWith("/dashboard/distribution")) {
     if (!hasDistributionAccess(user)) return false
+  }
+
+  if (pathname.startsWith("/dashboard/storefront")) {
+    if (!isTenantFeatureEnabled(user, "allow_storefront")) return false
+    if (pathname.startsWith("/dashboard/storefront/sites") && !isTenantFeatureEnabled(user, "allow_storefront_sites")) return false
+    if (pathname.startsWith("/dashboard/storefront/orders") && !isTenantFeatureEnabled(user, "allow_storefront_orders")) return false
+    if (pathname.startsWith("/dashboard/storefront/reports") && !isTenantFeatureEnabled(user, "allow_storefront_reports")) return false
+    if (pathname.startsWith("/dashboard/storefront/settings") && !isTenantFeatureEnabled(user, "allow_storefront_settings")) return false
   }
 
   if (pathname.startsWith("/dashboard/office")) {

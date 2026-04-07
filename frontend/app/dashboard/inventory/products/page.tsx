@@ -115,6 +115,18 @@ export default function ProductsPage() {
   const isWholesaleRetail = outletSegment === "retail"
   const isBar = outletSegment === "bar"
   const isRestaurant = outletSegment === "restaurant"
+
+  const resolveProductImageUrl = useCallback((rawUrl?: string) => {
+    if (!rawUrl) return ""
+    if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://") || rawUrl.startsWith("data:")) return rawUrl
+    if (rawUrl.startsWith("//")) return `https:${rawUrl}`
+    if (rawUrl.startsWith("/")) {
+      const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+      const origin = base.replace(/\/api\/v\d+\/?$/, "")
+      return `${origin}${rawUrl}`
+    }
+    return rawUrl
+  }, [])
   
   // Helper function to parse business-specific fields from description
   const parseBusinessFields = (product: any) => {
@@ -568,12 +580,26 @@ export default function ProductsPage() {
                   return (
                     <TableRow key={product.id}>
                       <TableCell>
-                        <Link 
-                          href={`/dashboard/inventory/products/${product.id}`}
-                          className="font-medium hover:text-primary"
-                        >
-                          {product.name}
-                        </Link>
+                        <div className="flex items-center gap-3">
+                          {product.image ? (
+                            <img
+                              src={resolveProductImageUrl(product.image)}
+                              alt={product.name}
+                              className="h-10 w-10 rounded-md border object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-gray-50 text-[10px] text-gray-500">
+                              N/A
+                            </div>
+                          )}
+                          <Link 
+                            href={`/dashboard/inventory/products/${product.id}`}
+                            className="font-medium hover:text-primary"
+                          >
+                            {product.name}
+                          </Link>
+                        </div>
                       </TableCell>
                       <TableCell>{product.sku || "N/A"}</TableCell>
                       <TableCell>{categoryName}</TableCell>
@@ -725,12 +751,26 @@ export default function ProductsPage() {
                         return (
                           <TableRow key={product.id}>
                             <TableCell>
-                              <Link 
-                                href={`/dashboard/inventory/products/${product.id}`}
-                                className="font-medium hover:text-primary"
-                              >
-                                {product.name}
-                              </Link>
+                              <div className="flex items-center gap-3">
+                                {product.image ? (
+                                  <img
+                                    src={resolveProductImageUrl(product.image)}
+                                    alt={product.name}
+                                    className="h-10 w-10 rounded-md border object-cover"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-gray-50 text-[10px] text-gray-500">
+                                    N/A
+                                  </div>
+                                )}
+                                <Link 
+                                  href={`/dashboard/inventory/products/${product.id}`}
+                                  className="font-medium hover:text-primary"
+                                >
+                                  {product.name}
+                                </Link>
+                              </div>
                             </TableCell>
                             <TableCell>{product.sku || "N/A"}</TableCell>
                             <TableCell>{categoryName}</TableCell>
@@ -831,12 +871,26 @@ export default function ProductsPage() {
                             return (
                               <TableRow key={product.id} className="border-gray-300">
                             <TableCell>
-                              <Link 
-                                href={`/dashboard/inventory/products/${product.id}`}
-                                className="font-medium hover:text-primary"
-                              >
-                                {product.name}
-                              </Link>
+                              <div className="flex items-center gap-3">
+                                {product.image ? (
+                                  <img
+                                    src={resolveProductImageUrl(product.image)}
+                                    alt={product.name}
+                                    className="h-10 w-10 rounded-md border object-cover"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="flex h-10 w-10 items-center justify-center rounded-md border bg-gray-50 text-[10px] text-gray-500">
+                                    N/A
+                                  </div>
+                                )}
+                                <Link 
+                                  href={`/dashboard/inventory/products/${product.id}`}
+                                  className="font-medium hover:text-primary"
+                                >
+                                  {product.name}
+                                </Link>
+                              </div>
                             </TableCell>
                             <TableCell>{product.sku || "N/A"}</TableCell>
                             <TableCell>{categoryName}</TableCell>

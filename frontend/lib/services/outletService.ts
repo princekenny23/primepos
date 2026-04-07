@@ -32,6 +32,10 @@ export const outletService = {
         businessType: normalizeOutletBusinessType(outlet.business_type || outlet.businessType),
         businessTypeDisplay: outlet.business_type_display || outlet.businessTypeDisplay || getOutletBusinessTypeDisplay(outlet.business_type || outlet.businessType),
         settings: outlet.settings || {},
+        distributionActive:
+          outlet.distribution_active !== undefined
+            ? Boolean(outlet.distribution_active)
+            : (outlet.distributionActive !== undefined ? Boolean(outlet.distributionActive) : true),
         isActive: outlet.is_active !== undefined ? outlet.is_active : (outlet.isActive !== undefined ? outlet.isActive : true),
         createdAt: outlet.created_at || outlet.createdAt || new Date().toISOString(),
       } as Outlet
@@ -56,6 +60,10 @@ export const outletService = {
       businessType: normalizeOutletBusinessType(response.business_type || response.businessType),
       businessTypeDisplay: response.business_type_display || response.businessTypeDisplay || getOutletBusinessTypeDisplay(response.business_type || response.businessType),
       settings: response.settings || {},
+      distributionActive:
+        response.distribution_active !== undefined
+          ? Boolean(response.distribution_active)
+          : (response.distributionActive !== undefined ? Boolean(response.distributionActive) : true),
       isActive: response.is_active !== undefined ? response.is_active : (response.isActive !== undefined ? response.isActive : true),
       createdAt: response.created_at || response.createdAt || new Date().toISOString(),
     } as Outlet
@@ -89,6 +97,7 @@ export const outletService = {
       email: data.email?.trim() || "",
       business_type: normalizeOutletBusinessType(data.businessType),
       settings: data.settings || {},
+      distribution_active: data.distributionActive !== undefined ? data.distributionActive : true,
       is_active: data.isActive !== undefined ? data.isActive : true,
     }
     
@@ -119,6 +128,10 @@ export const outletService = {
         businessType: normalizeOutletBusinessType(response.business_type || response.businessType || backendData.business_type),
         businessTypeDisplay: response.business_type_display || response.businessTypeDisplay || getOutletBusinessTypeDisplay(response.business_type || response.businessType || backendData.business_type),
         settings: response.settings || backendData.settings || {},
+        distributionActive:
+          response.distribution_active !== undefined
+            ? Boolean(response.distribution_active)
+            : (response.distributionActive !== undefined ? Boolean(response.distributionActive) : Boolean(backendData.distribution_active)),
         isActive: response.is_active !== undefined ? response.is_active : (response.isActive !== undefined ? response.isActive : true),
         createdAt: response.created_at || response.createdAt || new Date().toISOString(),
       } as Outlet
@@ -159,6 +172,9 @@ export const outletService = {
     if (data.settings !== undefined) {
       backendData.settings = data.settings
     }
+    if (data.distributionActive !== undefined) {
+      backendData.distribution_active = data.distributionActive
+    }
     // Always include is_active if provided, even if false
     if (data.isActive !== undefined) {
       backendData.is_active = data.isActive
@@ -187,6 +203,12 @@ export const outletService = {
         businessType: normalizeOutletBusinessType(response.business_type || response.businessType || backendData.business_type),
         businessTypeDisplay: response.business_type_display || response.businessTypeDisplay || getOutletBusinessTypeDisplay(response.business_type || response.businessType || backendData.business_type),
         settings: response.settings || backendData.settings || {},
+        distributionActive:
+          response.distribution_active !== undefined
+            ? Boolean(response.distribution_active)
+            : (response.distributionActive !== undefined
+              ? Boolean(response.distributionActive)
+              : (backendData.distribution_active !== undefined ? Boolean(backendData.distribution_active) : true)),
         isActive: response.is_active !== undefined ? response.is_active : (response.isActive !== undefined ? response.isActive : true),
         createdAt: response.created_at || response.createdAt || new Date().toISOString(),
       } as Outlet

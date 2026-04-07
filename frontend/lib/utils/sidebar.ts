@@ -30,6 +30,7 @@ import {
   List,
   UserCog,
   Package2,
+  Store,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 
@@ -47,6 +48,7 @@ export const fullNavigation: NavigationItem[] = [
   { name: "Sales / POS", href: "/dashboard/pos", icon: Monitor, permission: "pos" },
   { name: "Inventory", href: "/dashboard/inventory", icon: Package, permission: "inventory" },
   { name: "Distribution", href: "/dashboard/distribution", icon: Package2, permission: "distribution" },
+  { name: "Storefront", href: "/dashboard/storefront", icon: Store, permission: "office" },
   { name: "Office", href: "/dashboard/office", icon: Building2, permission: "office" },
   { name: "Settings", href: "/dashboard/settings", icon: Settings, permission: "settings" },
 ]

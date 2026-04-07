@@ -29,6 +29,10 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     
+    # Cloudinary
+    'cloudinary',
+    'cloudinary_storage',
+
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt',
@@ -57,6 +61,7 @@ INSTALLED_APPS = [
     'apps.bar',
     'apps.distribution',
     'apps.sync',
+    'apps.storefronts',
     'apps.admin.apps.AdminConfig',  # Use explicit config to avoid label conflict
 ]
 
@@ -160,6 +165,14 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# Cloudinary Storage
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': config('CLOUDINARY_CLOUD_NAME', default=''),
+    'API_KEY': config('CLOUDINARY_API_KEY', default=''),
+    'API_SECRET': config('CLOUDINARY_API_SECRET', default=''),
+}
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
