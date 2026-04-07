@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageCard } from "@/components/layouts/page-card"
 import { PageHeader } from "@/components/layouts/page-header"
@@ -131,11 +130,6 @@ const EMPTY_FORM: StorefrontForm = {
 export default function StorefrontSettingsPage() {
   const { toast } = useToast()
   const { outlets } = useTenant()
-  const searchParams = useSearchParams()
-  const requestedTab = searchParams.get("tab")
-  const initialTab = requestedTab === "rules" || requestedTab === "content" || requestedTab === "general"
-    ? requestedTab
-    : "general"
 
   const [storefronts, setStorefronts] = useState<StorefrontAdmin[]>([])
   const [selectedStorefrontId, setSelectedStorefrontId] = useState<string>("new")
@@ -153,7 +147,7 @@ export default function StorefrontSettingsPage() {
   const [products, setProducts] = useState<Array<{ id: number; name: string; category_name: string }>>([])
   const [updatingProductId, setUpdatingProductId] = useState<number | null>(null)
   const [selectedThemePreset, setSelectedThemePreset] = useState<string>("custom")
-  const [activeTab, setActiveTab] = useState(initialTab)
+  const [activeTab, setActiveTab] = useState("general")
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoFileName, setLogoFileName] = useState<string>("")
   const [detectedPalette, setDetectedPalette] = useState<string[]>([])
@@ -218,7 +212,8 @@ export default function StorefrontSettingsPage() {
       const list = await storefrontService.listStorefronts()
       setStorefronts(list)
 
-      const requestedId = Number(searchParams.get("site") || "")
+      const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null
+      const requestedId = Number(params?.get("site") || "")
       const requestedSite = requestedId > 0 ? list.find((item) => item.id === requestedId) : undefined
       const currentId = Number(selectedStorefrontId)
       const currentSite = currentId > 0 ? list.find((item) => item.id === currentId) : undefined
@@ -236,7 +231,7 @@ export default function StorefrontSettingsPage() {
     } finally {
       setLoading(false)
     }
-  }, [applyStorefrontToForm, searchParams, toast])
+  }, [applyStorefrontToForm, selectedStorefrontId, toast])
 
   const loadRules = useCallback(async (sfId: number) => {
     setRulesLoading(true)
@@ -268,6 +263,15 @@ export default function StorefrontSettingsPage() {
       )
     } catch {
       // non-fatal for page startup
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const requestedTab = params.get("tab")
+    if (requestedTab === "rules" || requestedTab === "content" || requestedTab === "general") {
+      setActiveTab(requestedTab)
     }
   }, [])
 

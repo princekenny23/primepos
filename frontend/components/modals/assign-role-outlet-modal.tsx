@@ -170,7 +170,7 @@ export function AssignRoleOutletModal({ open, onOpenChange, staff, onSuccess }: 
                   </SelectItem>
                 ))}
               </SelectContent>
-                {roles.map((role) => (
+            </Select>
           </div>
 
           <div className="space-y-2">
