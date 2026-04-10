@@ -16,7 +16,7 @@ from io import BytesIO
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 import base64
@@ -161,7 +161,6 @@ class ReceiptService:
             spaceAfter=12,
         )
         
-        # Header
         elements.append(Paragraph(business_name.upper(), title_style))
         
         if outlet_name:
@@ -497,11 +496,11 @@ class ReceiptService:
             if first or last:
                 return f"{first} {last}".strip()
 
-        if hasattr(user, 'email') and user.email:
-            return user.email
-
         if hasattr(user, 'username') and user.username:
             return user.username
+
+        if hasattr(user, 'email') and user.email:
+            return user.email
 
         return ""
 

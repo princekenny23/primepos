@@ -90,6 +90,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const [switchPassword, setSwitchPassword] = useState("")
   const [showSwitchPassword, setShowSwitchPassword] = useState(false)
   const [isVerifyingSwitch, setIsVerifyingSwitch] = useState(false)
+  const [showOutletPermDenied, setShowOutletPermDenied] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
   const { currentTenant, currentOutlet, outlets, switchOutlet, isLoading } = useTenant()
@@ -154,6 +155,10 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
 
   const requestOutletSwitch = (outletId: string) => {
     if (!outletId || outletId === String(currentOutlet?.id || "")) return
+    if (!hasPermission("switch_outlet")) {
+      setShowOutletPermDenied(true)
+      return
+    }
     setPendingOutletId(outletId)
     setSwitchUsername(user?.email || "")
     setSwitchPassword("")
@@ -221,23 +226,24 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const isAdminRoute = pathname?.startsWith("/admin")
   const isPosRoute = pathname?.startsWith("/pos/")
   const displayTenantName = currentTenant?.name || currentBusiness?.name || ""
+  const displayLogo = "/icon.jpg"
   const displayOutlet = currentOutlet || businessOutlet
   const displayOutlets = outlets.length > 0 ? outlets : businessOutlets
 
   const hasTenantAppAccess = (itemName: string) => {
-    if (itemName === "Sales") return isTenantFeatureEnabled(user, "allow_sales")
-    if (itemName === "Sales / POS") return isTenantFeatureEnabled(user, "allow_pos")
+    if (itemName === "Sales") return isTenantFeatureEnabled(user, "allow_sales", displayOutlet as any)
+    if (itemName === "Sales / POS") return isTenantFeatureEnabled(user, "allow_pos", displayOutlet as any)
     if (itemName === "Restaurant") {
-      return isTenantFeatureEnabled(user, "allow_pos") && isTenantFeatureEnabled(user, "allow_pos_restaurant")
+      return isTenantFeatureEnabled(user, "allow_pos", displayOutlet as any) && isTenantFeatureEnabled(user, "allow_pos_restaurant", displayOutlet as any)
     }
     if (itemName === "Bar") {
-      return isTenantFeatureEnabled(user, "allow_pos") && isTenantFeatureEnabled(user, "allow_pos_bar")
+      return isTenantFeatureEnabled(user, "allow_pos", displayOutlet as any) && isTenantFeatureEnabled(user, "allow_pos_bar", displayOutlet as any)
     }
-    if (itemName === "Inventory") return isTenantFeatureEnabled(user, "allow_inventory")
-    if (itemName === "Distribution") return hasDistributionAccess(user)
-    if (itemName === "Storefront") return isTenantFeatureEnabled(user, "allow_storefront")
-    if (itemName === "Office") return isTenantFeatureEnabled(user, "allow_office")
-    if (itemName === "Settings") return isTenantFeatureEnabled(user, "allow_settings")
+    if (itemName === "Inventory") return isTenantFeatureEnabled(user, "allow_inventory", displayOutlet as any)
+    if (itemName === "Distribution") return hasDistributionAccess(user) && isTenantFeatureEnabled(user, "has_distribution", displayOutlet as any)
+    if (itemName === "Storefront") return isTenantFeatureEnabled(user, "allow_storefront", displayOutlet as any)
+    if (itemName === "Office") return isTenantFeatureEnabled(user, "allow_office", displayOutlet as any)
+    if (itemName === "Settings") return isTenantFeatureEnabled(user, "allow_settings", displayOutlet as any)
 
     return true
   }
@@ -326,7 +332,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
       return
     }
 
-    if (canAccessTenantPath(user, pathname)) {
+    if (canAccessTenantPath(user, pathname, displayOutlet as any)) {
       permissionRedirectRef.current = false
       return
     }
@@ -338,10 +344,10 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
         router.replace(fallbackRoute)
       }
     }
-  }, [firstAllowedDashboardRoute, hasPermission, isAdminRoute, pathname, router, user])
+  }, [displayOutlet, firstAllowedDashboardRoute, hasPermission, isAdminRoute, pathname, router, user])
 
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className={cn("flex bg-background", isPosRoute ? "h-screen overflow-hidden" : "min-h-screen")}>
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div
@@ -363,11 +369,15 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
             <div className="flex items-center justify-between lg:justify-start">
               <Link href="/dashboard" className="flex items-center justify-start w-full">
                 <img
-                  src="/icon.jpg"
+                  src={displayLogo}
                   alt="PrimePOS"
                   width={40}
                   height={40}
                   className="h-10 w-10 rounded-md object-cover"
+                  onError={(e) => {
+                    if (e.currentTarget.src.endsWith("/icon.jpg")) return
+                    e.currentTarget.src = "/icon.jpg"
+                  }}
                 />
               </Link>
               <Button
@@ -633,6 +643,22 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
             </Button>
             <Button type="button" onClick={confirmOutletSwitch} disabled={isVerifyingSwitch}>
               {isVerifyingSwitch ? "Verifying..." : "Verify & Switch"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showOutletPermDenied} onOpenChange={setShowOutletPermDenied}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Permission Denied</DialogTitle>
+            <DialogDescription>
+              You do not have permission to switch the active outlet. Please contact your manager.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" onClick={() => setShowOutletPermDenied(false)}>
+              OK
             </Button>
           </DialogFooter>
         </DialogContent>

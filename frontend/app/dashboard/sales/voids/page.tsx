@@ -45,6 +45,7 @@ import type { Sale } from "@/lib/types"
 interface SaleDetail extends Sale {
   payment_method?: string
   receipt_number?: string
+  void_reason?: string
   created_at?: string
   _raw?: any
   customer?: {
@@ -154,6 +155,7 @@ export default function VoidsPage() {
 
         saleDetail.receipt_number = sale._raw?.receipt_number || sale.receipt_number
         saleDetail.payment_method = sale._raw?.payment_method || sale.payment_method || sale.paymentMethod
+        saleDetail.void_reason = sale._raw?.void_reason || sale.void_reason || ""
 
         return saleDetail
       })
@@ -377,6 +379,7 @@ export default function VoidsPage() {
                   <TableHead className="text-gray-900 font-semibold">User</TableHead>
                   <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                   <TableHead className="text-gray-900 font-semibold">Payment Method</TableHead>
+                  <TableHead className="text-gray-900 font-semibold">Void Reason</TableHead>
                   <TableHead className="text-gray-900 font-semibold">Amount</TableHead>
                   <TableHead className="text-gray-900 font-semibold">Status</TableHead>
                   <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
@@ -398,6 +401,9 @@ export default function VoidsPage() {
                       <Badge variant="outline" className="capitalize border-gray-300">
                         {sale._raw?.payment_method || sale.payment_method || sale.paymentMethod || "cash"}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="max-w-[220px] truncate" title={sale._raw?.void_reason || sale.void_reason || ""}>
+                      {sale._raw?.void_reason || sale.void_reason || "-"}
                     </TableCell>
                     <TableCell>
                       {currentBusiness?.currencySymbol || "MWK"} {sale.total.toFixed(2)}

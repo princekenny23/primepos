@@ -1,16 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageCard } from "@/components/layouts/page-card"
-import { PageHeader } from "@/components/layouts/page-header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
-import { FilterableTabs, TabsContent } from "@/components/ui/filterable-tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Copy, Check, Loader2, Wand2 } from "lucide-react"
 import { storefrontService, type StorefrontAdmin, type CatalogRule } from "@/lib/services/storefrontService"
@@ -127,9 +127,14 @@ const EMPTY_FORM: StorefrontForm = {
   },
 }
 
-export default function StorefrontSettingsPage() {
+function StorefrontSettingsPageContent() {
   const { toast } = useToast()
   const { outlets } = useTenant()
+  const searchParams = useSearchParams()
+  const requestedTab = searchParams.get("tab")
+  const initialTab = requestedTab === "rules" || requestedTab === "content" || requestedTab === "general"
+    ? requestedTab
+    : "general"
 
   const [storefronts, setStorefronts] = useState<StorefrontAdmin[]>([])
   const [selectedStorefrontId, setSelectedStorefrontId] = useState<string>("new")
@@ -147,7 +152,7 @@ export default function StorefrontSettingsPage() {
   const [products, setProducts] = useState<Array<{ id: number; name: string; category_name: string }>>([])
   const [updatingProductId, setUpdatingProductId] = useState<number | null>(null)
   const [selectedThemePreset, setSelectedThemePreset] = useState<string>("custom")
-  const [activeTab, setActiveTab] = useState("general")
+  const [activeTab, setActiveTab] = useState(initialTab)
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [logoFileName, setLogoFileName] = useState<string>("")
   const [detectedPalette, setDetectedPalette] = useState<string[]>([])
@@ -212,8 +217,7 @@ export default function StorefrontSettingsPage() {
       const list = await storefrontService.listStorefronts()
       setStorefronts(list)
 
-      const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null
-      const requestedId = Number(params?.get("site") || "")
+      const requestedId = Number(searchParams.get("site") || "")
       const requestedSite = requestedId > 0 ? list.find((item) => item.id === requestedId) : undefined
       const currentId = Number(selectedStorefrontId)
       const currentSite = currentId > 0 ? list.find((item) => item.id === currentId) : undefined
@@ -231,7 +235,7 @@ export default function StorefrontSettingsPage() {
     } finally {
       setLoading(false)
     }
-  }, [applyStorefrontToForm, selectedStorefrontId, toast])
+  }, [applyStorefrontToForm, searchParams, toast])
 
   const loadRules = useCallback(async (sfId: number) => {
     setRulesLoading(true)
@@ -263,15 +267,6 @@ export default function StorefrontSettingsPage() {
       )
     } catch {
       // non-fatal for page startup
-    }
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-    const params = new URLSearchParams(window.location.search)
-    const requestedTab = params.get("tab")
-    if (requestedTab === "rules" || requestedTab === "content" || requestedTab === "general") {
-      setActiveTab(requestedTab)
     }
   }, [])
 
@@ -514,133 +509,164 @@ export default function StorefrontSettingsPage() {
       .map((rule) => [rule.product as number, rule])
   )
 
+  const themeColorFields = [
+    { key: "primary", label: "Primary" },
+    { key: "ring", label: "Focus Ring" },
+    { key: "accent", label: "Accent" },
+    { key: "border", label: "Border" },
+  ] as const
+
   const generalForm = (
-    <div className="w-full space-y-5">
-      <p className="text-xs text-muted-foreground">
-        {storefront
-          ? `Editing site: ${storefront.name} (${storefront.slug})`
-          : "Creating a new storefront site."}
-      </p>
-
-      <div className="space-y-2">
-        <Label htmlFor="sf-name">Storefront Name *</Label>
-        <Input id="sf-name" value={form.name} onChange={(e) => handleNameChange(e.target.value)} placeholder="My Online Store" />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="sf-slug">URL Slug *</Label>
-        <Input
-          id="sf-slug"
-          value={form.slug}
-          onChange={(e) => {
-            setSlugEdited(true)
-            setForm((prev) => ({ ...prev, slug: e.target.value }))
-          }}
-          placeholder="my-online-store"
-          pattern="[a-z0-9-]+"
-        />
-        <p className="text-xs text-muted-foreground">Lowercase letters, numbers and hyphens only.</p>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="sf-outlet">Default Outlet *</Label>
-        <Select value={form.default_outlet} onValueChange={(v) => setForm((prev) => ({ ...prev, default_outlet: v }))}>
-          <SelectTrigger id="sf-outlet">
-            <SelectValue placeholder="Select outlet" />
-          </SelectTrigger>
-          <SelectContent>
-            {activeOutlets.map((outlet) => (
-              <SelectItem key={outlet.id} value={String(outlet.id)}>{outlet.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="sf-whatsapp">WhatsApp Number</Label>
-        <Input
-          id="sf-whatsapp"
-          value={form.whatsapp_number}
-          onChange={(e) => setForm((prev) => ({ ...prev, whatsapp_number: e.target.value }))}
-          placeholder="+265991234567"
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="sf-currency">Currency Override</Label>
-        <Input
-          id="sf-currency"
-          value={form.currency_override}
-          onChange={(e) => setForm((prev) => ({ ...prev, currency_override: e.target.value.toUpperCase().slice(0, 3) }))}
-          maxLength={3}
-          placeholder="MWK"
-          className="w-24"
-        />
-        <p className="text-xs text-muted-foreground">Leave blank to use tenant default.</p>
-      </div>
-
-      {storefront && (
-        <div className="flex items-center gap-3">
-          <Switch id="sf-active" checked={form.is_active} onCheckedChange={(v) => setForm((prev) => ({ ...prev, is_active: v }))} />
-          <Label htmlFor="sf-active">Storefront Active</Label>
-        </div>
-      )}
-
-      {storefront && (
-        <div className="flex items-center gap-2 rounded-md bg-muted p-3 text-sm font-mono">
-          <span className="truncate text-xs text-muted-foreground">
-            {(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000")}/storefront/{storefront.slug}
-          </span>
-          <Button type="button" variant="ghost" size="icon" onClick={copySlugUrl} className="h-7 w-7 shrink-0">
-            {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-          </Button>
-        </div>
-      )}
-
-      <div className="space-y-4 rounded-md border p-4">
-        <div>
-          <p className="text-sm font-medium">Quick Setup</p>
-          <p className="text-xs text-muted-foreground">Configure brand colors and theme style like guided website setup.</p>
+    <div className="space-y-6">
+      <div className="rounded-lg border bg-white p-6 shadow-sm transition hover:shadow-md">
+        <div className="mb-5 space-y-1">
+          <p className="text-sm font-semibold">General</p>
+          <p className="text-xs text-muted-foreground">
+            {storefront
+              ? `Editing site: ${storefront.name} (${storefront.slug})`
+              : "Create a new storefront and configure core details."}
+          </p>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="logo-upload">Detect from Logo</Label>
+            <Label htmlFor="sf-name">Storefront Name *</Label>
+            <Input id="sf-name" value={form.name} onChange={(e) => handleNameChange(e.target.value)} placeholder="My Online Store" />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sf-slug">URL Slug *</Label>
             <Input
-              id="logo-upload"
-              type="file"
-              accept="image/*"
+              id="sf-slug"
+              value={form.slug}
               onChange={(e) => {
-                const file = e.target.files?.[0] || null
-                setLogoFile(file)
-                setLogoFileName(file?.name || "")
+                setSlugEdited(true)
+                setForm((prev) => ({ ...prev, slug: e.target.value }))
               }}
+              placeholder="my-online-store"
+              pattern="[a-z0-9-]+"
             />
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => detectPaletteFromLogo()}
-                disabled={!logoFile || detectingColors}
-              >
-                {detectingColors ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
-                Detect Colors
-              </Button>
-              {logoFileName ? (
-                <span className="text-xs text-muted-foreground">{logoFileName}</span>
-              ) : (
-                <span className="text-xs text-muted-foreground">No logo selected</span>
-              )}
+            <p className="text-xs text-muted-foreground">Lowercase letters, numbers and hyphens only.</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sf-outlet">Default Outlet *</Label>
+            <Select value={form.default_outlet} onValueChange={(v) => setForm((prev) => ({ ...prev, default_outlet: v }))}>
+              <SelectTrigger id="sf-outlet" className="w-full">
+                <SelectValue placeholder="Select outlet" />
+              </SelectTrigger>
+              <SelectContent>
+                {activeOutlets.map((outlet) => (
+                  <SelectItem key={outlet.id} value={String(outlet.id)}>{outlet.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sf-whatsapp">WhatsApp Number</Label>
+            <Input
+              id="sf-whatsapp"
+              value={form.whatsapp_number}
+              onChange={(e) => setForm((prev) => ({ ...prev, whatsapp_number: e.target.value }))}
+              placeholder="+265991234567"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sf-currency">Currency Override</Label>
+            <Input
+              id="sf-currency"
+              value={form.currency_override}
+              onChange={(e) => setForm((prev) => ({ ...prev, currency_override: e.target.value.toUpperCase().slice(0, 3) }))}
+              maxLength={3}
+              placeholder="MWK"
+              className="w-full md:max-w-28"
+            />
+            <p className="text-xs text-muted-foreground">Leave blank to use tenant default currency.</p>
+          </div>
+
+          {storefront && (
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3 md:col-span-2">
+              <Switch id="sf-active" checked={form.is_active} onCheckedChange={(v) => setForm((prev) => ({ ...prev, is_active: v }))} />
+              <div>
+                <Label htmlFor="sf-active" className="text-sm font-medium">Storefront Active</Label>
+                <p className="text-xs text-muted-foreground">Disable this to temporarily hide your public storefront.</p>
+              </div>
             </div>
+          )}
+        </div>
+      </div>
+
+      {storefront && (
+        <div className="rounded-lg border bg-white p-5 shadow-sm transition hover:shadow-md">
+          <div className="mb-3 space-y-1">
+            <p className="text-sm font-semibold">Public URL</p>
+            <p className="text-xs text-muted-foreground">Share this link with customers to access your storefront.</p>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="truncate text-sm text-slate-700">
+              {(process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000")}/storefront/{storefront.slug}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={copySlugUrl}
+              className="h-9 shrink-0"
+            >
+              {copied ? <Check className="mr-2 h-4 w-4 text-green-600" /> : <Copy className="mr-2 h-4 w-4" />}
+              {copied ? "Copied" : "Copy URL"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-lg border bg-white p-6 shadow-sm transition hover:shadow-md">
+        <div className="mb-5 space-y-1">
+          <p className="text-sm font-semibold">Theme</p>
+          <p className="text-xs text-muted-foreground">Configure brand colors and choose a polished storefront look.</p>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="logo-upload">Detect Colors From Logo</Label>
+              <Input
+                id="logo-upload"
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null
+                  setLogoFile(file)
+                  setLogoFileName(file?.name || "")
+                }}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => detectPaletteFromLogo()}
+                  disabled={!logoFile || detectingColors}
+                  className="h-9"
+                >
+                  {detectingColors ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                  Detect Colors
+                </Button>
+                <span className="text-xs text-muted-foreground">{logoFileName || "No logo selected"}</span>
+              </div>
+            </div>
+
             {detectedPalette.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Detected palette confirmation</p>
+              <div className="space-y-2 rounded-lg border bg-muted/20 p-4">
+                <p className="text-xs font-medium text-muted-foreground">Detected Palette</p>
                 <div className="flex flex-wrap gap-2">
                   {detectedPalette.map((hex) => (
                     <button
                       key={hex}
                       type="button"
-                      className="h-8 min-w-16 rounded-md border px-2 text-[11px] font-medium"
+                      className="h-9 min-w-20 rounded-md border px-2 text-[11px] font-semibold transition hover:scale-[1.02]"
                       style={{ backgroundColor: hex, color: getReadableTextColor(hex) }}
                       onClick={() => handleThemeColorChange("primary", hex)}
                     >
@@ -650,11 +676,35 @@ export default function StorefrontSettingsPage() {
                 </div>
               </div>
             )}
+
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-muted-foreground">Fine Tune Core Colors</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {themeColorFields.map((field) => (
+                  <div key={field.key} className="rounded-lg border bg-white p-3">
+                    <Label className="mb-2 block text-xs font-medium">{field.label}</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="color"
+                        value={form.theme_settings[field.key] || "#000000"}
+                        onChange={(e) => handleThemeColorChange(field.key, e.target.value)}
+                        className="h-10 w-12 cursor-pointer p-1"
+                      />
+                      <Input
+                        value={form.theme_settings[field.key] || ""}
+                        onChange={(e) => handleThemeColorChange(field.key, e.target.value)}
+                        className="h-10"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Choose Theme</Label>
-            <div className="grid gap-2">
+          <div className="space-y-3">
+            <p className="text-xs font-medium text-muted-foreground">Theme Presets</p>
+            <div className="grid gap-3">
               {THEME_SHOWCASES.map((theme) => {
                 const palette = THEME_PRESETS[theme.key]
                 const selected = selectedThemePreset === theme.key
@@ -663,18 +713,18 @@ export default function StorefrontSettingsPage() {
                     key={theme.key}
                     type="button"
                     onClick={() => handleApplyThemePreset(theme.key)}
-                    className={`rounded-md border p-3 text-left transition ${selected ? "border-primary ring-1 ring-primary" : "hover:bg-muted/50"}`}
+                    className={`group rounded-lg border bg-white p-4 text-left transition hover:shadow-md ${selected ? "border-primary ring-2 ring-primary/30" : "hover:border-slate-300"}`}
                   >
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium">{theme.title}</p>
-                      {selected ? <Badge>Active</Badge> : null}
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-900">{theme.title}</p>
+                      {selected ? <Badge className="shadow-sm">Active</Badge> : <Badge variant="outline">Preset</Badge>}
                     </div>
                     <p className="text-xs text-muted-foreground">{theme.blurb}</p>
-                    <div className="mt-2 flex items-center gap-1.5">
+                    <div className="mt-3 flex items-center gap-2">
                       {[palette.primary, palette.secondary, palette.accent, palette.ring].map((hex) => (
                         <span
                           key={`${theme.key}-${hex}`}
-                          className="h-5 w-5 rounded-full border"
+                          className="h-7 w-7 rounded-full border shadow-sm"
                           style={{ backgroundColor: hex }}
                         />
                       ))}
@@ -686,87 +736,95 @@ export default function StorefrontSettingsPage() {
           </div>
         </div>
       </div>
-
     </div>
   )
 
   const catalogTab = (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">Manage which products are visible in this storefront catalog.</p>
-
-      {!storefront ? (
-        <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
-          Products are optional when creating a site. Save the site first, then add Shop products here.
+      <div className="rounded-lg border bg-white p-6 shadow-sm transition hover:shadow-md">
+        <div className="mb-5 space-y-1">
+          <p className="text-sm font-semibold">Catalog Visibility</p>
+          <p className="text-xs text-muted-foreground">Manage which products are visible in this storefront catalog.</p>
         </div>
-      ) : rulesLoading ? (
-        <div className="py-8 text-center text-sm text-muted-foreground">Loading catalog...</div>
-      ) : products.length === 0 ? (
-        <div className="py-8 text-center text-sm text-muted-foreground">No products found.</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground">
-                <th className="px-3 py-2 text-left font-medium">Product</th>
-                <th className="px-3 py-2 text-left font-medium">Category</th>
-                <th className="px-3 py-2 text-left font-medium">Status</th>
-                <th className="px-3 py-2 text-right font-medium">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.map((product) => {
-                const activeRule = productRuleMap.get(product.id)
-                const isInCatalog = Boolean(activeRule)
 
-                return (
-                  <tr key={product.id} className="border-b hover:bg-muted/40">
-                    <td className="px-3 py-2 font-medium">{product.name}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{product.category_name}</td>
-                    <td className="px-3 py-2">
-                      <Badge variant={isInCatalog ? "default" : "outline"} className="text-xs">
-                        {isInCatalog ? "In Catalog" : "Not In Catalog"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {isInCatalog ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8"
-                          onClick={() => removeProductFromCatalog(activeRule!.id, product.id)}
-                          disabled={updatingProductId === product.id}
-                        >
-                          {updatingProductId === product.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
-                          Remove
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          className="h-8"
-                          onClick={() => addProductToCatalog(product.id)}
-                          disabled={updatingProductId === product.id}
-                        >
-                          {updatingProductId === product.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-1 h-3.5 w-3.5" />}
-                          Add
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+        {!storefront ? (
+          <div className="rounded-lg border border-dashed bg-muted/20 p-8 text-center text-sm text-muted-foreground">
+            Products are optional when creating a site. Save the site first, then add Shop products here.
+          </div>
+        ) : rulesLoading ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">Loading catalog...</div>
+        ) : products.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">No products found.</div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/40">
+                <tr className="text-muted-foreground">
+                  <th className="px-4 py-3 text-left font-medium">Product</th>
+                  <th className="px-4 py-3 text-left font-medium">Category</th>
+                  <th className="px-4 py-3 text-left font-medium">Status</th>
+                  <th className="px-4 py-3 text-right font-medium">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {products.map((product) => {
+                  const activeRule = productRuleMap.get(product.id)
+                  const isInCatalog = Boolean(activeRule)
+
+                  return (
+                    <tr key={product.id} className="border-t transition hover:bg-muted/30">
+                      <td className="px-4 py-3 font-medium text-slate-900">{product.name}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{product.category_name}</td>
+                      <td className="px-4 py-3">
+                        <Badge variant={isInCatalog ? "default" : "outline"} className="text-xs">
+                          {isInCatalog ? "In Catalog" : "Not In Catalog"}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {isInCatalog ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => removeProductFromCatalog(activeRule!.id, product.id)}
+                            disabled={updatingProductId === product.id}
+                          >
+                            {updatingProductId === product.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+                            Remove
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            className="h-8 shadow-sm"
+                            onClick={() => addProductToCatalog(product.id)}
+                            disabled={updatingProductId === product.id}
+                          >
+                            {updatingProductId === product.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Plus className="mr-1 h-3.5 w-3.5" />}
+                            Add
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 
   const contentTab = (
     <div className="space-y-6">
-      <div className="rounded-md border p-4">
-        <p className="mb-3 text-sm font-medium">Home Page Content</p>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="space-y-1">
+      <div className="rounded-lg border bg-white p-6 shadow-sm transition hover:shadow-md">
+        <div className="mb-5 space-y-1">
+          <p className="text-sm font-semibold">Home Content</p>
+          <p className="text-xs text-muted-foreground">Add the homepage hero text and call-to-action messaging shown to shoppers first.</p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
             <Label htmlFor="seo-hero-title">Home Headline</Label>
             <Input
               id="seo-hero-title"
@@ -774,7 +832,7 @@ export default function StorefrontSettingsPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, seo_settings: { ...prev.seo_settings, hero_title: e.target.value } }))}
             />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-2">
             <Label htmlFor="seo-whatsapp-cta">Home Button Text</Label>
             <Input
               id="seo-whatsapp-cta"
@@ -782,7 +840,7 @@ export default function StorefrontSettingsPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, seo_settings: { ...prev.seo_settings, whatsapp_cta: e.target.value } }))}
             />
           </div>
-          <div className="space-y-1 lg:col-span-2">
+          <div className="space-y-2 md:col-span-2">
             <Label htmlFor="seo-hero-subtitle">Home Subtitle</Label>
             <Textarea
               id="seo-hero-subtitle"
@@ -791,7 +849,7 @@ export default function StorefrontSettingsPage() {
               rows={3}
             />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-2">
             <Label htmlFor="seo-contact-phone">Contact Phone</Label>
             <Input
               id="seo-contact-phone"
@@ -802,10 +860,43 @@ export default function StorefrontSettingsPage() {
         </div>
       </div>
 
-      <div className="rounded-md border p-4">
-        <p className="mb-3 text-sm font-medium">About Page Content</p>
+      <div className="rounded-lg border bg-white p-6 shadow-sm transition hover:shadow-md">
+        <div className="mb-5 space-y-1">
+          <p className="text-sm font-semibold">Shop Header Content</p>
+          <p className="text-xs text-muted-foreground">Add the heading and supporting text shown at the top of your shop/catalog page.</p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="seo-shop-header-title">Shop Header Title</Label>
+            <Input
+              id="seo-shop-header-title"
+              value={form.seo_settings.shop_header_title || ""}
+              onChange={(e) => setForm((prev) => ({ ...prev, seo_settings: { ...prev.seo_settings, shop_header_title: e.target.value } }))}
+              placeholder="Browse our latest products"
+            />
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="seo-shop-header-subtitle">Shop Header Subtitle</Label>
+            <Textarea
+              id="seo-shop-header-subtitle"
+              value={form.seo_settings.shop_header_subtitle || ""}
+              onChange={(e) => setForm((prev) => ({ ...prev, seo_settings: { ...prev.seo_settings, shop_header_subtitle: e.target.value } }))}
+              rows={3}
+              placeholder="Highlight collections, value proposition, or shopping guidance."
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-white p-6 shadow-sm transition hover:shadow-md">
+        <div className="mb-5 space-y-1">
+          <p className="text-sm font-semibold">About Section Content</p>
+          <p className="text-xs text-muted-foreground">Add your brand story, mission, and company details for the About section.</p>
+        </div>
+
         <div className="grid gap-4">
-          <div className="space-y-1">
+          <div className="space-y-2">
             <Label htmlFor="seo-about-title">About Title</Label>
             <Input
               id="seo-about-title"
@@ -814,7 +905,7 @@ export default function StorefrontSettingsPage() {
               placeholder="Who we are"
             />
           </div>
-          <div className="space-y-1">
+          <div className="space-y-2">
             <Label htmlFor="seo-about-description">About Description</Label>
             <Textarea
               id="seo-about-description"
@@ -825,33 +916,6 @@ export default function StorefrontSettingsPage() {
             />
           </div>
         </div>
-      </div>
-
-      <div className="rounded-md border p-4">
-        <p className="mb-2 text-sm font-medium">Page Links</p>
-        <p className="mb-3 text-xs text-muted-foreground">Open your public pages directly after save.</p>
-        {storefront ? (
-          <div className="grid gap-2 sm:grid-cols-2">
-            <a
-              href={`${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/storefront/${storefront.slug}/about`}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-md border px-3 py-2 text-sm hover:bg-muted/50"
-            >
-              About
-            </a>
-            <a
-              href={`${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/storefront/${storefront.slug}/shop`}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-md border px-3 py-2 text-sm hover:bg-muted/50"
-            >
-              Shop
-            </a>
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">Create and save the site first to generate page links.</p>
-        )}
       </div>
 
       <p className="text-xs text-muted-foreground">Shop content is managed from the Catalog tab.</p>
@@ -873,7 +937,7 @@ export default function StorefrontSettingsPage() {
   }
 
   const settingsActionButtons = (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Button
         type="button"
         variant="outline"
@@ -882,10 +946,11 @@ export default function StorefrontSettingsPage() {
           setSelectedStorefrontId("new")
         }}
         disabled={saving}
+        className="h-10"
       >
         Create New Site
       </Button>
-      <Button onClick={handleSave} disabled={saving}>
+      <Button onClick={handleSave} disabled={saving} className="h-10 shadow-sm">
         {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
         {saveButtonLabel}
       </Button>
@@ -894,27 +959,66 @@ export default function StorefrontSettingsPage() {
 
   return (
     <DashboardLayout>
-      <PageCard className="mt-6">
-        <PageHeader title="Storefront Settings" />
+      <div className="mx-auto mt-6 w-full max-w-6xl px-4 pb-8 sm:px-6 lg:px-8">
+        <PageCard className="overflow-hidden border-slate-200">
+          <div className="space-y-8 bg-gradient-to-b from-slate-50/70 to-white p-6 sm:p-8">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="space-y-1.5">
+                <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Storefront Settings</h1>
+                <p className="text-sm text-muted-foreground">
+                  Configure your public storefront experience, catalog visibility, and content.
+                </p>
+              </div>
+              {settingsActionButtons}
+            </div>
 
-        <FilterableTabs
-          tabs={[
-            { value: "general", label: "General" },
-            { value: "rules", label: "Catalog" },
-            { value: "content", label: "Content" },
-          ]}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          className="w-full"
-          tabsListClassName="grid w-full h-9 items-center gap-1 rounded-md bg-gray-100 p-1"
-          actionButton={settingsActionButtons}
-          actionButtonPlacement="below"
-        >
-          <TabsContent value="general" className="m-0">{generalForm}</TabsContent>
-          <TabsContent value="rules" className="m-0">{catalogTab}</TabsContent>
-          <TabsContent value="content" className="m-0">{contentTab}</TabsContent>
-        </FilterableTabs>
-      </PageCard>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+              <TabsList className="grid h-11 w-full grid-cols-3 rounded-lg bg-muted p-1">
+                <TabsTrigger
+                  value="general"
+                  className="rounded-md text-sm font-medium transition data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm"
+                >
+                  General
+                </TabsTrigger>
+                <TabsTrigger
+                  value="rules"
+                  className="rounded-md text-sm font-medium transition data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm"
+                >
+                  Catalog
+                </TabsTrigger>
+                <TabsTrigger
+                  value="content"
+                  className="rounded-md text-sm font-medium transition data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm"
+                >
+                  Content
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="general" className="m-0">{generalForm}</TabsContent>
+              <TabsContent value="rules" className="m-0">{catalogTab}</TabsContent>
+              <TabsContent value="content" className="m-0">{contentTab}</TabsContent>
+            </Tabs>
+          </div>
+        </PageCard>
+      </div>
     </DashboardLayout>
+  )
+}
+
+export default function StorefrontSettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardLayout>
+          <PageCard className="mt-6">
+            <div className="py-16 text-center text-muted-foreground">
+              <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin opacity-40" />
+            </div>
+          </PageCard>
+        </DashboardLayout>
+      }
+    >
+      <StorefrontSettingsPageContent />
+    </Suspense>
   )
 }

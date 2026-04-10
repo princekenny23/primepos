@@ -68,6 +68,7 @@ class SaleSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'outlet', 'outlet_detail', 'user', 'user_detail', 
             'shift', 'shift_detail', 'customer', 'customer_detail', 'till', 'till_detail', 'receipt_number',
             'subtotal', 'tax', 'discount', 'total', 'payment_method', 'status',
+            'is_void', 'void_reason',
             'cash_received', 'change_given',
             'due_date', 'amount_paid', 'payment_status',
             'delivery_required',
@@ -97,12 +98,15 @@ class SaleSerializer(serializers.ModelSerializer):
     def get_user_detail(self, obj):
         """Return user details as nested object"""
         if obj.user:
+            full_name = obj.user.get_full_name() if hasattr(obj.user, 'get_full_name') else ''
+            fallback_name = obj.user.username or obj.user.email or ''
             return {
                 'id': str(obj.user.id),
+                'username': obj.user.username,
                 'email': obj.user.email,
                 'first_name': obj.user.first_name or '',
                 'last_name': obj.user.last_name or '',
-                'full_name': obj.user.get_full_name() or obj.user.email,
+                'full_name': (full_name or '').strip() or fallback_name,
             }
         return None
     

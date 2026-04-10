@@ -53,6 +53,8 @@ export interface Role {
   can_settings: boolean
   can_dashboard: boolean
   can_distribution: boolean
+  can_storefront: boolean
+  can_switch_outlet: boolean
   is_active: boolean
   created_at: string
   updated_at: string

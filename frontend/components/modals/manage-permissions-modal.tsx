@@ -13,11 +13,57 @@ import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, ShoppingCart, Home, Package, Settings, DollarSign, AlertCircle, Truck, Store } from "lucide-react"
+import { Loader2, AlertCircle } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { adminService } from "@/lib/services/adminService"
+import { outletService } from "@/lib/services/outletService"
+import {
+  TenantAppAccessPanel,
+  type TenantAppAccessKey,
+  type TenantAppAccessState,
+} from "@/components/permissions/tenant-app-access-panel"
+
+type OutletPermissions = TenantAppAccessState
+
+type EditableOutlet = {
+  id: string
+  name: string
+  address?: string
+  isActive: boolean
+  distributionActive: boolean
+  settings: Record<string, any>
+  modulePermissions: OutletPermissions
+  isSaving: boolean
+}
+
+const defaultOutletModulePermissions: OutletPermissions = {
+  allow_sales: true,
+  allow_pos: true,
+  allow_inventory: true,
+  allow_office: true,
+  allow_settings: true,
+  allow_storefront: true,
+  has_distribution: true,
+}
+
+const normalizeOutletModulePermissions = (source: any): OutletPermissions => ({
+  allow_sales: source?.allow_sales ?? source?.sales ?? true,
+  allow_pos: source?.allow_pos ?? source?.pos ?? true,
+  allow_inventory: source?.allow_inventory ?? source?.inventory ?? true,
+  allow_office: source?.allow_office ?? source?.office ?? true,
+  allow_settings: source?.allow_settings ?? source?.settings ?? true,
+  allow_storefront: source?.allow_storefront ?? source?.storefront ?? true,
+  has_distribution: source?.has_distribution ?? source?.allow_distribution ?? source?.distribution ?? true,
+})
 
 interface TenantPermissions {
   has_distribution: boolean
@@ -94,6 +140,7 @@ export function ManagePermissionsModal({
   const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isSavingOutletPermissions, setIsSavingOutletPermissions] = useState(false)
   const [permissions, setPermissions] = useState<TenantPermissions>({
     has_distribution: false,
 
@@ -151,6 +198,9 @@ export function ManagePermissionsModal({
     allow_distribution_tracking: true,
     allow_distribution_reports: true,
   })
+  const [outlets, setOutlets] = useState<EditableOutlet[]>([])
+  const [selectedOutletId, setSelectedOutletId] = useState<string>("")
+  const selectedOutlet = outlets.find((item) => item.id === selectedOutletId) || null
 
   useEffect(() => {
     if (open && tenant) {
@@ -161,7 +211,11 @@ export function ManagePermissionsModal({
   const loadPermissions = async () => {
     setIsLoading(true)
     try {
-      const data = await adminService.getTenantPermissions(tenant.id)
+      const [data, tenantDetails] = await Promise.all([
+        adminService.getTenantPermissions(tenant.id),
+        adminService.getTenant(tenant.id),
+      ])
+
       if (data) {
         // Keep users and staff managed together in the UI.
         const usersAndStaffEnabled = (data.allow_office_users !== false) || (data.allow_office_staff !== false)
@@ -183,6 +237,31 @@ export function ManagePermissionsModal({
           allow_storefront_settings: data.allow_storefront_settings ?? true,
         }))
       }
+
+      const tenantOutlets = Array.isArray(tenantDetails?.outlets) ? tenantDetails.outlets : []
+      const mappedOutlets: EditableOutlet[] = tenantOutlets.map((outlet: any) => {
+        const modulePermissionsRaw =
+          outlet?.settings?.module_permissions ||
+          outlet?.settings?.modulePermissions ||
+          defaultOutletModulePermissions
+
+        return {
+          id: String(outlet.id),
+          name: outlet.name || "Unnamed Outlet",
+          address: outlet.address || "",
+          isActive: outlet.is_active !== false,
+          distributionActive: outlet.distribution_active !== false,
+          settings: outlet.settings || {},
+          modulePermissions: normalizeOutletModulePermissions(modulePermissionsRaw),
+          isSaving: false,
+        }
+      })
+
+      setOutlets(mappedOutlets)
+      setSelectedOutletId((prev) => {
+        if (prev && mappedOutlets.some((item) => item.id === prev)) return prev
+        return mappedOutlets[0]?.id || ""
+      })
     } catch (error: any) {
       console.error("Failed to load permissions:", error)
       toast({
@@ -298,6 +377,127 @@ export function ManagePermissionsModal({
     }
   }
 
+  const setOutletSaving = (outletId: string, isSavingFlag: boolean) => {
+    setOutlets((prev) =>
+      prev.map((outlet) =>
+        outlet.id === outletId ? { ...outlet, isSaving: isSavingFlag } : outlet
+      )
+    )
+  }
+
+  const toggleOutletPermission = (outletId: string, key: TenantAppAccessKey, value: boolean) => {
+    setOutlets((prev) =>
+      prev.map((outlet) => {
+        if (outlet.id !== outletId) return outlet
+
+        const nextModulePermissions = {
+          ...outlet.modulePermissions,
+          [key]: value,
+        }
+
+        return {
+          ...outlet,
+          modulePermissions: nextModulePermissions,
+          distributionActive: key === "has_distribution" ? value : outlet.distributionActive,
+        }
+      })
+    )
+  }
+
+  const handleSaveOutletPermissions = async () => {
+    if (!selectedOutlet) return
+
+    setIsSavingOutletPermissions(true)
+    setOutletSaving(selectedOutlet.id, true)
+
+    try {
+      const currentOutletSettings = (selectedOutlet.settings || {}) as Record<string, any>
+      const updatePayload: any = {
+        name: selectedOutlet.name,
+        settings: {
+          ...currentOutletSettings,
+          module_permissions: {
+            ...selectedOutlet.modulePermissions,
+          },
+        },
+        distributionActive: selectedOutlet.distributionActive,
+      }
+      const updatedOutlet = await outletService.update(selectedOutlet.id, updatePayload)
+      const updatedOutletAny = updatedOutlet as any
+
+      const updatedOutletSettings = (updatedOutletAny.settings || {}) as Record<string, any>
+
+      setOutlets((prev) =>
+        prev.map((item) =>
+          item.id === selectedOutlet.id
+            ? {
+                ...item,
+                settings: updatedOutletAny.settings || item.settings,
+                distributionActive:
+                  updatedOutletAny.distributionActive !== undefined
+                    ? Boolean(updatedOutletAny.distributionActive)
+                    : item.distributionActive,
+                modulePermissions: normalizeOutletModulePermissions(
+                  updatedOutletSettings?.module_permissions ||
+                    updatedOutletSettings?.modulePermissions ||
+                    item.modulePermissions
+                ),
+              }
+            : item
+        )
+      )
+
+      if (typeof window !== "undefined") {
+        const currentOutletId = window.localStorage.getItem("currentOutletId")
+        if (currentOutletId && String(currentOutletId) === String(selectedOutlet.id)) {
+          try {
+            const rawBusinessState = window.localStorage.getItem("primepos-business")
+            if (rawBusinessState) {
+              const parsed = JSON.parse(rawBusinessState)
+              if (parsed?.state?.currentOutlet && String(parsed.state.currentOutlet.id) === String(selectedOutlet.id)) {
+                parsed.state.currentOutlet.settings = updatedOutlet.settings || parsed.state.currentOutlet.settings || {}
+                parsed.state.currentOutlet.distributionActive =
+                  updatedOutlet.distributionActive !== undefined
+                    ? Boolean(updatedOutlet.distributionActive)
+                    : parsed.state.currentOutlet.distributionActive
+                window.localStorage.setItem("primepos-business", JSON.stringify(parsed))
+
+                window.dispatchEvent(
+                  new CustomEvent("outlet-changed", {
+                    detail: {
+                      outletId: String(selectedOutlet.id),
+                      outletName: selectedOutlet.name,
+                      outlet: parsed.state.currentOutlet,
+                    },
+                  })
+                )
+              }
+            }
+          } catch {
+            // Non-fatal: outlet refresh event below still syncs app state.
+          }
+        }
+
+        window.dispatchEvent(new CustomEvent("outlets-updated"))
+      }
+
+      toast({
+        title: "Outlet Updated",
+        description: `${selectedOutlet.name} permissions updated successfully.`,
+      })
+    } catch (error: any) {
+      console.error("Failed to save outlet permissions:", error)
+      toast({
+        title: "Error",
+        description: error?.message || `Failed to update ${selectedOutlet.name}.`,
+        variant: "destructive",
+      })
+    } finally {
+      setOutletSaving(selectedOutlet.id, false)
+      setIsSavingOutletPermissions(false)
+    }
+  }
+
   const PermissionSwitch = ({ 
     id, 
     label, 
@@ -333,7 +533,7 @@ export function ManagePermissionsModal({
         <DialogHeader>
           <DialogTitle>Manage Permissions - {tenant?.name}</DialogTitle>
           <DialogDescription>
-            Control which apps and features this tenant can access
+            Control which apps, features, and outlet-level access this tenant can use
           </DialogDescription>
         </DialogHeader>
 
@@ -343,158 +543,19 @@ export function ManagePermissionsModal({
           </div>
         ) : (
           <Tabs defaultValue="apps" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="apps">Apps</TabsTrigger>
               <TabsTrigger value="features">Features</TabsTrigger>
+              <TabsTrigger value="outlets">Outlets</TabsTrigger>
             </TabsList>
 
             <TabsContent value="apps" className="space-y-4 mt-4">
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <DollarSign className="h-5 w-5" />
-                    <div>
-                      <CardTitle className="text-lg">Sales</CardTitle>
-                      <CardDescription>Core sales management</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <PermissionSwitch
-                    id="allow_sales"
-                    label="Enable Sales App"
-                    checked={permissions.allow_sales}
-                    onChange={(checked) => handleToggle('allow_sales', checked)}
-                    description="Master switch for all sales functionality"
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <ShoppingCart className="h-5 w-5" />
-                    <div>
-                      <CardTitle className="text-lg">Point of Sale</CardTitle>
-                      <CardDescription>POS terminals and transactions</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <PermissionSwitch
-                    id="allow_pos"
-                    label="Enable POS App"
-                    checked={permissions.allow_pos}
-                    onChange={(checked) => handleToggle('allow_pos', checked)}
-                    description="Master switch for all POS functionality"
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Package className="h-5 w-5" />
-                    <div>
-                      <CardTitle className="text-lg">Inventory</CardTitle>
-                      <CardDescription>Stock and product management</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <PermissionSwitch
-                    id="allow_inventory"
-                    label="Enable Inventory App"
-                    checked={permissions.allow_inventory}
-                    onChange={(checked) => handleToggle('allow_inventory', checked)}
-                    description="Master switch for all inventory functionality"
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Home className="h-5 w-5" />
-                    <div>
-                      <CardTitle className="text-lg">Office</CardTitle>
-                      <CardDescription>Back office operations</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <PermissionSwitch
-                    id="allow_office"
-                    label="Enable Office App"
-                    checked={permissions.allow_office}
-                    onChange={(checked) => handleToggle('allow_office', checked)}
-                    description="Master switch for accounting, HR, and reporting"
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Settings className="h-5 w-5" />
-                    <div>
-                      <CardTitle className="text-lg">Settings</CardTitle>
-                      <CardDescription>System configuration</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <PermissionSwitch
-                    id="allow_settings"
-                    label="Enable Settings App"
-                    checked={permissions.allow_settings}
-                    onChange={(checked) => handleToggle('allow_settings', checked)}
-                    description="Master switch for system settings"
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Store className="h-5 w-5" />
-                    <div>
-                      <CardTitle className="text-lg">Storefront</CardTitle>
-                      <CardDescription>Online store and WhatsApp commerce</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <PermissionSwitch
-                    id="allow_storefront"
-                    label="Enable Storefront App"
-                    checked={permissions.allow_storefront}
-                    onChange={(checked) => handleToggle('allow_storefront', checked)}
-                    description="Master switch for storefront pages, orders, and settings"
-                  />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center gap-2">
-                    <Truck className="h-5 w-5" />
-                    <div>
-                      <CardTitle className="text-lg">Distribution</CardTitle>
-                      <CardDescription>Fleet and delivery workflows</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <PermissionSwitch
-                    id="has_distribution"
-                    label="Enable Distribution Module"
-                    checked={permissions.has_distribution}
-                    onChange={(checked) => handleToggle('has_distribution', checked)}
-                    description="Shows distribution menu and enables delivery operations"
-                  />
-                </CardContent>
-              </Card>
+              <TenantAppAccessPanel
+                permissions={permissions}
+                onToggle={handleToggle}
+                disabled={isSaving}
+                description="Control which top-level tenant apps are enabled. This is shared with Edit Tenant module access."
+              />
             </TabsContent>
 
             <TabsContent value="features" className="space-y-4 mt-4">
@@ -797,6 +858,77 @@ export function ManagePermissionsModal({
                     />
                   </CardContent>
                 </Card>
+              )}
+            </TabsContent>
+
+            <TabsContent value="outlets" className="space-y-4 mt-4">
+              {outlets.length === 0 ? (
+                <Card>
+                  <CardContent className="pt-6 text-sm text-muted-foreground">
+                    No outlets found for this tenant.
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Outlet Permission Scope</CardTitle>
+                      <CardDescription>
+                        Select an outlet and manage app access just for that outlet.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Select value={selectedOutletId} onValueChange={setSelectedOutletId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select outlet" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {outlets.map((outlet) => (
+                            <SelectItem key={outlet.id} value={outlet.id}>
+                              {outlet.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </CardContent>
+                  </Card>
+
+                  {selectedOutlet && (
+                    <Card>
+                      <CardHeader>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <CardTitle className="text-base">{selectedOutlet.name}</CardTitle>
+                            <CardDescription>{selectedOutlet.address || "No address"}</CardDescription>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant={selectedOutlet.isActive ? "default" : "secondary"}>
+                              {selectedOutlet.isActive ? "Active" : "Inactive"}
+                            </Badge>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <TenantAppAccessPanel
+                          permissions={selectedOutlet.modulePermissions}
+                          onToggle={(key, value) => toggleOutletPermission(selectedOutlet.id, key, value)}
+                          disabled={selectedOutlet.isSaving || isSavingOutletPermissions}
+                          title="Outlet App Access"
+                          description="These module switches apply only to this outlet. Distribution is controlled by the Distribution toggle here."
+                        />
+
+                        <div className="flex justify-end">
+                          <Button
+                            onClick={handleSaveOutletPermissions}
+                            disabled={selectedOutlet.isSaving || isSavingOutletPermissions}
+                          >
+                            {(selectedOutlet.isSaving || isSavingOutletPermissions) ? "Saving..." : "Save Outlet Permissions"}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </>
               )}
             </TabsContent>
           </Tabs>

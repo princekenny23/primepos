@@ -3,6 +3,8 @@ import { api, apiEndpoints } from "@/lib/api"
 export interface AdminTenant {
   id: string
   name: string
+  subdomain?: string
+  domain?: string
   email: string
   phone?: string
   address?: string

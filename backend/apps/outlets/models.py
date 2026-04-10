@@ -23,7 +23,6 @@ class Outlet(models.Model):
         help_text="Business type for this outlet (inherits from tenant if not set)",
     )
     settings = models.JSONField(default=dict, blank=True)
-    distribution_active = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

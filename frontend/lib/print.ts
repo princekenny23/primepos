@@ -288,7 +288,15 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
     sale.business?.name || sale.outlet?.business?.name || sale.tenant?.name || "Business"
   const address = sale.outlet?.address || sale.business?.address || sale.tenant?.address || ""
   const date = sale.created_at || new Date().toLocaleString()
-  const cashier = sale.cashier?.name || sale.cashier_name || sale.created_by_name || "Cashier"
+  const cashier =
+    sale.cashier?.username ||
+    sale.user_detail?.username ||
+    sale.cashier?.name ||
+    sale.user_detail?.full_name ||
+    sale.cashier_name ||
+    sale.created_by_username ||
+    sale.created_by_name ||
+    "Cashier"
 
   lines.push(String(businessName).toUpperCase())
   if (address) lines.push(String(address))

@@ -535,7 +535,7 @@ export function SingleProductPOS() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-full flex flex-col bg-background overflow-hidden">
       {/* Header */}
       <div className="border-b bg-card p-4">
         <div className="flex items-center justify-between">
@@ -548,17 +548,18 @@ export function SingleProductPOS() {
           <div className="flex items-center gap-4">
             {selectedCustomer ? (
               <Button
-                variant="outline"
+                variant="default"
                 onClick={() => setShowCustomerSelect(true)}
-                className="flex items-center gap-2"
+                className="flex items-center gap-2 bg-blue-900 text-white hover:bg-blue-800"
               >
                 <User className="h-4 w-4" />
                 {selectedCustomer.name}
               </Button>
             ) : (
               <Button
-                variant="outline"
+                variant="default"
                 onClick={() => setShowCustomerSelect(true)}
+                className="bg-blue-900 text-white hover:bg-blue-800"
               >
                 <User className="h-4 w-4 mr-2" />
                 Select Customer
@@ -728,7 +729,7 @@ export function SingleProductPOS() {
         </div>
 
         {/* Cart Sidebar */}
-        <div className="flex-1 lg:flex-none w-full lg:w-[520px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col">
+        <div className="flex-1 lg:flex-none w-full lg:w-[520px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col overflow-hidden">
           <div className="p-4 border-b">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <ShoppingCart className="h-5 w-5" />

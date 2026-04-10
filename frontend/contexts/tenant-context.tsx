@@ -12,6 +12,7 @@ interface Tenant {
   id: string
   name: string
   businessType: string
+  logo?: string
   email: string
   phone: string
   address: string
@@ -26,6 +27,7 @@ interface Outlet {
   businessType?: OutletBusinessType
   businessTypeDisplay?: string
   settings?: BusinessSettings
+  distributionActive?: boolean
   isActive: boolean
 }
 
@@ -100,6 +102,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
             id: tenantData.id,
             name: tenantData.name,
             businessType: tenantData.type,
+            logo: tenantData.logo,
             email: tenantData.email || "",
             phone: tenantData.phone || "",
             address: tenantData.address || "",
@@ -156,6 +159,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
               businessType: normalizeOutletBusinessType(o.business_type || o.businessType || tenantData.type),
               businessTypeDisplay: o.business_type_display || o.businessTypeDisplay || getOutletBusinessTypeDisplay(o.business_type || o.businessType || tenantData.type),
               settings: normalizeBusinessSettings(o.settings),
+              distributionActive: o.distribution_active !== undefined ? Boolean(o.distribution_active) : (o.distributionActive !== undefined ? Boolean(o.distributionActive) : true),
               isActive: o.is_active !== undefined ? o.is_active : (o.isActive !== undefined ? o.isActive : true),
             }
           })
@@ -175,6 +179,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
               businessType: o.businessType,
               businessTypeDisplay: o.businessTypeDisplay,
               settings: o.settings,
+              distributionActive: o.distributionActive !== undefined ? o.distributionActive : true,
               isActive: o.isActive,
               createdAt: new Date().toISOString(),
             })) })
@@ -205,6 +210,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
               businessType: selectedOutlet.businessType,
               businessTypeDisplay: selectedOutlet.businessTypeDisplay,
               settings: selectedOutlet.settings,
+              distributionActive: selectedOutlet.distributionActive,
               isActive: selectedOutlet.isActive,
               createdAt: new Date().toISOString(),
             } })
@@ -221,6 +227,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           id: currentBusiness.id,
           name: currentBusiness.name,
           businessType: currentBusiness.type,
+          logo: currentBusiness.logo,
           email: currentBusiness.email || "",
           phone: currentBusiness.phone || "",
           address: currentBusiness.address || "",
@@ -235,6 +242,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           businessType: o.businessType,
           businessTypeDisplay: o.businessTypeDisplay,
           settings: o.settings,
+          distributionActive: o.distributionActive !== undefined ? o.distributionActive : true,
           isActive: o.isActive,
         }))
         setOutlets(loadedOutlets)
@@ -249,6 +257,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
             businessType: store.currentOutlet.businessType,
             businessTypeDisplay: store.currentOutlet.businessTypeDisplay,
             settings: store.currentOutlet.settings,
+            distributionActive: (store.currentOutlet as any).distributionActive !== undefined ? (store.currentOutlet as any).distributionActive : true,
             isActive: store.currentOutlet.isActive,
           })
         } else if (loadedOutlets.length > 0) {
@@ -302,6 +311,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         businessType: outlet.businessType,
         businessTypeDisplay: outlet.businessTypeDisplay,
         settings: outlet.settings,
+        distributionActive: outlet.distributionActive,
         isActive: outlet.isActive,
         createdAt: new Date().toISOString(),
       }
@@ -348,6 +358,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
             businessType: o.businessType,
             businessTypeDisplay: o.businessTypeDisplay,
             settings: o.settings,
+            distributionActive: (o as any).distributionActive !== undefined ? (o as any).distributionActive : true,
             isActive: o.isActive,
           }))
           setOutlets(transformedOutlets)

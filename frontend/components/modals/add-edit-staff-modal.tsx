@@ -9,7 +9,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -18,11 +17,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-  import { User, Mail, Phone, Shield, MapPin, Eye, EyeOff } from "lucide-react"
+import { User, Shield, MapPin } from "lucide-react"
 import { useState, useEffect, useCallback } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { staffService, roleService, type Staff, type Role } from "@/lib/services/staffService"
-import { outletService } from "@/lib/services/outletService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { api } from "@/lib/api"
@@ -39,18 +37,10 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
   const { currentBusiness } = useBusinessStore()
   const { outlets } = useTenant()
   const [isLoading, setIsLoading] = useState(false)
-  const [showPassword, setShowPassword] = useState(false)
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [roles, setRoles] = useState<Role[]>([])
   const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string; email: string }>>([])
   const [formData, setFormData] = useState({
-    user_id: "",
-    useExistingUser: false,
-    name: "",
-    email: "",
-    phone: "",
-    password: "",
-    confirmPassword: "",
+    user_ids: [] as string[],
     role_id: "",
     outlet_ids: [] as string[],
   })
@@ -74,10 +64,10 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
     try {
       const tenantResponse = await api.get<any>(`/tenants/${currentBusiness.id}/`)
       const tenantUsers = tenantResponse?.users || []
-      const users = tenantUsers.map((user: any) => ({
-        id: String(user.id),
-        name: user.name || user.username || user.email?.split("@")[0] || "Unnamed User",
-        email: user.email || "",
+      const users = tenantUsers.map((tenantUser: any) => ({
+        id: String(tenantUser.id),
+        name: tenantUser.name || tenantUser.username || tenantUser.email?.split("@")[0] || "Unnamed User",
+        email: tenantUser.email || "",
       }))
       setAvailableUsers(users)
     } catch (error) {
@@ -90,44 +80,29 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
     if (open) {
       loadRoles()
       loadAvailableUsers()
+
       if (staff) {
-        // Edit mode - extract outlet IDs from outlets array
-        const outletIds = staff.outlets?.map((o: any) => {
-          // Handle both object format {id, name} and string format
-          return typeof o === 'object' ? String(o.id) : String(o)
-        }) || []
-        
+        const outletIds =
+          staff.outlets?.map((outlet: any) => (typeof outlet === "object" ? String(outlet.id) : String(outlet))) || []
+
         setFormData({
-          user_id: "",
-          useExistingUser: false,
-          name: staff.user?.name || "",
-          email: staff.user?.email || "",
-          phone: staff.user?.phone || "",
-          password: "",
-          confirmPassword: "",
+          user_ids: staff.user?.id ? [String(staff.user.id)] : [],
           role_id: staff.role?.id ? String(staff.role.id) : "",
           outlet_ids: outletIds,
         })
       } else {
-        // Add mode
         setFormData({
-          user_id: "",
-          useExistingUser: false,
-          name: "",
-          email: "",
-          phone: "",
-          password: "",
-          confirmPassword: "",
+          user_ids: [],
           role_id: "",
           outlet_ids: [],
         })
       }
     }
-  }, [open, staff, currentBusiness, loadRoles, loadAvailableUsers])
+  }, [open, staff, loadRoles, loadAvailableUsers])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    
+
     if (!currentBusiness) {
       toast({
         title: "Error",
@@ -137,56 +112,10 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
       return
     }
 
-    // Validation
-    if (!formData.name) {
+    if (!staff && formData.user_ids.length === 0) {
       toast({
         title: "Validation Error",
-        description: "Name is required.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!staff && !formData.useExistingUser && !formData.email) {
-      toast({
-        title: "Validation Error",
-        description: "Email is required.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!staff && !formData.useExistingUser && !formData.password) {
-      toast({
-        title: "Validation Error",
-        description: "Password is required.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!staff && !formData.useExistingUser && formData.password !== formData.confirmPassword) {
-      toast({
-        title: "Validation Error",
-        description: "Passwords do not match.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!staff && !formData.useExistingUser && formData.password.length < 8) {
-      toast({
-        title: "Validation Error",
-        description: "Password must be at least 8 characters.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!staff && formData.useExistingUser && !formData.user_id) {
-      toast({
-        title: "Validation Error",
-        description: "Please select an existing office user.",
+        description: "Select at least one existing user to assign.",
         variant: "destructive",
       })
       return
@@ -195,84 +124,49 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
     setIsLoading(true)
 
     try {
+      const roleId = formData.role_id && formData.role_id.trim() ? parseInt(formData.role_id, 10) : null
+      const normalizedOutletIds = formData.outlet_ids
+        .filter((id) => id && id !== "")
+        .map((id) => parseInt(String(id), 10))
+        .filter((id) => !isNaN(id))
+
+      const outletRoles = normalizedOutletIds.map((outletId) => ({
+        outlet_id: outletId,
+        role_id: roleId,
+      }))
+
       if (staff) {
-        // Update existing staff
-        const updateData: any = {}
-        
-        // Keep tenant-level fallback role; can be null.
-        if (formData.role_id && formData.role_id.trim()) {
-          updateData.role_id = parseInt(formData.role_id)
-        } else {
-          updateData.role_id = null
+        const updateData: any = {
+          role_id: roleId,
+          outlet_roles: outletRoles,
         }
 
-        // Per-outlet role assignment payload.
-        // For this modal, selected role is applied to each selected outlet.
-        if (formData.outlet_ids.length > 0) {
-          updateData.outlet_roles = formData.outlet_ids.map((id) => ({
-            outlet_id: parseInt(id),
-            role_id: formData.role_id && formData.role_id.trim() ? parseInt(formData.role_id) : null,
-          }))
-        } else {
-          // Empty list clears outlet assignments
-          updateData.outlet_roles = []
-        }
-        
         await staffService.update(staff.id, updateData)
         toast({
           title: "Staff Updated",
           description: "Staff member has been updated successfully.",
         })
       } else {
-        // Create new staff
-        const staffData: any = {}
+        const selectedUserIds = Array.from(
+          new Set(
+            formData.user_ids
+              .map((id) => parseInt(String(id), 10))
+              .filter((id) => !isNaN(id))
+          )
+        )
 
-        if (formData.useExistingUser && formData.user_id) {
-          staffData.user_id = parseInt(formData.user_id)
-        } else {
-          staffData.name = formData.name.trim()
-          staffData.email = formData.email.trim()
-          staffData.password = formData.password
-        }
-        
-        // Only include phone if provided
-        if (!formData.useExistingUser && formData.phone && formData.phone.trim()) {
-          staffData.phone = formData.phone.trim()
-        }
-        
-        // Only include outlet_roles if there are outlets selected.
-        if (formData.outlet_ids && formData.outlet_ids.length > 0) {
-          const normalizedOutletIds = formData.outlet_ids
-            .filter(id => id && id !== '')
-            .map(id => parseInt(String(id)))
-            .filter(id => !isNaN(id))
+        await Promise.all(
+          selectedUserIds.map((userId) => {
+            const payload: any = { user_id: userId }
+            if (roleId !== null) payload.role_id = roleId
+            if (outletRoles.length > 0) payload.outlet_roles = outletRoles
+            return staffService.create(payload)
+          })
+        )
 
-          staffData.outlet_roles = normalizedOutletIds.map((outletId) => ({
-            outlet_id: outletId,
-            role_id: null,
-          }))
-        }
-        
-        // Keep tenant-level fallback role and mirror it to outlet_roles where applicable.
-        if (formData.role_id && formData.role_id.trim() && formData.role_id !== "none") {
-          const roleId = parseInt(formData.role_id)
-          if (!isNaN(roleId)) {
-            staffData.role_id = roleId
-
-            if (Array.isArray(staffData.outlet_roles)) {
-              staffData.outlet_roles = staffData.outlet_roles.map((assignment: any) => ({
-                ...assignment,
-                role_id: roleId,
-              }))
-            }
-          }
-        }
-        
-        console.log("Sending staff data:", staffData)
-        await staffService.create(staffData)
         toast({
-          title: "Staff Created",
-          description: "Staff member has been created successfully.",
+          title: "Staff Assigned",
+          description: `${selectedUserIds.length} user${selectedUserIds.length !== 1 ? "s" : ""} assigned successfully.`,
         })
       }
 
@@ -282,55 +176,9 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
       }
     } catch (error: any) {
       console.error("Failed to save staff:", error)
-      console.error("Error details:", {
-        message: error.message,
-        status: error.status,
-        data: error.data,
-        staffData: staff ? "update" : formData
-      })
-      
-      // Extract detailed error message
-      let errorMessage = error.message || "Failed to save staff member."
-      if (error.data) {
-        if (typeof error.data === 'string') {
-          errorMessage = error.data
-        } else if (error.data.detail) {
-          errorMessage = error.data.detail
-        } else if (error.data.email) {
-          // Handle email error (can be string or array)
-          const emailError = error.data.email
-          if (Array.isArray(emailError)) {
-            errorMessage = emailError[0]
-          } else if (typeof emailError === 'string') {
-            errorMessage = emailError
-          } else if (emailError && typeof emailError === 'object' && 'string' in emailError) {
-            // Handle ErrorDetail object format
-            errorMessage = emailError.string || emailError
-          }
-        } else if (error.data.password) {
-          errorMessage = Array.isArray(error.data.password) ? error.data.password[0] : error.data.password
-        } else if (error.data.non_field_errors) {
-          errorMessage = Array.isArray(error.data.non_field_errors) ? error.data.non_field_errors[0] : error.data.non_field_errors
-        } else {
-          // Try to get first error message from any field
-          const firstKey = Object.keys(error.data)[0]
-          if (firstKey) {
-            const firstError = error.data[firstKey]
-            if (Array.isArray(firstError)) {
-              errorMessage = firstError[0]
-            } else if (typeof firstError === 'string') {
-              errorMessage = firstError
-            } else if (firstError && typeof firstError === 'object' && 'string' in firstError) {
-              // Handle ErrorDetail object format
-              errorMessage = firstError.string || String(firstError)
-            }
-          }
-        }
-      }
-      
       toast({
         title: "Error",
-        description: errorMessage,
+        description: error.message || "Failed to save staff assignment.",
         variant: "destructive",
       })
     } finally {
@@ -339,11 +187,20 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
   }
 
   const handleOutletToggle = (outletId: string) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       outlet_ids: prev.outlet_ids.includes(outletId)
-        ? prev.outlet_ids.filter(id => id !== outletId)
-        : [...prev.outlet_ids, outletId]
+        ? prev.outlet_ids.filter((id) => id !== outletId)
+        : [...prev.outlet_ids, outletId],
+    }))
+  }
+
+  const handleUserToggle = (userId: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      user_ids: prev.user_ids.includes(userId)
+        ? prev.user_ids.filter((id) => id !== userId)
+        : [...prev.user_ids, userId],
     }))
   }
 
@@ -355,118 +212,58 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
           <DialogDescription>
             {staff
               ? "Update role and outlet assignments for this staff member"
-              : "Assign a user to staff with role and outlet access"}
+              : "Assign existing office users to staff in bulk with role and outlet access"}
           </DialogDescription>
         </DialogHeader>
-        
+
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4 md:grid-cols-2">
             {!staff && (
               <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="user_source">User Source *</Label>
-                <Select
-                  value={formData.useExistingUser ? "existing" : "new"}
-                  onValueChange={(value) => {
-                    const useExisting = value === "existing"
-                    setFormData((prev) => ({
-                      ...prev,
-                      useExistingUser: useExisting,
-                      user_id: useExisting ? prev.user_id : "",
-                    }))
-                  }}
-                >
-                  <SelectTrigger id="user_source">
-                    <SelectValue placeholder="Select user source" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="new">Create New User</SelectItem>
-                    <SelectItem value="existing">Use Existing Office User</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label>Select Users *</Label>
+                <div className="border rounded-md p-4 max-h-56 overflow-y-auto">
+                  {availableUsers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No users available for this business.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {availableUsers.map((availableUser) => (
+                        <div key={availableUser.id} className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            aria-label={`Assign user ${availableUser.name}`}
+                            checked={formData.user_ids.includes(String(availableUser.id))}
+                            onChange={() => handleUserToggle(String(availableUser.id))}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          <div className="flex items-center gap-2 flex-1">
+                            <User className="h-3 w-3 text-muted-foreground" />
+                            <span>{availableUser.name}</span>
+                            <span className="text-xs text-muted-foreground">({availableUser.email})</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {formData.user_ids.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {formData.user_ids.length} user{formData.user_ids.length !== 1 ? "s" : ""} selected
+                  </p>
+                )}
               </div>
             )}
 
-            {!staff && formData.useExistingUser && (
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="user_id">Select User *</Label>
-                <Select
-                  value={formData.user_id || "none"}
-                  onValueChange={(value) => {
-                    const selected = value === "none" ? "" : value
-                    const selectedUser = availableUsers.find((u) => String(u.id) === selected)
-                    setFormData((prev) => ({
-                      ...prev,
-                      user_id: selected,
-                      name: selectedUser?.name || "",
-                      email: selectedUser?.email || "",
-                    }))
-                  }}
-                >
-                  <SelectTrigger id="user_id">
-                    <SelectValue placeholder="Choose an existing office user" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Select a user</SelectItem>
-                    {availableUsers.map((user) => (
-                      <SelectItem key={user.id} value={String(user.id)}>
-                        {user.name} ({user.email})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {staff && (
+              <div className="space-y-2 md:col-span-2 rounded border p-3 bg-muted/40">
+                <p className="text-sm font-medium">Assigned User</p>
+                <p className="text-sm text-muted-foreground">
+                  {staff.user?.name || "Unknown User"}
+                  {staff.user?.email ? ` (${staff.user.email})` : ""}
+                </p>
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name *</Label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="name"
-                  className="pl-10"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  required
-                  placeholder="John Doe"
-                  disabled={!!staff || (!!formData.useExistingUser && !staff)}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="email">Email *</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  className="pl-10"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  required={!staff}
-                  disabled={!!staff || (!!formData.useExistingUser && !staff)}
-                  placeholder="john.doe@example.com"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone</Label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="phone"
-                  type="tel"
-                  className="pl-10"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="+265 991 234 567"
-                  disabled={!!staff || (!!formData.useExistingUser && !staff)}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
+            <div className="space-y-2 md:col-span-2">
               <Label htmlFor="role_id">Role Assignment</Label>
               <div className="relative">
                 <Shield className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -475,16 +272,14 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
                   onValueChange={(value) => setFormData({ ...formData, role_id: value === "none" ? "" : value })}
                 >
                   <SelectTrigger className="pl-10">
-                    <SelectValue placeholder="Select role for this staff assignment" />
+                    <SelectValue placeholder="Select role for this assignment" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No role assigned</SelectItem>
                     {roles.length === 0 ? (
-                      <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                        No roles available. Create roles first.
-                      </div>
+                      <div className="px-2 py-1.5 text-sm text-muted-foreground">No roles available. Create roles first.</div>
                     ) : (
-                      roles.map(role => (
+                      roles.map((role) => (
                         <SelectItem key={role.id} value={String(role.id)}>
                           {role.name}
                         </SelectItem>
@@ -495,90 +290,30 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
               </div>
             </div>
 
-            {!staff && !formData.useExistingUser && (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="password">Password *</Label>
-                  <div className="relative">
-                    <Input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      value={formData.password}
-                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      required
-                      placeholder="Minimum 8 characters"
-                      minLength={8}
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      {showPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="confirmPassword">Confirm Password *</Label>
-                  <div className="relative">
-                    <Input
-                      id="confirmPassword"
-                      type={showConfirmPassword ? "text" : "password"}
-                      value={formData.confirmPassword}
-                      onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                      required
-                      placeholder="Confirm password"
-                      minLength={8}
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      {showConfirmPassword ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
             <div className="space-y-2 md:col-span-2">
               <Label>Outlet Assignment</Label>
               <div className="border rounded-md p-4 max-h-48 overflow-y-auto">
-                {outlets.filter(o => o.isActive).length === 0 ? (
+                {outlets.filter((outlet) => outlet.isActive).length === 0 ? (
                   <p className="text-sm text-muted-foreground">No active outlets available</p>
                 ) : (
                   <div className="space-y-2">
-                    {outlets.filter(o => o.isActive).map(outlet => (
-                      <div key={outlet.id} className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          id={`outlet-${outlet.id}`}
-                          aria-label={`Assign to outlet ${outlet.name}`}
-                          checked={formData.outlet_ids.includes(String(outlet.id))}
-                          onChange={() => handleOutletToggle(String(outlet.id))}
-                          className="h-4 w-4 rounded border-gray-300"
-                        />
-                        <Label
-                          htmlFor={`outlet-${outlet.id}`}
-                          className="flex items-center gap-2 cursor-pointer flex-1"
-                        >
-                          <MapPin className="h-3 w-3 text-muted-foreground" />
-                          <span>{outlet.name}</span>
-                        </Label>
-                      </div>
-                    ))}
+                    {outlets
+                      .filter((outlet) => outlet.isActive)
+                      .map((outlet) => (
+                        <div key={outlet.id} className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            aria-label={`Assign to outlet ${outlet.name}`}
+                            checked={formData.outlet_ids.includes(String(outlet.id))}
+                            onChange={() => handleOutletToggle(String(outlet.id))}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          <div className="flex items-center gap-2 flex-1">
+                            <MapPin className="h-3 w-3 text-muted-foreground" />
+                            <span>{outlet.name}</span>
+                          </div>
+                        </div>
+                      ))}
                   </div>
                 )}
               </div>
@@ -595,7 +330,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading}>
-              {isLoading ? (staff ? "Updating..." : "Assigning...") : (staff ? "Update Assignment" : "Assign Staff")}
+              {isLoading ? (staff ? "Updating..." : "Assigning...") : staff ? "Update Assignment" : "Assign Selected Users"}
             </Button>
           </DialogFooter>
         </form>

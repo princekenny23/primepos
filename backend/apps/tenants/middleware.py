@@ -22,6 +22,23 @@ class TenantMiddleware(MiddlewareMixin):
         if request.path.startswith('/admin/') or request.path.startswith('/static/'):
             return None
 
+        # Resolve tenant from host/subdomain first (Odoo-style URL tenancy).
+        host = (
+            request.META.get('HTTP_X_TENANT_HOST')
+            or request.META.get('HTTP_HOST')
+            or request.get_host()
+            or ''
+        ).split(':')[0].strip().lower()
+
+        if host:
+            tenant = Tenant.objects.filter(is_active=True, domain__iexact=host).first()
+            if not tenant and '.' in host:
+                subdomain = host.split('.', 1)[0]
+                if subdomain and subdomain not in {'www', 'api', 'admin'}:
+                    tenant = Tenant.objects.filter(is_active=True, subdomain__iexact=subdomain).first()
+            if tenant:
+                request.tenant = tenant
+
         # Get token from Authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
         if not auth_header.startswith('Bearer '):

@@ -4,6 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.db.models import Q
 from .serializers import CustomTokenObtainPairSerializer, RegisterSerializer, UserSerializer
 
@@ -17,6 +18,31 @@ class LoginView(TokenObtainPairView):
     
     def post(self, request, *args, **kwargs):
         """Override post to log login activity"""
+        if getattr(settings, 'TENANT_URL_STRICT', False):
+            host = (
+                request.META.get('HTTP_X_TENANT_HOST')
+                or request.META.get('HTTP_HOST')
+                or request.get_host()
+                or ''
+            ).split(':')[0].strip().lower()
+            is_local_host = host in {'', 'localhost', '127.0.0.1'}
+
+            # In strict mode, tenant login should come from a tenant-resolved URL.
+            if not is_local_host and not getattr(request, 'tenant', None):
+                identifier = request.data.get('identifier') or request.data.get('email')
+                is_saas_admin_attempt = False
+                if identifier:
+                    is_saas_admin_attempt = User.objects.filter(
+                        Q(email__iexact=identifier) | Q(username__iexact=identifier),
+                        is_saas_admin=True,
+                    ).exists()
+
+                if not is_saas_admin_attempt:
+                    return Response(
+                        {'detail': 'Tenant URL not recognized. Please use your tenant login URL.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
         response = super().post(request, *args, **kwargs)
         
         # Log login if successful
@@ -26,9 +52,12 @@ class LoginView(TokenObtainPairView):
                 identifier = request.data.get('identifier') or request.data.get('email')
                 user = None
                 if identifier:
-                    user = User.objects.filter(
+                    user_qs = User.objects.filter(
                         Q(email__iexact=identifier) | Q(username__iexact=identifier)
-                    ).first()
+                    )
+                    if getattr(request, 'tenant', None):
+                        user_qs = user_qs.filter(tenant=request.tenant)
+                    user = user_qs.first()
                 if user and user.tenant:
                     # Get IP address
                     ip_address = self._get_client_ip(request)

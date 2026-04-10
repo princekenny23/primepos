@@ -4,6 +4,7 @@ from django.core.validators import MinValueValidator
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django.utils.text import slugify
 from decimal import Decimal
 
 
@@ -29,6 +30,8 @@ class Tenant(models.Model):
     email = models.EmailField(blank=True)
     address = models.TextField(blank=True)
     logo = models.ImageField(upload_to='tenants/logos/', blank=True, null=True, help_text='Business logo')
+    subdomain = models.SlugField(max_length=63, unique=True, blank=True, null=True)
+    domain = models.CharField(max_length=255, unique=True, blank=True, null=True)
     settings = models.JSONField(default=dict, blank=True)
     has_distribution = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
@@ -43,6 +46,23 @@ class Tenant(models.Model):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        # Ensure every tenant can be resolved by URL even if subdomain/domain are not set manually.
+        if not self.subdomain and self.name:
+            base_slug = slugify(self.name)[:50] or 'tenant'
+            candidate = base_slug
+            counter = 1
+            while Tenant.objects.exclude(pk=self.pk).filter(subdomain=candidate).exists():
+                suffix = f"-{counter}"
+                candidate = f"{base_slug[:max(1, 63 - len(suffix))]}{suffix}"
+                counter += 1
+            self.subdomain = candidate
+
+        base_domain = getattr(settings, 'TENANT_BASE_DOMAIN', '').strip().lower()
+        if base_domain and self.subdomain and not self.domain:
+            self.domain = f"{self.subdomain}.{base_domain}"
+        super().save(*args, **kwargs)
 
 
 class TenantPaymentRecord(models.Model):

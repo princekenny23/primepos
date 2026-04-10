@@ -1,6 +1,52 @@
 from rest_framework import permissions
 
 
+OUTLET_MODULE_PERMISSION_KEYS = {
+    'allow_sales',
+    'allow_pos',
+    'allow_inventory',
+    'allow_office',
+    'allow_settings',
+    'allow_storefront',
+    'has_distribution',
+}
+
+FEATURE_TO_PARENT_MODULE_PERMISSION = {
+    'allow_sales_create': 'allow_sales',
+    'allow_sales_refund': 'allow_sales',
+    'allow_sales_reports': 'allow_sales',
+    'allow_pos_restaurant': 'allow_pos',
+    'allow_pos_bar': 'allow_pos',
+    'allow_pos_retail': 'allow_pos',
+    'allow_pos_discounts': 'allow_pos',
+    'allow_inventory_products': 'allow_inventory',
+    'allow_inventory_stock_take': 'allow_inventory',
+    'allow_inventory_transfers': 'allow_inventory',
+    'allow_inventory_adjustments': 'allow_inventory',
+    'allow_inventory_suppliers': 'allow_inventory',
+    'allow_office_accounting': 'allow_office',
+    'allow_office_hr': 'allow_office',
+    'allow_office_users': 'allow_office',
+    'allow_office_staff': 'allow_office',
+    'allow_office_shift_management': 'allow_office',
+    'allow_office_reports': 'allow_office',
+    'allow_office_analytics': 'allow_office',
+    'allow_settings_users': 'allow_settings',
+    'allow_settings_outlets': 'allow_settings',
+    'allow_settings_integrations': 'allow_settings',
+    'allow_settings_advanced': 'allow_settings',
+    'allow_storefront_sites': 'allow_storefront',
+    'allow_storefront_orders': 'allow_storefront',
+    'allow_storefront_reports': 'allow_storefront',
+    'allow_storefront_settings': 'allow_storefront',
+    'allow_distribution_routes': 'has_distribution',
+    'allow_distribution_drivers': 'has_distribution',
+    'allow_distribution_orders': 'has_distribution',
+    'allow_distribution_tracking': 'has_distribution',
+    'allow_distribution_reports': 'has_distribution',
+}
+
+
 def _get_request_value(request, keys):
     for key in keys:
         value = None
@@ -20,6 +66,113 @@ def _to_int(value):
         return int(value)
     except (ValueError, TypeError):
         return None
+
+
+def _to_bool_or_none(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ('true', '1', 'yes', 'on'):
+            return True
+        if normalized in ('false', '0', 'no', 'off'):
+            return False
+    return None
+
+
+def _normalize_outlet_module_permissions(settings_value):
+    if not isinstance(settings_value, dict):
+        return {}
+
+    module_permissions = settings_value.get('module_permissions')
+    if not isinstance(module_permissions, dict):
+        module_permissions = settings_value.get('modulePermissions')
+    if not isinstance(module_permissions, dict):
+        module_permissions = {}
+
+    normalized = {}
+    legacy_map = {
+        'sales': 'allow_sales',
+        'pos': 'allow_pos',
+        'inventory': 'allow_inventory',
+        'office': 'allow_office',
+        'settings': 'allow_settings',
+        'storefront': 'allow_storefront',
+        'allow_distribution': 'has_distribution',
+        'distribution': 'has_distribution',
+    }
+
+    for key, value in module_permissions.items():
+        mapped_key = legacy_map.get(key, key)
+        if mapped_key not in OUTLET_MODULE_PERMISSION_KEYS:
+            continue
+        as_bool = _to_bool_or_none(value)
+        if as_bool is not None:
+            normalized[mapped_key] = as_bool
+
+    return normalized
+
+
+def resolve_outlet_from_request(request, tenant=None):
+    outlet_id = _get_request_value(request, ['outlet', 'outlet_id', 'warehouse', 'warehouse_id'])
+    if outlet_id in (None, '', 'null'):
+        outlet_id = request.headers.get('X-Outlet-ID')
+
+    outlet_id_int = _to_int(outlet_id)
+    if not outlet_id_int:
+        return None
+
+    from apps.outlets.models import Outlet
+    user = getattr(request, 'user', None)
+    is_saas_admin = bool(getattr(user, 'is_authenticated', False) and getattr(user, 'is_saas_admin', False))
+
+    try:
+        if is_saas_admin:
+            return Outlet.objects.get(id=outlet_id_int)
+
+        tenant_obj = tenant or resolve_tenant_from_request(request)
+        if not tenant_obj:
+            return None
+
+        return Outlet.objects.get(id=outlet_id_int, tenant=tenant_obj)
+    except Outlet.DoesNotExist:
+        return None
+
+
+def get_required_outlet_module_permission(permission_key):
+    if permission_key in OUTLET_MODULE_PERMISSION_KEYS:
+        return permission_key
+    return FEATURE_TO_PARENT_MODULE_PERMISSION.get(permission_key)
+
+
+def is_outlet_module_permission_enabled(outlet, permission_key):
+    if not outlet:
+        return True
+
+    required_key = get_required_outlet_module_permission(permission_key)
+    if not required_key:
+        return True
+
+    settings_value = getattr(outlet, 'settings', None)
+    normalized_permissions = _normalize_outlet_module_permissions(settings_value)
+
+    # If no explicit module permissions are configured for outlet, default to enabled.
+    if required_key not in normalized_permissions:
+        if required_key == 'has_distribution':
+            distribution_active = _to_bool_or_none(getattr(outlet, 'distribution_active', None))
+            if distribution_active is False:
+                return False
+        return True
+
+    enabled = normalized_permissions[required_key]
+    if required_key == 'has_distribution' and enabled:
+        distribution_active = _to_bool_or_none(getattr(outlet, 'distribution_active', None))
+        if distribution_active is False:
+            return False
+
+    return enabled is not False
 
 
 def resolve_tenant_from_request(request):
@@ -148,8 +301,20 @@ class HasTenantModuleAccess(permissions.BasePermission):
         if not permissions_obj:
             return True
 
+        outlet = resolve_outlet_from_request(request, tenant)
+
         keys = required if isinstance(required, (list, tuple, set)) else [required]
-        checks = [getattr(permissions_obj, key, True) is not False for key in keys]
+
+        checks = []
+        for key in keys:
+            tenant_allowed = getattr(permissions_obj, key, True) is not False
+            if not tenant_allowed:
+                checks.append(False)
+                continue
+
+            outlet_allowed = is_outlet_module_permission_enabled(outlet, key)
+            checks.append(outlet_allowed)
+
         require_any = bool(getattr(view, 'require_any_tenant_permission', False))
 
         return any(checks) if require_any else all(checks)
@@ -263,39 +428,8 @@ class TenantFilterMixin:
         Returns:
             Outlet instance or None
         """
-        # Check query params first (most common)
-        outlet_id = request.query_params.get('outlet') or request.query_params.get('outlet_id')
-        
-        # Check headers (X-Outlet-ID)
-        if not outlet_id:
-            outlet_id = request.headers.get('X-Outlet-ID')
-        
-        # Check request data (for POST/PUT)
-        if not outlet_id and hasattr(request, 'data'):
-            outlet_id = (
-                request.data.get('outlet')
-                or request.data.get('outlet_id')
-                or request.data.get('warehouse')
-                or request.data.get('warehouse_id')
-            )
-        
-        if not outlet_id:
-            return None
-        
-        try:
-            from apps.outlets.models import Outlet
-            user = getattr(request, 'user', None)
-            is_saas_admin = bool(getattr(user, 'is_authenticated', False) and getattr(user, 'is_saas_admin', False))
-            # SaaS admins can access outlets from any tenant
-            if is_saas_admin:
-                return Outlet.objects.get(id=outlet_id)
-            else:
-                tenant = self.get_tenant_for_request(request)
-                if not tenant:
-                    return None
-                return Outlet.objects.get(id=outlet_id, tenant=tenant)
-        except (Outlet.DoesNotExist, ValueError, TypeError):
-            return None
+        tenant = self.get_tenant_for_request(request)
+        return resolve_outlet_from_request(request, tenant)
     
     def validate_tenant_id(self, request, tenant_id_from_data):
         """

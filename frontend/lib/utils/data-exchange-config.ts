@@ -434,7 +434,7 @@ export const dataExchangeConfigs: Record<string, DataExchangeConfig> = {
     defaultFormat: "xlsx",
     showFieldsInfo: false,
     filters: {
-      outlet: false,
+      outlet: true,
       category: false,
       status: false,
     },

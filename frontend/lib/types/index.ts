@@ -9,6 +9,7 @@ export interface Business {
   name: string
   type: BusinessType
   posType: POSType
+  logo?: string
   currency: string
   currencySymbol: string
   phone: string

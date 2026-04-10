@@ -42,6 +42,8 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
     can_settings: false,
     can_dashboard: true,
     can_distribution: false,
+    can_storefront: false,
+    can_switch_outlet: true,
     is_active: true,
   })
 
@@ -61,6 +63,8 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
           can_settings: role.can_settings || false,
           can_dashboard: role.can_dashboard !== undefined ? role.can_dashboard : true,
           can_distribution: role.can_distribution || false,
+          can_storefront: role.can_storefront || false,
+          can_switch_outlet: role.can_switch_outlet !== undefined ? role.can_switch_outlet : true,
           is_active: role.is_active !== undefined ? role.is_active : true,
         })
       } else {
@@ -77,6 +81,8 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
           can_settings: false,
           can_dashboard: true,
           can_distribution: false,
+          can_storefront: false,
+          can_switch_outlet: true,
           is_active: true,
         })
       }
@@ -120,6 +126,8 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
         can_settings: formData.can_settings,
         can_dashboard: formData.can_dashboard,
         can_distribution: formData.can_distribution,
+        can_storefront: formData.can_storefront,
+        can_switch_outlet: formData.can_switch_outlet,
         is_active: formData.is_active,
       }
 
@@ -307,6 +315,30 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
                     id="can_distribution"
                     checked={formData.can_distribution}
                     onCheckedChange={(checked) => setFormData({ ...formData, can_distribution: checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between space-x-2">
+                  <Label htmlFor="can_storefront" className="flex flex-col space-y-1">
+                    <span>Storefront</span>
+                    <span className="font-normal text-xs text-muted-foreground">View and manage storefront features</span>
+                  </Label>
+                  <Switch
+                    id="can_storefront"
+                    checked={formData.can_storefront}
+                    onCheckedChange={(checked) => setFormData({ ...formData, can_storefront: checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between space-x-2">
+                  <Label htmlFor="can_switch_outlet" className="flex flex-col space-y-1">
+                    <span>Switch Outlet</span>
+                    <span className="font-normal text-xs text-muted-foreground">Allow switching active outlet</span>
+                  </Label>
+                  <Switch
+                    id="can_switch_outlet"
+                    checked={formData.can_switch_outlet}
+                    onCheckedChange={(checked) => setFormData({ ...formData, can_switch_outlet: checked })}
                   />
                 </div>
               </div>

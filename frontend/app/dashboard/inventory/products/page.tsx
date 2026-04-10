@@ -104,6 +104,8 @@ export default function ProductsPage() {
   const [showExport, setShowExport] = useState(false)
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
+  const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false)
+  const [isDeletingAllProducts, setIsDeletingAllProducts] = useState(false)
   const [productToDelete, setProductToDelete] = useState<any>(null)
   const [showOrderModal, setShowOrderModal] = useState(false)
   const [productToOrder, setProductToOrder] = useState<any>(null)
@@ -115,6 +117,27 @@ export default function ProductsPage() {
   const isWholesaleRetail = outletSegment === "retail"
   const isBar = outletSegment === "bar"
   const isRestaurant = outletSegment === "restaurant"
+
+  // Data-driven column visibility — only show a column if at least one product has a value
+  const hasSkuColumn = useMemo(() => products.some(p => p.sku), [products])
+  const hasCategoryColumn = useMemo(() => products.some(p => p.category?.name || p.categoryId), [products])
+  const hasOutletColumn = useMemo(() => products.some(p => p.outlet || p.outlet_id || p.outlet_name), [products])
+  const hasCostColumn = useMemo(() => products.some(p => p.cost && Number(p.cost) > 0), [products])
+  const hasWholesaleColumn = useMemo(() =>
+    isWholesaleRetail && products.some(p =>
+      p.wholesale_enabled || p.wholesaleEnabled ||
+      Number(p.wholesale_price || 0) > 0 || Number(p.wholesalePrice || 0) > 0
+    ), [products, isWholesaleRetail])
+  const hasVolumeColumn = useMemo(() =>
+    isBar && products.some(p => /Volume:\s*\d+ml/i.test(p.description || "")),
+    [products, isBar])
+  const hasAlcoholColumn = useMemo(() =>
+    isBar && products.some(p => /Alcohol:\s*[\d.]+%/i.test(p.description || "")),
+    [products, isBar])
+  const hasPrepTimeColumn = useMemo(() =>
+    isRestaurant && products.some(p => /Prep time:\s*\d+\s*min/i.test(p.description || "")),
+    [products, isRestaurant])
+  const hasMenuItemColumn = useMemo(() => isRestaurant, [isRestaurant])
 
   const resolveProductImageUrl = useCallback((rawUrl?: string) => {
     if (!rawUrl) return ""
@@ -166,7 +189,9 @@ export default function ProductsPage() {
 
     setIsLoading(true)
     try {
-      const categoriesPromise = categoryService.list()
+      const categoriesPromise = categoryService.list({
+        outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+      })
       const allProducts: any[] = []
       let page = 1
       let next: string | undefined = undefined
@@ -426,6 +451,37 @@ export default function ProductsPage() {
     }
   }
 
+  const handleDeleteAllProducts = async () => {
+    if (products.length === 0) return
+
+    setIsDeletingAllProducts(true)
+    try {
+      const productIds = products
+        .map((product) => String(product.id || ""))
+        .filter(Boolean)
+
+      const response = await productService.bulkDelete(productIds)
+      const deletedCount = response?.deleted_count || 0
+
+      toast({
+        title: "Products Deleted",
+        description: `${deletedCount} product${deletedCount !== 1 ? "s" : ""} deleted successfully.`,
+      })
+
+      await handleProductSaved()
+    } catch (error: any) {
+      console.error("Failed to delete all products:", error)
+      toast({
+        title: "Delete All Failed",
+        description: error.message || "Failed to delete all products. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeletingAllProducts(false)
+      setShowDeleteAllDialog(false)
+    }
+  }
+
   return (
     <DashboardLayout>
       <PageLayout
@@ -445,38 +501,43 @@ export default function ProductsPage() {
             <div className="px-6 py-3 border-b border-gray-300 flex gap-3 justify-end">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button className="bg-blue-900 hover:bg-blue-800 text-white">
-                    <Upload className="mr-2 h-4 w-4" />
-                    Import / Export
+                  <Button variant="outline" size="icon" className="border-blue-600 text-blue-600 hover:bg-blue-50 hover:text-blue-700" aria-label="Open product actions">
+                    <Menu className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => { setSelectedProduct(null); setShowAddProduct(true) }}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Product
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => setShowImport(true)}>
                     <Upload className="mr-2 h-4 w-4" />
-                    Import Products
+                    Import / Export
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setShowExport(true)} disabled={products.length === 0}>
                     <Download className="mr-2 h-4 w-4" />
                     Export Products
                   </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/inventory/products/categories">
+                      <Folder className="mr-2 h-4 w-4" />
+                      Categories
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setShowDeleteAllDialog(true)}
+                    disabled={products.length === 0 || isDeletingAllProducts}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete All Products
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Link href="/dashboard/inventory/products/categories">
-                <Button className="bg-blue-900 hover:bg-blue-800 text-white">
-                  <Folder className="mr-2 h-4 w-4" />
-                  Categories
-                </Button>
-              </Link>
-              <Button 
-                onClick={() => {
-                  setSelectedProduct(null)
-                  setShowAddProduct(true)
-                }}
-                className="bg-blue-900 hover:bg-blue-800 text-white"
-              >
-                <Plus className="mr-2 h-4 w-4" />
-                Add Product
-              </Button>
             </div>
 
             {/* Filters */}
@@ -551,18 +612,18 @@ export default function ProductsPage() {
                       <TableHeader>
                         <TableRow className="bg-gray-50">
                           <TableHead className="text-gray-900 font-semibold">Product</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">SKU</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">Category</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">Cost</TableHead>
+                          {hasSkuColumn && <TableHead className="text-gray-900 font-semibold">SKU</TableHead>}
+                          {hasCategoryColumn && <TableHead className="text-gray-900 font-semibold">Category</TableHead>}
+                          {hasOutletColumn && <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>}
+                          {hasCostColumn && <TableHead className="text-gray-900 font-semibold">Cost</TableHead>}
                           <TableHead className="text-gray-900 font-semibold">Retail Price</TableHead>
-                          {isWholesaleRetail && <TableHead className="text-gray-900 font-semibold">Wholesale Price</TableHead>}
-                          {isBar && <TableHead className="text-gray-900 font-semibold">Volume (ml)</TableHead>}
-                          {isBar && <TableHead className="text-gray-900 font-semibold">Alcohol %</TableHead>}
-                          {isRestaurant && <TableHead>Prep Time</TableHead>}
-                          {isRestaurant && <TableHead>Menu Item</TableHead>}
-                          <TableHead>Stock</TableHead>
-                          <TableHead>Actions</TableHead>
+                          {hasWholesaleColumn && <TableHead className="text-gray-900 font-semibold">Wholesale Price</TableHead>}
+                          {hasVolumeColumn && <TableHead className="text-gray-900 font-semibold">Volume (ml)</TableHead>}
+                          {hasAlcoholColumn && <TableHead className="text-gray-900 font-semibold">Alcohol %</TableHead>}
+                          {hasPrepTimeColumn && <TableHead className="text-gray-900 font-semibold">Prep Time</TableHead>}
+                          {hasMenuItemColumn && <TableHead className="text-gray-900 font-semibold">Menu Item</TableHead>}
+                          <TableHead className="text-gray-900 font-semibold">Stock</TableHead>
+                          <TableHead className="text-gray-900 font-semibold">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -601,14 +662,16 @@ export default function ProductsPage() {
                           </Link>
                         </div>
                       </TableCell>
-                      <TableCell>{product.sku || "N/A"}</TableCell>
-                      <TableCell>{categoryName}</TableCell>
-                      <TableCell>{outletName}</TableCell>
-                      <TableCell>{currentBusiness?.currencySymbol || "MWK"} {product.cost ? product.cost.toFixed(2) : "0.00"}</TableCell>
+                      {hasSkuColumn && <TableCell>{product.sku || "—"}</TableCell>}
+                      {hasCategoryColumn && <TableCell>{categoryName}</TableCell>}
+                      {hasOutletColumn && <TableCell>{outletName}</TableCell>}
+                      {hasCostColumn && (
+                        <TableCell>{currentBusiness?.currencySymbol || "MWK"} {product.cost ? Number(product.cost).toFixed(2) : "0.00"}</TableCell>
+                      )}
                       <TableCell>
                         {currentBusiness?.currencySymbol || "MWK"} {(product.retail_price || product.price || 0).toFixed(2)}
                       </TableCell>
-                      {isWholesaleRetail && (
+                      {hasWholesaleColumn && (
                         <TableCell>
                           {product.wholesale_enabled || product.wholesaleEnabled ? (
                             <span>
@@ -624,22 +687,22 @@ export default function ProductsPage() {
                           )}
                         </TableCell>
                       )}
-                      {isBar && (
+                      {hasVolumeColumn && (
                         <TableCell>
                           {businessFields.volume_ml ? `${businessFields.volume_ml}ml` : <span className="text-muted-foreground">—</span>}
                         </TableCell>
                       )}
-                      {isBar && (
+                      {hasAlcoholColumn && (
                         <TableCell>
                           {businessFields.alcohol_percentage !== undefined ? `${businessFields.alcohol_percentage}%` : <span className="text-muted-foreground">—</span>}
                         </TableCell>
                       )}
-                      {isRestaurant && (
+                      {hasPrepTimeColumn && (
                         <TableCell>
                           {businessFields.preparation_time ? `${businessFields.preparation_time} min` : <span className="text-muted-foreground">—</span>}
                         </TableCell>
                       )}
-                      {isRestaurant && (
+                      {hasMenuItemColumn && (
                         <TableCell>
                           <span className={`px-2 py-1 rounded-full text-xs ${
                             businessFields.is_menu_item 
@@ -1047,6 +1110,32 @@ export default function ProductsPage() {
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deletingProductId !== null ? "Deleting..." : "Delete Product"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showDeleteAllDialog} onOpenChange={setShowDeleteAllDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Delete All Products
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete all products in this list?
+              <br />
+              <span className="text-destructive font-medium">This action cannot be undone.</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingAllProducts}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteAllProducts}
+              disabled={isDeletingAllProducts || products.length === 0}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeletingAllProducts ? "Deleting..." : "Delete All Products"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -15,7 +15,8 @@ class RoleSerializer(serializers.ModelSerializer):
         model = Role
         fields = ('id', 'tenant', 'name', 'description', 'can_sales', 'can_inventory',
                   'can_products', 'can_customers', 'can_reports', 'can_staff',
-                  'can_settings', 'can_dashboard', 'is_active', 'created_at', 'updated_at')
+                  'can_settings', 'can_dashboard', 'can_storefront', 'can_switch_outlet',
+                  'is_active', 'created_at', 'updated_at')
         read_only_fields = ('id', 'tenant', 'created_at', 'updated_at')
 
 

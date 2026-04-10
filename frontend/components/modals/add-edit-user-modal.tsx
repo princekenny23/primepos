@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-  import { User, Mail, Phone, Eye, EyeOff } from "lucide-react"
+import { User, Mail, Phone, Eye, EyeOff } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { userService } from "@/lib/services/userService"
@@ -28,13 +28,14 @@ interface AddEditUserModalProps {
 
 export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEditUserModalProps) {
   const { toast } = useToast()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { t } = useI18n()
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [formData, setFormData] = useState({
-    name: "",
+    firstName: "",
+    lastName: "",
     email: "",
     phone: "",
     role: "staff" as "admin" | "manager" | "cashier" | "staff",
@@ -45,9 +46,15 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
   useEffect(() => {
     if (open) {
       if (user) {
+        const userName = (user.name || "").trim()
+        const nameParts = userName.split(/\s+/).filter(Boolean)
+        const firstName = nameParts[0] || ""
+        const lastName = nameParts.slice(1).join(" ")
+
         // Edit mode
         setFormData({
-          name: user.name || "",
+          firstName,
+          lastName,
           email: user.email || "",
           phone: "",
           role: (user.role as any) || "staff",
@@ -57,7 +64,8 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
       } else {
         // Add mode
         setFormData({
-          name: "",
+          firstName: "",
+          lastName: "",
           email: "",
           phone: "",
           role: "staff",
@@ -81,10 +89,10 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
     }
 
     // Validation
-    if (!formData.name || !formData.email) {
+    if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.email.trim()) {
       toast({
         title: "Validation Error",
-        description: "Name and email are required.",
+        description: "First name, last name, and email are required.",
         variant: "destructive",
       })
       return
@@ -108,13 +116,24 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
       return
     }
 
+    if (!user && formData.password.length < 8) {
+      toast({
+        title: "Validation Error",
+        description: "Password must be at least 8 characters.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const fullName = `${formData.firstName.trim()} ${formData.lastName.trim()}`.trim()
+
     setIsLoading(true)
 
     try {
       if (user) {
         // Update user
         await userService.update(user.id, {
-          name: formData.name,
+          name: fullName,
           phone: formData.phone || undefined,
           role: formData.role,
           password: formData.password || undefined,
@@ -132,11 +151,12 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
       } else {
         // Create new user
         const response = await userService.create({
-          email: formData.email,
-          name: formData.name,
+          email: formData.email.trim(),
+          name: fullName,
           phone: formData.phone || undefined,
           role: formData.role,
           tenant: currentBusiness.id,
+          outlet: currentOutlet?.id,
           password: formData.password || undefined,
         })
 
@@ -154,7 +174,8 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
 
         // Reset form
         setFormData({
-          name: "",
+          firstName: "",
+          lastName: "",
           email: "",
           phone: "",
           role: "staff",
@@ -195,15 +216,30 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Full Name *</Label>
+              <Label htmlFor="firstName">First Name *</Label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  id="name"
+                  id="firstName"
                   className="pl-10"
-                  placeholder={t("settings.users.name_placeholder")}
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="John"
+                  value={formData.firstName}
+                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="lastName">Last Name *</Label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="lastName"
+                  className="pl-10"
+                  placeholder="Doe"
+                  value={formData.lastName}
+                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
                   required
                 />
               </div>
@@ -253,6 +289,7 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                       required={!user}
+                      minLength={8}
                       className="pr-10"
                     />
                     <button
@@ -279,6 +316,7 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
                       value={formData.confirmPassword}
                       onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                       required={!user}
+                      minLength={8}
                       className="pr-10"
                     />
                     <button

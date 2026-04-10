@@ -75,9 +75,18 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Support hybrid login using either email or username.
         identifier = attrs.pop('identifier', None) or attrs.get(self.username_field)
         if identifier:
-            user = User.objects.filter(
+            request = self.context.get('request')
+            tenant = getattr(request, 'tenant', None) if request else None
+
+            user_qs = User.objects.filter(
                 Q(email__iexact=identifier) | Q(username__iexact=identifier)
-            ).first()
+            )
+
+            # If tenant is already resolved from URL host, authenticate within that tenant only.
+            if tenant:
+                user_qs = user_qs.filter(tenant=tenant)
+
+            user = user_qs.first()
             if user:
                 attrs[self.username_field] = getattr(user, self.username_field)
             else:

@@ -21,7 +21,7 @@ import { useBusinessStore } from "@/stores/businessStore"
 import type { Category } from "@/lib/types"
 
 export default function CategoriesPage() {
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<any>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -33,7 +33,9 @@ export default function CategoriesPage() {
       
       setIsLoading(true)
       try {
-        const cats = await categoryService.list()
+        const cats = await categoryService.list({
+          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+        })
         setCategories(cats)
       } catch (error) {
         console.error("Failed to load categories:", error)
@@ -44,12 +46,14 @@ export default function CategoriesPage() {
     }
     
     loadCategories()
-  }, [currentBusiness])
+  }, [currentBusiness, currentOutlet])
 
   const handleCategorySaved = () => {
     // Reload categories after save
     if (currentBusiness) {
-      categoryService.list().then(cats => {
+      categoryService.list({
+        outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+      }).then(cats => {
         setCategories(cats)
       })
     }

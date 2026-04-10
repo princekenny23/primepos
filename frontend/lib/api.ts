@@ -155,6 +155,15 @@ export class ApiClient {
             }
           }
         }
+
+        // Preserve browser host so backend can resolve tenant URL even when API is hosted separately.
+        const tenantHost = window.location.host
+        if (tenantHost) {
+          config.headers = {
+            ...config.headers,
+            "X-Tenant-Host": tenantHost,
+          }
+        }
       } catch (error) {
         // Silently fail if localStorage is not available
       }

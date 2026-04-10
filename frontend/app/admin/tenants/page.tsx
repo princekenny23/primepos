@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Search, Building2, Users, DollarSign, AlertTriangle, Eye, MoreVertical, Loader2, Edit, Trash2, Shield } from "lucide-react"
+import { Search, Building2, Users, DollarSign, AlertTriangle, Eye, MoreVertical, Loader2, Edit, Trash2, Shield, Copy, Check } from "lucide-react"
 import { useState, useEffect } from "react"
 import { SuspendTenantModal } from "@/components/modals/suspend-tenant-modal"
 import { ViewTenantDetailsModal } from "@/components/modals/view-tenant-details-modal"
@@ -44,6 +44,7 @@ export default function AdminTenantsPage() {
   const [tenants, setTenants] = useState<AdminTenant[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
 
   useEffect(() => {
     loadTenants()
@@ -97,6 +98,30 @@ export default function AdminTenantsPage() {
     return isActive 
       ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200"
       : "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200"
+  }
+
+  const handleCopyUrl = async (url: string) => {
+    if (!url || url === "Not configured") return
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedUrl(url)
+      setTimeout(() => setCopiedUrl((current) => (current === url ? null : current)), 1500)
+    } catch (error) {
+      console.error("Failed to copy tenant URL:", error)
+    }
+  }
+
+  const getTenantLoginUrl = (tenant: AdminTenant): string => {
+    if (tenant.domain && tenant.domain.trim()) {
+      return `https://${tenant.domain.trim().toLowerCase()}`
+    }
+
+    const baseDomain = process.env.NEXT_PUBLIC_TENANT_BASE_DOMAIN?.trim().toLowerCase()
+    if (tenant.subdomain && baseDomain) {
+      return `https://${tenant.subdomain.trim().toLowerCase()}.${baseDomain}`
+    }
+
+    return "Not configured"
   }
 
   const handleSuspend = async (tenantId: string, reason: string) => {
@@ -248,6 +273,7 @@ export default function AdminTenantsPage() {
                         <TableRow>
                           <TableHead>Tenant Name</TableHead>
                           <TableHead>Email</TableHead>
+                          <TableHead>Login URL</TableHead>
                           <TableHead>Type</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Users</TableHead>
@@ -262,6 +288,36 @@ export default function AdminTenantsPage() {
                           <TableRow key={tenant.id}>
                             <TableCell className="font-medium">{tenant.name}</TableCell>
                             <TableCell>{tenant.email}</TableCell>
+                            <TableCell className="max-w-[280px]">
+                              {getTenantLoginUrl(tenant) === "Not configured" ? (
+                                <span className="text-muted-foreground text-xs">Not configured</span>
+                              ) : (
+                                <div className="flex items-start gap-2">
+                                  <a
+                                    href={getTenantLoginUrl(tenant)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-xs text-primary underline underline-offset-2 break-all"
+                                  >
+                                    {getTenantLoginUrl(tenant)}
+                                  </a>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0"
+                                    onClick={() => handleCopyUrl(getTenantLoginUrl(tenant))}
+                                    title={copiedUrl === getTenantLoginUrl(tenant) ? "Copied" : "Copy URL"}
+                                  >
+                                    {copiedUrl === getTenantLoginUrl(tenant) ? (
+                                      <Check className="h-3.5 w-3.5 text-green-600" />
+                                    ) : (
+                                      <Copy className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                </div>
+                              )}
+                            </TableCell>
                             <TableCell>
                               <Badge variant="outline" className="capitalize">{tenant.type}</Badge>
                             </TableCell>

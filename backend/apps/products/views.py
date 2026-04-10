@@ -52,7 +52,7 @@ class CategoryViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         tenant = request_tenant or user_tenant
         
         # Get base queryset with prefetched product count to avoid N+1 queries
-        queryset = Category.objects.annotate(_products_count=Count('products'))
+        queryset = Category.objects.annotate(_products_count=Count('products', distinct=True))
         
         # Apply tenant filter - CRITICAL for security
         if not is_saas_admin:
@@ -60,6 +60,10 @@ class CategoryViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 queryset = queryset.filter(tenant=tenant)
             else:
                 return queryset.none()
+
+        outlet = self.get_outlet_for_request(self.request)
+        if outlet:
+            queryset = queryset.filter(products__outlet=outlet).distinct()
         
         return queryset
     
@@ -813,17 +817,27 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     
                     # Get optional fields from first row (product-level)
                     stock = 0
-                    if 'stock' in column_mapping:
-                        stock_val = first_row[column_mapping['stock']]
+                    # Accept common stock header variants from templates.
+                    stock_col_key = next(
+                        (k for k in ('stock', 'initial_stock_qty', 'initial_stock') if k in column_mapping),
+                        None,
+                    )
+                    if stock_col_key:
+                        stock_val = first_row[column_mapping[stock_col_key]]
                         if pd.notna(stock_val):
                             try:
                                 stock = int(float(stock_val))
                             except (ValueError, TypeError):
                                 stock = 0
-                    
+
                     unit = 'pcs'
-                    if 'unit' in column_mapping:
-                        unit_val = first_row[column_mapping['unit']]
+                    # Accept both legacy and template unit headers.
+                    unit_col_key = next(
+                        (k for k in ('unit', 'unit_name') if k in column_mapping),
+                        None,
+                    )
+                    if unit_col_key:
+                        unit_val = first_row[column_mapping[unit_col_key]]
                         if pd.notna(unit_val):
                             unit = str(unit_val).strip() or 'pcs'
                     
@@ -915,8 +929,13 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                             description = " | ".join(business_specific_info)
                     
                     low_stock_threshold = 0
-                    if 'low_stock_threshold' in column_mapping:
-                        threshold_col = column_mapping['low_stock_threshold']
+                    # Tolerate common misspellings from import sheets.
+                    threshold_col_key = next(
+                        (k for k in ('low_stock_threshold', 'low_stock_treshold', 'low_stock_thread') if k in column_mapping),
+                        None,
+                    )
+                    if threshold_col_key:
+                        threshold_col = column_mapping[threshold_col_key]
                         threshold_val = first_row[threshold_col]
                         if pd.notna(threshold_val):
                             try:

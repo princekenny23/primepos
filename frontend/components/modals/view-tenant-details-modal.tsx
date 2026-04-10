@@ -17,7 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Building2, Users, DollarSign, Calendar, Mail, Phone } from "lucide-react"
+import { Building2, Users, DollarSign, Calendar, Mail, Phone, Copy, Check } from "lucide-react"
+import { useState } from "react"
 
 interface ViewTenantDetailsModalProps {
   open: boolean
@@ -26,7 +27,30 @@ interface ViewTenantDetailsModalProps {
 }
 
 export function ViewTenantDetailsModal({ open, onOpenChange, tenant }: ViewTenantDetailsModalProps) {
+  const [copied, setCopied] = useState(false)
   if (!tenant) return null
+
+  const tenantLoginUrl = (() => {
+    if (tenant.domain && String(tenant.domain).trim()) {
+      return `https://${String(tenant.domain).trim().toLowerCase()}`
+    }
+    const baseDomain = process.env.NEXT_PUBLIC_TENANT_BASE_DOMAIN?.trim().toLowerCase()
+    if (tenant.subdomain && baseDomain) {
+      return `https://${String(tenant.subdomain).trim().toLowerCase()}.${baseDomain}`
+    }
+    return "Not configured"
+  })()
+
+  const handleCopy = async () => {
+    if (tenantLoginUrl === "Not configured") return
+    try {
+      await navigator.clipboard.writeText(tenantLoginUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch (error) {
+      console.error("Failed to copy tenant URL:", error)
+    }
+  }
 
   // Transform tenant data with safe defaults
   const tenantDetails = {
@@ -92,6 +116,33 @@ export function ViewTenantDetailsModal({ open, onOpenChange, tenant }: ViewTenan
                 <Badge variant={tenantDetails.status === "Active" ? "default" : "destructive"}>
                   {tenantDetails.status}
                 </Badge>
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <p className="text-sm text-muted-foreground">Login URL</p>
+                {tenantLoginUrl === "Not configured" ? (
+                  <p className="font-medium text-muted-foreground">Not configured</p>
+                ) : (
+                  <div className="flex items-start gap-2">
+                    <a
+                      href={tenantLoginUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-primary underline underline-offset-2 break-all"
+                    >
+                      {tenantLoginUrl}
+                    </a>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      onClick={handleCopy}
+                      title={copied ? "Copied" : "Copy URL"}
+                    >
+                      {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

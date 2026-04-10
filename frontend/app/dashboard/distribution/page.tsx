@@ -8,12 +8,14 @@ import { PageHeader } from "@/components/layouts/page-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { FilterableTabs, TabsContent } from "@/components/ui/filterable-tabs"
 import { useAuthStore } from "@/stores/authStore"
-import { hasDistributionAccess } from "@/lib/utils/tenant-permissions"
+import { useBusinessStore } from "@/stores/businessStore"
+import { isDistributionEnabledForOutlet } from "@/lib/utils/tenant-permissions"
 
 export default function DistributionPage() {
   const router = useRouter()
   const { user } = useAuthStore()
-  const canAccess = hasDistributionAccess(user)
+  const { currentOutlet } = useBusinessStore()
+  const canAccess = isDistributionEnabledForOutlet(user, currentOutlet)
 
   const tabs = [
     { value: "vehicles", label: "Vehicles" },
@@ -47,7 +49,7 @@ export default function DistributionPage() {
               <CardTitle>Distribution Module</CardTitle>
             </CardHeader>
             <CardContent className="text-muted-foreground">
-              Distribution is not enabled for this tenant.
+              Distribution is not enabled for this outlet.
             </CardContent>
           </Card>
         ) : (

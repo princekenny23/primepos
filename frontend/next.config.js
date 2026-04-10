@@ -4,7 +4,14 @@ const { withSentryConfig } = require("@sentry/nextjs")
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    domains: [],
+    domains: ["res.cloudinary.com"],
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "res.cloudinary.com",
+        pathname: "/**",
+      },
+    ],
     unoptimized: false,
   },
   // Performance optimizations

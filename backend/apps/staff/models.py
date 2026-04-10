@@ -19,6 +19,8 @@ class Role(models.Model):
     can_staff = models.BooleanField(default=False)
     can_settings = models.BooleanField(default=False)
     can_dashboard = models.BooleanField(default=True)
+    can_storefront = models.BooleanField(default=False)
+    can_switch_outlet = models.BooleanField(default=True)
     
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

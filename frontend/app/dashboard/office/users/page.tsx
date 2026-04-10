@@ -504,19 +504,18 @@ export default function AccountsPage() {
                         <TableHead className="text-gray-900 font-semibold">Role</TableHead>
                         <TableHead className="text-gray-900 font-semibold">Outlets</TableHead>
                         <TableHead className="text-gray-900 font-semibold">Status</TableHead>
-                        <TableHead className="text-gray-900 font-semibold">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {isStaffLoading ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-8">
+                          <TableCell colSpan={5} className="text-center py-8">
                             <p className="text-gray-600">Loading staff...</p>
                           </TableCell>
                         </TableRow>
                       ) : filteredStaff.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={6} className="text-center py-8">
+                          <TableCell colSpan={5} className="text-center py-8">
                             <p className="text-gray-600">No staff found</p>
                           </TableCell>
                         </TableRow>
@@ -533,32 +532,6 @@ export default function AccountsPage() {
                               <span className={`px-2 py-1 rounded-full text-xs ${staff.is_active ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
                                 {staff.is_active ? "Active" : "Inactive"}
                               </span>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="border-gray-300"
-                                  onClick={() => {
-                                    setSelectedStaff(staff)
-                                    setShowAddStaff(true)
-                                  }}
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="border-gray-300 text-destructive"
-                                  onClick={() => {
-                                    setStaffToDelete(staff)
-                                    setShowDeleteStaffDialog(true)
-                                  }}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
                             </TableCell>
                           </TableRow>
                         ))
@@ -843,6 +816,44 @@ export default function AccountsPage() {
                                 <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
                               )}
                               <span className="text-sm">View Customer History</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Storefront */}
+                        <div className="space-y-3">
+                          <h4 className="font-semibold text-base">Storefront</h4>
+                          <div className="space-y-2 pl-4">
+                            <div className="flex items-center gap-2">
+                              {role.can_storefront ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                              )}
+                              <span className="text-sm">View Storefront</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {role.can_storefront ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                              )}
+                              <span className="text-sm">Manage Storefront</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Switch Outlet */}
+                        <div className="space-y-3">
+                          <h4 className="font-semibold text-base">Switch Outlet</h4>
+                          <div className="space-y-2 pl-4">
+                            <div className="flex items-center gap-2">
+                              {role.can_switch_outlet ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                              )}
+                              <span className="text-sm">Switch Active Outlet</span>
                             </div>
                           </div>
                         </div>

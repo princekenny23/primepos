@@ -223,6 +223,12 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
+# Tenant URL configuration
+# TENANT_BASE_DOMAIN example: primepos.app
+TENANT_BASE_DOMAIN = config('TENANT_BASE_DOMAIN', default='')
+# When enabled, login must come from a resolvable tenant URL except local/dev hosts.
+TENANT_URL_STRICT = config('TENANT_URL_STRICT', default=False, cast=bool)
+
 # CORS Settings
 CORS_ALLOWED_ORIGINS = config(
     'CORS_ALLOWED_ORIGINS',
@@ -245,6 +251,7 @@ CORS_ALLOW_HEADERS = [
     'x-requested-with',
     'x-outlet-id',  # Custom header for outlet data isolation
     'x-tenant-id',  # Custom header for tenant context
+    'x-tenant-host',  # Browser host forwarded for tenant URL resolution
 ]
 
 # Offline sync feature flags (disabled by default)

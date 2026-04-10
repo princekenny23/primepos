@@ -8,6 +8,26 @@ import { outletService } from "@/lib/services/outletService"
 import { tillService } from "@/lib/services/tillService"
 import { useRealAPI } from "@/lib/utils/api-config"
 
+const normalizeCurrencyLabel = (value?: string | null): string => {
+  const normalized = String(value || "").trim().toUpperCase()
+
+  if (normalized === "MK") {
+    return "MWK"
+  }
+
+  return normalized || "MWK"
+}
+
+const normalizeBusinessCurrency = (business: Business | null): Business | null => {
+  if (!business) return business
+
+  return {
+    ...business,
+    currency: normalizeCurrencyLabel(business.currency),
+    currencySymbol: normalizeCurrencyLabel(business.currencySymbol),
+  }
+}
+
 let inFlightBusinessRequest: Promise<void> | null = null
 let inFlightBusinessId: string | null = null
 
@@ -50,7 +70,7 @@ export const useBusinessStore = create<BusinessState>()(
           const request = (async () => {
             set({ isLoading: true })
             const business = await tenantService.get(normalizedBusinessId)
-            set({ currentBusiness: business, currentOutlet: null, currentTill: null })
+            set({ currentBusiness: normalizeBusinessCurrency(business), currentOutlet: null, currentTill: null })
             await get().loadOutlets(normalizedBusinessId)
 
             const outlets = get().outlets
@@ -110,7 +130,7 @@ export const useBusinessStore = create<BusinessState>()(
         try {
           set({ isLoading: true })
           const businesses = await tenantService.list()
-          set({ businesses })
+          set({ businesses: businesses.map((business) => normalizeBusinessCurrency(business) as Business) })
         } catch (error) {
           console.error("Failed to load businesses:", error)
         } finally {
@@ -148,7 +168,15 @@ export const useBusinessStore = create<BusinessState>()(
               tenantOutlets.find((o: any) => o.isActive) ||
               tenantOutlets[0]
 
-            if (!current || String(current.id) !== String(preferredOutlet.id)) {
+            // Update currentOutlet if:
+            // 1. No current outlet exists
+            // 2. Outlet ID changed (outlet was switched or removed)
+            // 3. We have a currentMatch (current outlet found in refreshed list, so permissions may have changed)
+            const needsUpdate = !current || 
+              String(current.id) !== String(preferredOutlet.id) || 
+              (currentMatch && String(current.id) === String(currentMatch.id))
+
+            if (needsUpdate) {
               set({ currentOutlet: preferredOutlet, currentTill: null })
               await get().loadTills(preferredOutlet.id)
             }
@@ -193,6 +221,12 @@ export const useBusinessStore = create<BusinessState>()(
     {
       name: "primepos-business",
       storage: createJSONStorage(() => localStorage),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+
+        state.currentBusiness = normalizeBusinessCurrency(state.currentBusiness)
+        state.businesses = state.businesses.map((business) => normalizeBusinessCurrency(business) as Business)
+      },
     }
   )
 )

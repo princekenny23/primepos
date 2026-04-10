@@ -366,8 +366,11 @@ export function BusinessInfoTab() {
         onOpenChange={setShowLogoModal}
         tenantId={currentTenant?.id || ""}
         currentLogo={logoUrl || undefined}
-        onSuccess={(newLogoUrl) => {
+        onSuccess={async (newLogoUrl) => {
           setLogoUrl(newLogoUrl)
+          if (currentTenant?.id) {
+            await setCurrentBusiness(currentTenant.id)
+          }
         }}
       />
     </Card>

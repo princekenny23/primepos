@@ -28,6 +28,8 @@ const rolePermissions: Record<UserRole, string[]> = {
     "pos",
     "notifications",
     "activity-log",
+    "storefront",
+    "switch_outlet",
   ],
   manager: [
     "dashboard",
@@ -40,6 +42,8 @@ const rolePermissions: Record<UserRole, string[]> = {
     "pos",
     "notifications",
     "activity-log",
+    "storefront",
+    "switch_outlet",
   ],
   cashier: [
     "dashboard",
@@ -48,6 +52,7 @@ const rolePermissions: Record<UserRole, string[]> = {
     "office",
     "pos",
     "notifications",
+    "switch_outlet",
   ],
   staff: [
     "dashboard",
@@ -121,6 +126,8 @@ export function RoleProvider({ children }: RoleProviderProps) {
     distribution: "can_dashboard",
     "activity-log": "can_reports",
     notifications: "can_dashboard",
+    storefront: "can_storefront",
+    switch_outlet: "can_switch_outlet",
   }
 
   const hasPermission = (permission: string): boolean => {

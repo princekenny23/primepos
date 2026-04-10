@@ -1,6 +1,16 @@
 import { api, apiEndpoints } from "@/lib/api"
 import type { Business } from "@/lib/types"
 
+const normalizeCurrencyLabel = (value?: string | null): string => {
+  const normalized = String(value || "").trim().toUpperCase()
+
+  if (normalized === "MK") {
+    return "MWK"
+  }
+
+  return normalized || "MWK"
+}
+
 // Map frontend business type to backend tenant type
 const mapFrontendTypeToBackend = (type: string | undefined): string => {
   if (!type) return "retail"
@@ -26,6 +36,9 @@ export const tenantService = {
       id: String(tenant.id),
       type: mapBackendTypeToFrontend(tenant.type) as Business["type"],
       posType: (tenant.pos_type || tenant.posType || "standard") as Business["posType"],
+      currency: normalizeCurrencyLabel(tenant.currency || "MWK"),
+      currencySymbol: normalizeCurrencyLabel(tenant.currency_symbol || tenant.currencySymbol || "MWK"),
+      logo: tenant.logo || "",
     }))
   },
 
@@ -38,8 +51,9 @@ export const tenantService = {
       name: response.name,
       type: mapBackendTypeToFrontend(response.type) as Business["type"],
       posType: (response.pos_type || response.posType || "standard") as Business["posType"],
-      currency: response.currency || "MWK",
-      currencySymbol: response.currency_symbol || response.currencySymbol || "MWK",
+      logo: response.logo || "",
+      currency: normalizeCurrencyLabel(response.currency || "MWK"),
+      currencySymbol: normalizeCurrencyLabel(response.currency_symbol || response.currencySymbol || "MWK"),
       phone: response.phone || "",
       email: response.email || "",
       address: response.address || "",
@@ -63,8 +77,9 @@ export const tenantService = {
       name: response.name,
       type: mapBackendTypeToFrontend(response.type) as Business["type"],
       posType: (response.pos_type || response.posType || "standard") as Business["posType"],
-      currency: response.currency || "MWK",
-      currencySymbol: response.currency_symbol || response.currencySymbol || "MWK",
+      logo: response.logo || "",
+      currency: normalizeCurrencyLabel(response.currency || "MWK"),
+      currencySymbol: normalizeCurrencyLabel(response.currency_symbol || response.currencySymbol || "MWK"),
       phone: response.phone || "",
       email: response.email || "",
       address: response.address || "",
@@ -85,8 +100,8 @@ export const tenantService = {
       name: data.name,
       type: mapFrontendTypeToBackend(data.type),
       pos_type: data.posType || "standard",
-      currency: data.currency || "MWK",
-      currency_symbol: data.currencySymbol || "MWK",
+      currency: normalizeCurrencyLabel(data.currency || "MWK"),
+      currency_symbol: normalizeCurrencyLabel(data.currencySymbol || "MWK"),
       phone: data.phone || "",
       // Only include email if it's a valid non-empty string
       ...(data.email && data.email.trim() ? { email: data.email.trim() } : {}),
@@ -102,8 +117,9 @@ export const tenantService = {
       name: response.name,
       type: mapBackendTypeToFrontend(response.type) as Business["type"],
       posType: (response.pos_type || response.posType || "standard") as Business["posType"],
-      currency: response.currency,
-      currencySymbol: response.currency_symbol || response.currencySymbol || "MWK",
+      logo: response.logo || "",
+      currency: normalizeCurrencyLabel(response.currency || "MWK"),
+      currencySymbol: normalizeCurrencyLabel(response.currency_symbol || response.currencySymbol || "MWK"),
       phone: response.phone || "",
       email: response.email || "",
       address: response.address || "",
@@ -122,8 +138,8 @@ export const tenantService = {
       name: data.name ?? currentTenant.name,
       type: mapFrontendTypeToBackend(data.type ?? currentTenant.type),
       pos_type: data.posType ?? currentTenant.posType ?? "standard",
-      currency: data.currency ?? currentTenant.currency ?? "MWK",
-      currency_symbol: data.currencySymbol || currentTenant.currencySymbol || "MWK",
+      currency: normalizeCurrencyLabel(data.currency ?? currentTenant.currency ?? "MWK"),
+      currency_symbol: normalizeCurrencyLabel(data.currencySymbol || currentTenant.currencySymbol || "MWK"),
       phone: data.phone ?? currentTenant.phone ?? "",
       address: data.address ?? currentTenant.address ?? "",
     }
@@ -152,8 +168,9 @@ export const tenantService = {
       name: response.name,
       type: mapBackendTypeToFrontend(response.type) as Business["type"],
       posType: (response.pos_type || response.posType || "standard") as Business["posType"],
-      currency: response.currency,
-      currencySymbol: response.currency_symbol || response.currencySymbol || "MWK",
+      logo: response.logo || "",
+      currency: normalizeCurrencyLabel(response.currency || "MWK"),
+      currencySymbol: normalizeCurrencyLabel(response.currency_symbol || response.currencySymbol || "MWK"),
       phone: response.phone || "",
       email: response.email || "",
       address: response.address || "",

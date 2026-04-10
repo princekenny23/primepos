@@ -1,6 +1,16 @@
 // Currency Formatting Utilities
 import type { Business } from "../types"
 
+function normalizeCurrencyLabel(value?: string | null): string {
+  const normalized = String(value || "").trim().toUpperCase()
+
+  if (normalized === "MK") {
+    return "MWK"
+  }
+
+  return normalized || "MWK"
+}
+
 /**
  * Format currency amount using business currency settings
  * 
@@ -18,8 +28,8 @@ export function formatCurrency(
     symbolOverride?: string
   }
 ): string {
-  const currency = business?.currency || "MWK"
-  const symbol = options?.symbolOverride || business?.currencySymbol || "MWK"
+  const currency = normalizeCurrencyLabel(business?.currency)
+  const symbol = normalizeCurrencyLabel(options?.symbolOverride || business?.currencySymbol || currency)
   const decimals = options?.decimals ?? 2
   const showSymbol = options?.showSymbol ?? true
 

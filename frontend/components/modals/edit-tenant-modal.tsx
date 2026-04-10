@@ -23,6 +23,7 @@ import { Edit } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { adminService, type AdminTenant } from "@/lib/services/adminService"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface EditTenantModalProps {
   open: boolean
@@ -35,6 +36,7 @@ export function EditTenantModal({ open, onOpenChange, tenant, onUpdate }: EditTe
   const { toast } = useToast()
   const [isUpdating, setIsUpdating] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState("business")
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -48,6 +50,7 @@ export function EditTenantModal({ open, onOpenChange, tenant, onUpdate }: EditTe
       if (!tenant || !open) return
 
       setIsLoading(true)
+      setActiveTab("business")
       try {
         // Fetch full tenant details to get address and other fields
         const fullTenant = await adminService.getTenant(tenant.id)
@@ -121,11 +124,9 @@ export function EditTenantModal({ open, onOpenChange, tenant, onUpdate }: EditTe
 
   if (!tenant) return null
 
-  if (!tenant) return null
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Edit className="h-5 w-5" />
@@ -141,82 +142,90 @@ export function EditTenantModal({ open, onOpenChange, tenant, onUpdate }: EditTe
             <p className="text-muted-foreground">Loading tenant details...</p>
           </div>
         ) : (
-          <div className="space-y-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Business Name *</Label>
-            <Input
-              id="name"
-              placeholder="Enter business name"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              required
-            />
-          </div>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full py-2">
+            <TabsList className="grid w-full grid-cols-1">
+              <TabsTrigger value="business">Business Info</TabsTrigger>
+            </TabsList>
 
-          <div className="space-y-2">
-            <Label htmlFor="email">Email *</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="business@example.com"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              required
-            />
-          </div>
+            <TabsContent value="business" className="space-y-4 pt-3">
+              <div className="space-y-2">
+                <Label htmlFor="name">Business Name *</Label>
+                <Input
+                  id="name"
+                  placeholder="Enter business name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  required
+                />
+              </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="phone">Phone</Label>
-            <Input
-              id="phone"
-              type="tel"
-              placeholder="+265 123 456 789"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-            />
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email *</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="business@example.com"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  required
+                />
+              </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="type">Business Type *</Label>
-            <Select
-              value={formData.type}
-              onValueChange={(value) => setFormData({ ...formData, type: value as "wholesale and retail" | "restaurant" | "bar" })}
-              required
-            >
-              <SelectTrigger id="type">
-                <SelectValue placeholder="Select business type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="wholesale and retail">Wholesale and Retail</SelectItem>
-                <SelectItem value="restaurant">Restaurant</SelectItem>
-                <SelectItem value="bar">Bar/Nightclub</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="+265 123 456 789"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                />
+              </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="address">Address</Label>
-            <Textarea
-              id="address"
-              placeholder="Enter business address"
-              value={formData.address}
-              onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-              rows={3}
-            />
-          </div>
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="type">Business Type *</Label>
+                <Select
+                  value={formData.type}
+                  onValueChange={(value) => setFormData({ ...formData, type: value as "wholesale and retail" | "restaurant" | "bar" })}
+                  required
+                >
+                  <SelectTrigger id="type">
+                    <SelectValue placeholder="Select business type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="wholesale and retail">Wholesale and Retail</SelectItem>
+                    <SelectItem value="restaurant">Restaurant</SelectItem>
+                    <SelectItem value="bar">Bar/Nightclub</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="address">Address</Label>
+                <Textarea
+                  id="address"
+                  placeholder="Enter business address"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  rows={3}
+                />
+              </div>
+            </TabsContent>
+          </Tabs>
         )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button
-            onClick={handleUpdate}
-            disabled={isUpdating || isLoading || !formData.name.trim() || !formData.email.trim()}
-          >
-            {isUpdating ? "Updating..." : "Update Tenant"}
-          </Button>
+          {activeTab === "business" && (
+            <Button
+              onClick={handleUpdate}
+              disabled={isUpdating || isLoading || !formData.name.trim() || !formData.email.trim()}
+            >
+              {isUpdating ? "Updating..." : "Update Tenant"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

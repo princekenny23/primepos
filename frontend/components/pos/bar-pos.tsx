@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { 
@@ -200,6 +201,9 @@ export function BarPOS() {
   const [rowActionPassword, setRowActionPassword] = useState("")
   const [showRowActionPassword, setShowRowActionPassword] = useState(false)
   const [isVerifyingRowAction, setIsVerifyingRowAction] = useState(false)
+  const [showVoidReasonDialog, setShowVoidReasonDialog] = useState(false)
+  const [voidReason, setVoidReason] = useState("")
+  const [isSubmittingVoid, setIsSubmittingVoid] = useState(false)
 
   // Processing states
   const [isProcessing, setIsProcessing] = useState(false)
@@ -253,7 +257,11 @@ export function BarPOS() {
     setProductsError(null)
 
     try {
-      const response = await productService.list({ is_active: true, page })
+      const response = await productService.list({
+        is_active: true,
+        page,
+        outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+      })
       const productsList = response.results || []
       setProducts(productsList)
       setProductsPage(page)
@@ -273,7 +281,7 @@ export function BarPOS() {
         setIsLoadingNextProductsPage(false)
       }
     }
-  }, [currentBusiness])
+  }, [currentBusiness, currentOutlet])
 
   const handleNextProductsPage = useCallback(() => {
     if (!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage) return
@@ -289,7 +297,9 @@ export function BarPOS() {
     setIsLoadingCategories(true)
     setCategoriesError(null)
     try {
-      const list = await categoryService.list()
+      const list = await categoryService.list({
+        outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+      })
       setCategories(list)
     } catch (error) {
       console.error("Failed to load categories:", error)
@@ -298,7 +308,7 @@ export function BarPOS() {
     } finally {
       setIsLoadingCategories(false)
     }
-  }, [])
+  }, [currentOutlet])
 
   const loadTabs = useCallback(async () => {
     if (!outlet) return
@@ -713,7 +723,17 @@ export function BarPOS() {
     }
   }
 
-  const handleVoidSale = async () => {
+  const openVoidReasonDialog = () => {
+    setVoidReason("")
+    setShowVoidReasonDialog(true)
+  }
+
+  const closeVoidReasonDialog = () => {
+    if (isSubmittingVoid) return
+    setShowVoidReasonDialog(false)
+  }
+
+  const handleVoidSale = async (reasonInput?: string) => {
     if (cart.length === 0) {
       toast({ title: "Void Sale", description: "Cart is already empty." })
       return
@@ -724,32 +744,36 @@ export function BarPOS() {
       return
     }
 
+    const reason = String(reasonInput || "").trim()
+    if (!reason) {
+      openVoidReasonDialog()
+      return
+    }
+
+    setIsSubmittingVoid(true)
+
     try {
-      const subtotal = Math.round(cartSubtotal * 100) / 100
-      const discount = Math.round(discountAmount * 100) / 100
-      const tax = 0
-      const total = Math.round((subtotal - discount + tax) * 100) / 100
-
-      const items_data = cart.map((item) => ({
-        product_id: item.productId,
-        unit_id: (item as any).unitId || undefined,
-        quantity: item.quantity,
-        price: Math.round(item.price * 100) / 100,
-        notes: item.notes || "",
-      }))
-
-      const voidSale = await saleService.void({
-        outlet: outlet.id,
-        shift: activeShift?.id,
-        customer: selectedCustomer?.id || undefined,
-        items_data,
-        subtotal,
-        tax,
-        discount,
-        total,
-        payment_method: "cash",
-        notes: "Voided sale from POS",
-      })
+      const voidSale = transactionLocked && initiatedSaleId
+        ? await saleService.voidTransaction(initiatedSaleId, reason)
+        : await saleService.void({
+            outlet: outlet.id,
+            shift: activeShift?.id,
+            customer: selectedCustomer?.id || undefined,
+            items_data: cart.map((item) => ({
+              product_id: item.productId,
+              unit_id: (item as any).unitId || undefined,
+              quantity: item.quantity,
+              price: Math.round(item.price * 100) / 100,
+              notes: item.notes || "",
+            })),
+            subtotal: Math.round(cartSubtotal * 100) / 100,
+            tax: 0,
+            discount: Math.round(discountAmount * 100) / 100,
+            total: Math.round((cartSubtotal - discountAmount) * 100) / 100,
+            payment_method: "cash",
+            notes: "Voided sale from POS",
+            reason,
+          })
 
       const receiptNumber =
         voidSale._raw?.receipt_number ||
@@ -760,6 +784,8 @@ export function BarPOS() {
         description: `Sale voided. Receipt #${receiptNumber}`,
       })
 
+      setShowVoidReasonDialog(false)
+      setVoidReason("")
       setCart([])
       setSaleDiscount(null)
       setSelectedCustomer(null)
@@ -770,6 +796,10 @@ export function BarPOS() {
         description: error.message || "Unable to record void sale.",
         variant: "destructive",
       })
+    } finally {
+      setIsSubmittingVoid(false)
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
     }
   }
 
@@ -839,10 +869,6 @@ export function BarPOS() {
       setInitiatedSaleId(String(initiated.id))
       setTransactionLocked(true)
       setShowPaymentModal(true)
-      toast({
-        title: "Transaction initiated",
-        description: `Receipt #${initiated._raw?.receipt_number || initiated.id} is locked for payment.`,
-      })
     } catch (error: any) {
       toast({
         title: "Checkout start failed",
@@ -860,15 +886,18 @@ export function BarPOS() {
     }
 
     if (!transactionLocked || !initiatedSaleId) {
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
+      setIsDeliveryRequired(false)
+      setIsProcessing(false)
       return
     }
 
     try {
-      await saleService.voidTransaction(initiatedSaleId, "Cashier cancelled payment popup")
-      setCart([])
-      setSaleDiscount(null)
-      setSelectedCustomer(null)
-      toast({ title: "Transaction voided", description: "Initiated transaction was cancelled and logged." })
+      await saleService.voidTransaction(initiatedSaleId, "Cancelled from payment popup")
     } catch (error: any) {
       toast({
         title: "Cancel failed",
@@ -876,6 +905,36 @@ export function BarPOS() {
         variant: "destructive",
       })
     } finally {
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
+      setIsDeliveryRequired(false)
+      setIsProcessing(false)
+      setShowVoidReasonDialog(false)
+      setVoidReason("")
+    }
+  }
+
+  const handleConfirmPaymentCancel = async (reason: string) => {
+    if (!transactionLocked || !initiatedSaleId) return
+
+    setIsSubmittingVoid(true)
+    try {
+      await saleService.voidTransaction(initiatedSaleId, reason)
+      setCart([])
+      setSaleDiscount(null)
+      setSelectedCustomer(null)
+      setShowVoidReasonDialog(false)
+    } catch (error: any) {
+      toast({
+        title: "Cancel failed",
+        description: error?.message || "Unable to void initiated transaction.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmittingVoid(false)
       setTransactionLocked(false)
       setInitiatedSaleId("")
       setIsDeliveryRequired(false)
@@ -1579,60 +1638,60 @@ export function BarPOS() {
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                className="h-9 gap-2 bg-amber-600 text-white hover:bg-amber-700"
+                className="h-[4.75rem] w-[4.75rem] rounded-md px-1 py-2 text-xs font-semibold leading-tight whitespace-normal flex-col gap-1 bg-amber-600 text-white hover:bg-amber-700"
                 onClick={() => requestRowActionConfirmation("discount")}
               >
-                <Tag className="h-4 w-4" />
+                <Tag className="h-5 w-5" />
                 Discount
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-2 bg-blue-600 text-white hover:bg-blue-700"
+                className="h-[4.75rem] w-[4.75rem] rounded-md px-1 py-2 text-xs font-semibold leading-tight whitespace-normal flex-col gap-1 bg-blue-600 text-white hover:bg-blue-700"
                 onClick={() => requestRowActionConfirmation("refund")}
               >
-                <RotateCcw className="h-4 w-4" />
+                <RotateCcw className="h-5 w-5" />
                 Refund
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-2 bg-emerald-600 text-white hover:bg-emerald-700"
+                className="h-[4.75rem] w-[4.75rem] rounded-md px-1 py-2 text-xs font-semibold leading-tight whitespace-normal flex-col gap-1 bg-emerald-600 text-white hover:bg-emerald-700"
                 onClick={handleHoldSale}
               >
-                <PauseCircle className="h-4 w-4" />
+                <PauseCircle className="h-5 w-5" />
                 Hold
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-2 bg-indigo-600 text-white hover:bg-indigo-700"
+                className="h-[4.75rem] w-[4.75rem] rounded-md px-1 py-2 text-xs font-semibold leading-tight whitespace-normal flex-col gap-1 bg-indigo-600 text-white hover:bg-indigo-700"
                 onClick={() => requestRowActionConfirmation("retrieve")}
               >
-                <History className="h-4 w-4" />
+                <History className="h-5 w-5" />
                 Retrieve
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-2 bg-orange-600 text-white hover:bg-orange-700"
+                className="h-[4.75rem] w-[4.75rem] rounded-md px-1 py-2 text-xs font-semibold leading-tight whitespace-normal flex-col gap-1 bg-orange-600 text-white hover:bg-orange-700"
                 onClick={() => requestRowActionConfirmation("drawer")}
               >
-                <Wallet className="h-4 w-4" />
+                <Wallet className="h-5 w-5" />
                 Drawer
               </Button>
               <Button
                 size="sm"
-                className="h-9 gap-2 bg-slate-600 text-white hover:bg-slate-700"
+                className="h-[4.75rem] w-[4.75rem] rounded-md px-1 py-2 text-xs font-semibold leading-tight whitespace-normal flex-col gap-1 bg-slate-600 text-white hover:bg-slate-700"
                 onClick={() => requestRowActionConfirmation("close")}
               >
-                <Lock className="h-4 w-4" />
+                <Lock className="h-5 w-5" />
                 Close
               </Button>
               {showDeliveryAction && (
                 <Button
                   size="sm"
-                  className="h-9 gap-2 bg-sky-600 text-white hover:bg-sky-700"
+                  className="h-[4.75rem] w-[4.75rem] rounded-md px-1 py-2 text-xs font-semibold leading-tight whitespace-normal flex-col gap-1 bg-sky-600 text-white hover:bg-sky-700"
                   onClick={() => requestRowActionConfirmation("delivery")}
                   disabled={(currentTab ? currentTab.items.filter((item) => !item.is_voided).length : cart.length) === 0}
                 >
-                  <Truck className="h-4 w-4" />
+                  <Truck className="h-5 w-5" />
                   Delivery
                 </Button>
               )}
@@ -2300,7 +2359,9 @@ export function BarPOS() {
       {/* ==================== PAYMENT POPUP ==================== */}
       <PaymentPopup
         open={showPaymentModal}
-        onDismiss={() => setShowPaymentModal(false)}
+        onDismiss={() => {
+          void handlePaymentCancel()
+        }}
         onCancel={() => {
           void handlePaymentCancel()
         }}
@@ -2390,11 +2451,6 @@ export function BarPOS() {
                 setInitiatedSaleId("")
                 setIsDeliveryRequired(false)
                 setShowPaymentModal(false)
-
-                toast({
-                  title: "Offline sale completed",
-                  description: `Receipt #${offlineSale.receipt_number} created locally and queued for sync.`,
-                })
                 return
               }
 
@@ -2405,11 +2461,6 @@ export function BarPOS() {
               })
 
               const saleAny = sale as any
-              const receiptNumber = saleAny._raw?.receipt_number || saleAny.receipt_number || sale.id
-              toast({
-                title: "Sale completed successfully",
-                description: `Receipt #${receiptNumber}`,
-              })
 
               try {
                 const saleAny = sale as any
@@ -2825,6 +2876,54 @@ export function BarPOS() {
             </Button>
             <Button type="button" onClick={() => void handleConfirmRowAction()} disabled={isVerifyingRowAction}>
               {isVerifyingRowAction ? "Verifying..." : "Verify & Continue"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showVoidReasonDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeVoidReasonDialog()
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Void Reason Required</DialogTitle>
+            <DialogDescription>
+              Enter the reason for voiding this sale. This will appear in the Sales void reason column.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="bar-void-reason">Reason</Label>
+            <Textarea
+              id="bar-void-reason"
+              value={voidReason}
+              onChange={(event) => setVoidReason(event.target.value)}
+              placeholder="Enter void reason"
+              rows={3}
+              disabled={isSubmittingVoid}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeVoidReasonDialog} disabled={isSubmittingVoid}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                const reason = voidReason.trim()
+                if (transactionLocked && initiatedSaleId && (reason.includes("Cancelled from") || reason.toLowerCase().includes("payment"))) {
+                  void handleConfirmPaymentCancel(reason)
+                } else {
+                  void handleVoidSale(reason)
+                }
+              }}
+              disabled={isSubmittingVoid || !voidReason.trim()}
+            >
+              {isSubmittingVoid ? "Voiding..." : "Confirm Void"}
             </Button>
           </DialogFooter>
         </DialogContent>

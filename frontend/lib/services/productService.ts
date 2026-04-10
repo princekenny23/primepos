@@ -35,6 +35,10 @@ export interface ProductFilters {
   limit?: number
 }
 
+export interface CategoryFilters {
+  outlet?: string
+}
+
 // Transform backend product to frontend format
 function transformProduct(backendProduct: any): Product {
   // Extract tenant ID - handle both object and ID formats
@@ -278,8 +282,12 @@ function transformCategory(backendCategory: any): Category {
 
 // Inline categoryService for compatibility
 export const categoryService = {
-  async list(): Promise<Category[]> {
-    const response = await api.get<any>(apiEndpoints.categories.list)
+  async list(filters?: CategoryFilters): Promise<Category[]> {
+    const params = new URLSearchParams()
+    if (filters?.outlet) params.append("outlet", filters.outlet)
+
+    const query = params.toString()
+    const response = await api.get<any>(`${apiEndpoints.categories.list}${query ? `?${query}` : ""}`)
     const categories = Array.isArray(response) ? response : (response.results || [])
     return categories.map(transformCategory)
   },
@@ -378,9 +386,9 @@ export const productService = {
     await api.delete(apiEndpoints.products.delete(id))
   },
 
-  async getCategories(): Promise<Category[]> {
+  async getCategories(filters?: CategoryFilters): Promise<Category[]> {
     try {
-      return await categoryService.list()
+      return await categoryService.list(filters)
     } catch (error) {
       console.error("Failed to load categories via productService:", error)
       return []

@@ -117,6 +117,7 @@ export function PaymentPopup({
     >
       <DialogContent
         className="w-[calc(100vw-1rem)] max-w-2xl border border-gray-200 bg-white p-0 shadow-lg max-h-[90vh] overflow-hidden"
+        showCloseButton={false}
         onPointerDownOutside={(event) => {
           if (blockOutsideClose) {
             event.preventDefault();

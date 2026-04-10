@@ -16,6 +16,7 @@ class TenantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
         fields = ('id', 'name', 'type', 'pos_type', 'currency', 'currency_symbol', 'phone', 'email', 
+                  'subdomain', 'domain',
                   'address', 'logo', 'settings', 'has_distribution', 'is_active', 'created_at', 'updated_at', 
                   'outlets', 'users', 'permissions', 'total_manual_payments')
         read_only_fields = ('id', 'created_at', 'updated_at')

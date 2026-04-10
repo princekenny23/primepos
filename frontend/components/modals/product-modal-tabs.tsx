@@ -47,7 +47,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
   initialTab = "basic",
 }) => {
   const { toast } = useToast()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { outlets } = useTenant()
   const { t } = useI18n()
   const [isLoading, setIsLoading] = useState(false)
@@ -130,14 +130,16 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
   useEffect(() => {
     const loadCategories = async () => {
       try {
-        const cats = await categoryService.list()
+        const cats = await categoryService.list({
+          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+        })
         setCategories(cats)
       } catch (error) {
         console.error("Failed to load categories:", error)
       }
     }
     loadCategories()
-  }, [])
+  }, [currentOutlet])
 
   // Reset form when modal opens/closes or product changes
   useEffect(() => {

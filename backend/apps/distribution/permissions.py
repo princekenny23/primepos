@@ -1,6 +1,10 @@
 from rest_framework import permissions
 from rest_framework.exceptions import PermissionDenied
-from apps.tenants.permissions import resolve_tenant_from_request
+from apps.tenants.permissions import (
+    is_outlet_module_permission_enabled,
+    resolve_outlet_from_request,
+    resolve_tenant_from_request,
+)
 
 
 def get_effective_role(user):
@@ -21,6 +25,11 @@ class HasDistributionFeature(permissions.BasePermission):
             raise PermissionDenied('Tenant context is required for Distribution module. Provide tenant_id when acting as SaaS admin.')
         if not getattr(tenant, 'has_distribution', False):
             raise PermissionDenied('Distribution module is not enabled for this tenant.')
+
+        outlet = resolve_outlet_from_request(request, tenant)
+        if outlet and not is_outlet_module_permission_enabled(outlet, 'has_distribution'):
+            raise PermissionDenied('Distribution module is disabled for this outlet.')
+
         return True
 
 

@@ -3,6 +3,13 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { storefrontService } from "@/lib/services/storefrontService"
+import {
+  DEFAULT_THEME,
+  hexToRgba,
+  SectionHeading,
+  StorefrontHeader,
+  StorefrontShell,
+} from "@/app/storefront/_components/storefront-ui"
 
 type StorefrontConfig = {
   name: string
@@ -14,18 +21,6 @@ type StorefrontConfig = {
     about_description?: string
     contact_phone?: string
   }
-}
-
-const DEFAULT_THEME: Record<string, string> = {
-  primary: "#0f766e",
-  primary_foreground: "#ffffff",
-  secondary: "#f1f5f9",
-  accent: "#e2e8f0",
-  background: "#ffffff",
-  foreground: "#0f172a",
-  card: "#ffffff",
-  border: "#e2e8f0",
-  ring: "#14b8a6",
 }
 
 export default function StorefrontAboutPage({ params }: { params: { slug: string } }) {
@@ -61,20 +56,26 @@ export default function StorefrontAboutPage({ params }: { params: { slug: string
 
   if (isLoading) {
     return (
-      <main className="min-h-screen" style={{ backgroundColor: DEFAULT_THEME.background, color: DEFAULT_THEME.foreground }}>
-        <div className="mx-auto max-w-6xl px-4 py-12">Loading about page...</div>
-      </main>
+      <StorefrontShell theme={DEFAULT_THEME}>
+        <div className="mx-auto max-w-6xl px-4 py-20">
+          <div className="rounded-[2rem] border border-slate-200/80 bg-white/90 p-8 text-sm shadow-sm backdrop-blur">
+            Loading about page...
+          </div>
+        </div>
+      </StorefrontShell>
     )
   }
 
   if (error || !config) {
     return (
-      <main className="min-h-screen" style={{ backgroundColor: DEFAULT_THEME.background, color: DEFAULT_THEME.foreground }}>
-        <div className="mx-auto max-w-3xl px-4 py-16">
-          <h1 className="mb-2 text-2xl font-bold">Storefront unavailable</h1>
-          <p>{error || "This storefront could not be loaded."}</p>
+      <StorefrontShell theme={DEFAULT_THEME}>
+        <div className="mx-auto max-w-3xl px-4 py-20">
+          <div className="rounded-[2rem] border border-slate-200/80 bg-white/90 p-8 shadow-sm backdrop-blur">
+            <h1 className="mb-2 text-2xl font-bold">Storefront unavailable</h1>
+            <p>{error || "This storefront could not be loaded."}</p>
+          </div>
         </div>
-      </main>
+      </StorefrontShell>
     )
   }
 
@@ -85,50 +86,105 @@ export default function StorefrontAboutPage({ params }: { params: { slug: string
   const contactPhone = config?.seo_settings?.contact_phone?.trim() || ""
 
   return (
-    <main className="min-h-screen" style={{ backgroundColor: theme.background, color: theme.foreground }}>
-      <header className="sticky top-0 z-30 border-b backdrop-blur" style={{ borderColor: theme.border, backgroundColor: `${theme.card}ee` }}>
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <p className="text-sm font-semibold">{config.name}</p>
-          <nav className="flex items-center gap-2 text-sm font-medium">
-            <Link href={`/storefront/${slug}`} className="rounded-md px-3 py-1.5" style={{ backgroundColor: theme.accent }}>
-              Home
-            </Link>
-            <Link href={`/storefront/${slug}/about`} className="rounded-md px-3 py-1.5 text-white" style={{ backgroundColor: theme.primary }}>
-              About
-            </Link>
-            <Link href={`/storefront/${slug}/shop`} className="rounded-md px-3 py-1.5" style={{ backgroundColor: theme.accent }}>
-              Shop
-            </Link>
-          </nav>
-        </div>
-      </header>
+    <StorefrontShell theme={theme}>
+      <StorefrontHeader slug={slug} storeName={config.name} theme={theme} active="about" />
 
-      <section className="border-b" style={{ borderColor: theme.border, background: `linear-gradient(120deg, ${theme.primary} 0%, ${theme.ring} 100%)`, color: theme.primary_foreground }}>
-        <div className="mx-auto max-w-6xl px-4 py-14">
-          <p className="mb-2 text-xs uppercase tracking-[0.2em] opacity-80">About Us</p>
-          <h1 className="text-4xl font-black leading-tight">{aboutTitle}</h1>
-          {contactPhone && <p className="mt-3 text-sm opacity-90">Contact: {contactPhone}</p>}
+      <section className="mx-auto max-w-6xl px-4 py-10 sm:py-14 lg:py-16">
+        <div
+          className="rounded-[2rem] border p-8 shadow-sm sm:p-10"
+          style={{
+            borderColor: theme.border,
+            background: `linear-gradient(135deg, ${hexToRgba(theme.primary, 0.98)} 0%, ${hexToRgba(theme.ring, 0.92)} 100%)`,
+            color: theme.primary_foreground,
+          }}
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] opacity-80">About the brand</p>
+          <h1 className="mt-4 max-w-3xl text-4xl font-black leading-tight tracking-tight sm:text-5xl">{aboutTitle}</h1>
+          <p className="mt-5 max-w-2xl text-sm leading-7 opacity-90 sm:text-base">
+            Learn what sets this storefront apart, how it serves customers, and how to get in touch when you need help.
+          </p>
+          {contactPhone ? <p className="mt-6 text-sm font-medium opacity-85">Contact: {contactPhone}</p> : null}
         </div>
       </section>
 
-      <section className="mx-auto max-w-4xl px-4 py-10">
-        <article className="rounded-xl border p-6" style={{ borderColor: theme.border, backgroundColor: theme.card }}>
-          {aboutDescription.split("\n").filter(Boolean).map((paragraph, index) => (
-            <p key={index} className="mb-4 whitespace-pre-line text-sm leading-7 opacity-90">
-              {paragraph}
-            </p>
-          ))}
+      <section className="mx-auto grid max-w-6xl gap-6 px-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+        <article className="rounded-[2rem] border p-7 shadow-sm sm:p-8" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.card, 0.94) }}>
+          <SectionHeading
+            eyebrow="Story"
+            title="A clearer, more readable storefront profile"
+            description="The public-facing description now has more breathing room, stronger rhythm, and easier scanning on both desktop and mobile."
+          />
 
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Link href={`/storefront/${slug}/shop`} className="rounded-md px-4 py-2 text-sm font-semibold" style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}>
-              Go to Shop
+          <div className="space-y-5 text-base leading-8 opacity-85">
+            {aboutDescription.split("\n").filter(Boolean).map((paragraph, index) => (
+              <p key={index} className="whitespace-pre-line">
+                {paragraph}
+              </p>
+            ))}
+          </div>
+
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link
+              href={`/storefront/${slug}/shop`}
+              className="rounded-xl px-5 py-3 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
+              style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}
+            >
+              Go to shop
             </Link>
-            <Link href={`/storefront/${slug}/about`} className="rounded-md border px-4 py-2 text-sm font-semibold" style={{ borderColor: theme.border }}>
-              Refresh About
+            <Link
+              href={`/storefront/${slug}`}
+              className="rounded-xl border px-5 py-3 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
+              style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.72), color: theme.foreground }}
+            >
+              Back to home
             </Link>
           </div>
         </article>
+
+        <aside className="grid gap-4 self-start">
+          {[
+            {
+              title: "Trusted presentation",
+              description: "Clearer typography and spacing make brand information feel more credible and easier to absorb.",
+            },
+            {
+              title: "Direct shopping flow",
+              description: "Visitors can move from discovery to browsing without friction through stronger CTA placement.",
+            },
+            {
+              title: "Responsive by default",
+              description: "The updated layout holds its structure cleanly across phone, tablet, and desktop widths.",
+            },
+          ].map((item) => (
+            <div
+              key={item.title}
+              className="rounded-[1.5rem] border p-6 shadow-sm"
+              style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.card, 0.9) }}
+            >
+              <p className="text-lg font-semibold tracking-tight">{item.title}</p>
+              <p className="mt-3 text-sm leading-7 opacity-75">{item.description}</p>
+            </div>
+          ))}
+        </aside>
       </section>
-    </main>
+
+      <section className="mx-auto max-w-6xl px-4 pb-16 pt-8">
+        <div className="rounded-[2rem] border p-6 shadow-sm sm:p-8" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.card, 0.9) }}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] opacity-55">Next step</p>
+              <h2 className="mt-2 text-2xl font-bold tracking-tight">Ready to browse the catalog?</h2>
+            </div>
+            <Link
+              href={`/storefront/${slug}/shop`}
+              className="rounded-xl px-5 py-3 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
+              style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}
+            >
+              Explore products
+            </Link>
+          </div>
+        </div>
+      </section>
+    </StorefrontShell>
   )
 }

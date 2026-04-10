@@ -82,11 +82,11 @@ class User(AbstractUser):
         if self.role == 'admin':
             return True
         elif self.role == 'manager':
-            return permission in ['can_sales', 'can_inventory', 'can_products', 'can_customers', 'can_reports', 'can_dashboard']
+            return permission in ['can_sales', 'can_inventory', 'can_products', 'can_customers', 'can_reports', 'can_dashboard', 'can_storefront', 'can_switch_outlet']
         elif self.role == 'cashier':
-            return permission in ['can_sales', 'can_customers', 'can_dashboard']
+            return permission in ['can_sales', 'can_customers', 'can_dashboard', 'can_switch_outlet']
         elif self.role == 'staff':
-            return permission in ['can_sales', 'can_dashboard']
+            return permission in ['can_sales', 'can_dashboard', 'can_switch_outlet']
         
         return False
     
@@ -105,6 +105,8 @@ class User(AbstractUser):
             'can_staff': False,
             'can_settings': False,
             'can_dashboard': True,
+            'can_storefront': False,
+            'can_switch_outlet': True,
         }
         
         # SaaS admins have all permissions
@@ -191,6 +193,8 @@ def create_default_roles_for_tenant(tenant):
             'can_staff': True,
             'can_settings': True,
             'can_dashboard': True,
+            'can_storefront': True,
+            'can_switch_outlet': True,
         },
         'Manager': {
             'description': 'Manage outlet operations and staff',
@@ -198,6 +202,8 @@ def create_default_roles_for_tenant(tenant):
             'can_inventory': True,
             'can_products': True,
             'can_customers': True,
+            'can_storefront': True,
+            'can_switch_outlet': True,
             'can_reports': True,
             'can_staff': True,
             'can_settings': False,
@@ -213,6 +219,8 @@ def create_default_roles_for_tenant(tenant):
             'can_staff': False,
             'can_settings': False,
             'can_dashboard': True,
+            'can_storefront': False,
+            'can_switch_outlet': True,
         },
         'Cashier': {
             'description': 'Process sales transactions',
@@ -224,6 +232,8 @@ def create_default_roles_for_tenant(tenant):
             'can_staff': False,
             'can_settings': False,
             'can_dashboard': True,
+            'can_storefront': False,
+            'can_switch_outlet': True,
         },
         'Staff': {
             'description': 'Basic staff access',
@@ -235,6 +245,8 @@ def create_default_roles_for_tenant(tenant):
             'can_staff': False,
             'can_settings': False,
             'can_dashboard': True,
+            'can_storefront': False,
+            'can_switch_outlet': False,
         },
         'Dispatcher': {
             'description': 'Manage delivery assignments and dispatch workflows',
@@ -246,6 +258,8 @@ def create_default_roles_for_tenant(tenant):
             'can_staff': False,
             'can_settings': False,
             'can_dashboard': True,
+            'can_storefront': False,
+            'can_switch_outlet': False,
         },
         'Driver': {
             'description': 'Track and update assigned deliveries only',
@@ -257,6 +271,8 @@ def create_default_roles_for_tenant(tenant):
             'can_staff': False,
             'can_settings': False,
             'can_dashboard': True,
+            'can_storefront': False,
+            'can_switch_outlet': False,
         },
     }
     
