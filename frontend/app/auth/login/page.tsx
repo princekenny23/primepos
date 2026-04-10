@@ -36,6 +36,42 @@ export default function LoginPage() {
     }
   }
 
+  const selectPostLoginOutlet = (outletIds: string[]) => {
+    const store = useBusinessStore.getState()
+    const allOutlets = (store.outlets || []).filter((outlet) => outlet.isActive !== false)
+    if (allOutlets.length === 0) {
+      return
+    }
+
+    const normalizedAssignedOutletIds = Array.isArray(outletIds)
+      ? outletIds.map((id) => String(id)).filter(Boolean)
+      : []
+
+    const savedOutletId = typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null
+    const savedOutlet = savedOutletId
+      ? allOutlets.find((outlet) => String(outlet.id) === String(savedOutletId))
+      : null
+
+    if (normalizedAssignedOutletIds.length > 0) {
+      const assignedOutlets = allOutlets.filter((outlet) => normalizedAssignedOutletIds.includes(String(outlet.id)))
+      const preferredAssignedOutlet =
+        (savedOutlet && normalizedAssignedOutletIds.includes(String(savedOutlet.id)) ? savedOutlet : null) ||
+        assignedOutlets[0]
+
+      if (preferredAssignedOutlet) {
+        setSelectedOutlet(preferredAssignedOutlet.id)
+      }
+      return
+    }
+
+    if (savedOutlet) {
+      setSelectedOutlet(savedOutlet.id)
+      return
+    }
+
+    setSelectedOutlet(allOutlets[0].id)
+  }
+
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setIsLoading(true)
@@ -89,20 +125,7 @@ export default function LoginPage() {
           await setCurrentBusiness(String(tenant.id))
 
           const nextRoute = getPostLoginRoute(tenant.type, isAdminUser)
-          const store = useBusinessStore.getState()
-          const allOutlets = (store.outlets || []).filter((outlet) => outlet.isActive !== false)
-          const assignedOutletIds = Array.isArray(result.user.outletIds)
-            ? result.user.outletIds.map((id: any) => String(id)).filter(Boolean)
-            : []
-
-          if (assignedOutletIds.length === 1) {
-            const matchedOutlet = allOutlets.find((outlet) => String(outlet.id) === assignedOutletIds[0])
-            if (matchedOutlet) {
-              setSelectedOutlet(matchedOutlet.id)
-            }
-          } else if (allOutlets.length > 0) {
-            setSelectedOutlet(allOutlets[0].id)
-          }
+          selectPostLoginOutlet(result.user.outletIds || [])
 
           router.push(nextRoute)
           return
@@ -120,20 +143,7 @@ export default function LoginPage() {
         await setCurrentBusiness(String(currentTenant.id))
 
         const nextRoute = getPostLoginRoute(currentTenant.type, isAdminUser)
-        const store = useBusinessStore.getState()
-        const allOutlets = (store.outlets || []).filter((outlet) => outlet.isActive !== false)
-        const assignedOutletIds = Array.isArray(result.user.outletIds)
-          ? result.user.outletIds.map((id: any) => String(id)).filter(Boolean)
-          : []
-
-        if (assignedOutletIds.length === 1) {
-          const matchedOutlet = allOutlets.find((outlet) => String(outlet.id) === assignedOutletIds[0])
-          if (matchedOutlet) {
-            setSelectedOutlet(matchedOutlet.id)
-          }
-        } else if (allOutlets.length > 0) {
-          setSelectedOutlet(allOutlets[0].id)
-        }
+        selectPostLoginOutlet(result.user.outletIds || [])
 
         router.push(nextRoute)
         return

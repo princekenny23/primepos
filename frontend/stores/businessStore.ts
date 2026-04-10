@@ -6,6 +6,7 @@ import { Till } from "@/lib/services/tillService"
 import { tenantService } from "@/lib/services/tenantService"
 import { outletService } from "@/lib/services/outletService"
 import { tillService } from "@/lib/services/tillService"
+import { useAuthStore } from "@/stores/authStore"
 import { useRealAPI } from "@/lib/utils/api-config"
 
 const normalizeCurrencyLabel = (value?: string | null): string => {
@@ -26,6 +27,15 @@ const normalizeBusinessCurrency = (business: Business | null): Business | null =
     currency: normalizeCurrencyLabel(business.currency),
     currencySymbol: normalizeCurrencyLabel(business.currencySymbol),
   }
+}
+
+const getAssignedOutletIds = (): string[] => {
+  const user = useAuthStore.getState().user
+  if (!Array.isArray(user?.outletIds)) {
+    return []
+  }
+
+  return user.outletIds.map((id) => String(id)).filter(Boolean)
 }
 
 let inFlightBusinessRequest: Promise<void> | null = null
@@ -153,6 +163,8 @@ export const useBusinessStore = create<BusinessState>()(
             const current = get().currentOutlet
             const storedOutletId =
               typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null
+            const assignedOutletIds = getAssignedOutletIds()
+            const hasAssignedOutlets = assignedOutletIds.length > 0
 
             const currentMatch = current
               ? tenantOutlets.find((o: any) => String(o.id) === String(current.id))
@@ -162,9 +174,23 @@ export const useBusinessStore = create<BusinessState>()(
               ? tenantOutlets.find((o: any) => String(o.id) === String(storedOutletId))
               : null
 
+            const allowedStoredMatch = storedMatch && (!hasAssignedOutlets || assignedOutletIds.includes(String(storedMatch.id)))
+              ? storedMatch
+              : null
+
+            const allowedCurrentMatch = currentMatch && (!hasAssignedOutlets || assignedOutletIds.includes(String(currentMatch.id)))
+              ? currentMatch
+              : null
+
+            const assignedMatch = hasAssignedOutlets
+              ? tenantOutlets.find((o: any) => assignedOutletIds.includes(String(o.id)) && o.isActive)
+                || tenantOutlets.find((o: any) => assignedOutletIds.includes(String(o.id)))
+              : null
+
             const preferredOutlet =
-              storedMatch ||
-              currentMatch ||
+              allowedStoredMatch ||
+              allowedCurrentMatch ||
+              assignedMatch ||
               tenantOutlets.find((o: any) => o.isActive) ||
               tenantOutlets[0]
 

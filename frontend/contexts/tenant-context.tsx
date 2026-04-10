@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react"
 import { useBusinessStore } from "@/stores/businessStore"
+import { useAuthStore } from "@/stores/authStore"
 import { tenantService } from "@/lib/services/tenantService"
 import { outletService } from "@/lib/services/outletService"
 import { useRealAPI } from "@/lib/utils/api-config"
@@ -38,6 +39,15 @@ const normalizeBusinessSettings = (settings: any): BusinessSettings => ({
   taxRate: typeof settings?.taxRate === "number" ? settings.taxRate : 0,
   ...(settings || {}),
 })
+
+const getAssignedOutletIds = (): string[] => {
+  const user = useAuthStore.getState().user
+  if (!Array.isArray(user?.outletIds)) {
+    return []
+  }
+
+  return user.outletIds.map((id) => String(id)).filter(Boolean)
+}
 
 interface TenantContextType {
   currentTenant: Tenant | null
@@ -189,14 +199,26 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           if (loadedOutlets.length > 0) {
             const savedOutletId =
               typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null
+            const assignedOutletIds = getAssignedOutletIds()
+            const hasAssignedOutlets = assignedOutletIds.length > 0
             const savedOutlet = savedOutletId
               ? loadedOutlets.find((o) => String(o.id) === String(savedOutletId))
               : null
             const storeOutlet = businessOutlet
               ? loadedOutlets.find((o) => String(o.id) === String(businessOutlet.id))
               : null
+            const allowedSavedOutlet = savedOutlet && (!hasAssignedOutlets || assignedOutletIds.includes(String(savedOutlet.id)))
+              ? savedOutlet
+              : null
+            const allowedStoreOutlet = storeOutlet && (!hasAssignedOutlets || assignedOutletIds.includes(String(storeOutlet.id)))
+              ? storeOutlet
+              : null
+            const assignedOutlet = hasAssignedOutlets
+              ? loadedOutlets.find((o) => assignedOutletIds.includes(String(o.id)) && o.isActive)
+                || loadedOutlets.find((o) => assignedOutletIds.includes(String(o.id)))
+              : null
             const selectedOutlet =
-              savedOutlet || storeOutlet || loadedOutlets.find(o => o.isActive) || loadedOutlets[0]
+              allowedSavedOutlet || allowedStoreOutlet || assignedOutlet || loadedOutlets.find(o => o.isActive) || loadedOutlets[0]
 
             setCurrentOutlet(selectedOutlet)
             
@@ -263,10 +285,19 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         } else if (loadedOutlets.length > 0) {
           const savedOutletId =
             typeof window !== "undefined" ? localStorage.getItem("currentOutletId") : null
+          const assignedOutletIds = getAssignedOutletIds()
+          const hasAssignedOutlets = assignedOutletIds.length > 0
           const savedOutlet = savedOutletId
             ? loadedOutlets.find((o) => String(o.id) === String(savedOutletId))
             : null
-          const selectedOutlet = savedOutlet || loadedOutlets.find(o => o.isActive) || loadedOutlets[0]
+          const allowedSavedOutlet = savedOutlet && (!hasAssignedOutlets || assignedOutletIds.includes(String(savedOutlet.id)))
+            ? savedOutlet
+            : null
+          const assignedOutlet = hasAssignedOutlets
+            ? loadedOutlets.find((o) => assignedOutletIds.includes(String(o.id)) && o.isActive)
+              || loadedOutlets.find((o) => assignedOutletIds.includes(String(o.id)))
+            : null
+          const selectedOutlet = allowedSavedOutlet || assignedOutlet || loadedOutlets.find(o => o.isActive) || loadedOutlets[0]
           setCurrentOutlet(selectedOutlet)
         }
       }
