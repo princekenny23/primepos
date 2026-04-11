@@ -44,11 +44,24 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { customerService, type Customer } from "@/lib/services/customerService"
+import {
+  creditPaymentService,
+  customerService,
+  type Customer,
+  type UnpaidInvoice,
+} from "@/lib/services/customerService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 import { useI18n } from "@/contexts/i18n-context"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 
 export default function CustomerManagementPage() {
   const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
@@ -65,6 +78,22 @@ export default function CustomerManagementPage() {
   const [customerToDelete, setCustomerToDelete] = useState<string | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [isSavingPayment, setIsSavingPayment] = useState(false)
+  const [isLoadingCreditSummary, setIsLoadingCreditSummary] = useState(false)
+  const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null)
+  const [creditInvoices, setCreditInvoices] = useState<UnpaidInvoice[]>([])
+  const [selectedCreditSaleId, setSelectedCreditSaleId] = useState("")
+  const [paymentAmount, setPaymentAmount] = useState("")
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "mobile" | "bank_transfer" | "other">("cash")
+  const [paymentRef, setPaymentRef] = useState("")
+  const [paymentNotes, setPaymentNotes] = useState("")
+
+  const selectedCreditInvoice = useMemo(
+    () => creditInvoices.find((invoice) => String(invoice.id) === selectedCreditSaleId) || null,
+    [creditInvoices, selectedCreditSaleId]
+  )
+  const remainingForSelectedInvoice = Number(selectedCreditInvoice?.remaining || 0)
 
   const loadCustomers = useCallback(async () => {
     if (!currentBusiness) {
@@ -144,6 +173,111 @@ export default function CustomerManagementPage() {
     }
   }
 
+  const openCreditPaymentModal = async (customer: Customer) => {
+    setPaymentCustomer(customer)
+    setPaymentAmount("")
+    setPaymentMethod("cash")
+    setPaymentRef("")
+    setPaymentNotes("")
+    setCreditInvoices([])
+    setSelectedCreditSaleId("")
+    setIsLoadingCreditSummary(true)
+    setShowPaymentModal(true)
+
+    try {
+      const summary = await customerService.getCreditSummary(String(customer.id))
+      const unpaid = (summary.unpaid_invoices || []).filter((invoice) => Number(invoice.remaining || 0) > 0)
+      setCreditInvoices(unpaid)
+      if (unpaid.length > 0) {
+        setSelectedCreditSaleId(String(unpaid[0].id))
+        setPaymentAmount(Number(unpaid[0].remaining || 0).toFixed(2))
+      }
+    } catch (error: any) {
+      console.error("Failed to load credit summary:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load customer credit sales",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingCreditSummary(false)
+    }
+  }
+
+  const handleRecordCreditPayment = async () => {
+    if (!paymentCustomer) return
+    const amount = Number(paymentAmount)
+    if (!amount || amount <= 0) {
+      toast({
+        title: "Invalid amount",
+        description: "Enter a valid amount received.",
+        variant: "destructive",
+      })
+      return
+    }
+    if (!selectedCreditSaleId) {
+      toast({
+        title: "No credit sale selected",
+        description: "Select a credit sale to record this payment.",
+        variant: "destructive",
+      })
+      return
+    }
+    if (remainingForSelectedInvoice <= 0) {
+      toast({
+        title: "No balance due",
+        description: "Selected credit sale has no remaining balance.",
+        variant: "destructive",
+      })
+      return
+    }
+    if (amount > remainingForSelectedInvoice) {
+      toast({
+        title: "Amount exceeds remaining",
+        description: `Amount cannot be greater than remaining balance (${currentBusiness?.currencySymbol || "MWK"} ${remainingForSelectedInvoice.toFixed(2)}).`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsSavingPayment(true)
+    try {
+      await creditPaymentService.create({
+        sale: selectedCreditSaleId,
+        customer: String(paymentCustomer.id),
+        amount,
+        payment_method: paymentMethod,
+        payment_date: new Date().toISOString(),
+        reference_number: paymentRef || undefined,
+        notes: paymentNotes || undefined,
+      })
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("sale-completed"))
+      }
+
+      toast({
+        title: "Payment recorded",
+        description: "Credit payment has been recorded successfully.",
+      })
+
+      setShowPaymentModal(false)
+      setPaymentCustomer(null)
+      setCreditInvoices([])
+      setSelectedCreditSaleId("")
+      loadCustomers()
+    } catch (error: any) {
+      console.error("Failed to record payment:", error)
+      toast({
+        title: "Error",
+        description: error.message || "Failed to record payment",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSavingPayment(false)
+    }
+  }
+
   return (
     <DashboardLayout>
       <PageLayout
@@ -199,34 +333,32 @@ export default function CustomerManagementPage() {
               <Table className="table-fixed w-full">
                 <TableHeader>
                   <TableRow className="bg-gray-50">
-                    <TableHead className="text-gray-900 font-semibold w-[16%] whitespace-normal">Name</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[18%] whitespace-normal">Email</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[11%] whitespace-normal">Outlet</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[10%] whitespace-normal">Loyalty</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[11%] whitespace-normal">Spent</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[18%] whitespace-normal">Name</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[20%] whitespace-normal">Email</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Outlet</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[11%] whitespace-normal">Loyalty</TableHead>
                     <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Credit</TableHead>
                     <TableHead className="text-gray-900 font-semibold w-[12%] whitespace-normal">Outstanding</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[7%] whitespace-normal">Last Visit</TableHead>
-                    <TableHead className="text-gray-900 font-semibold w-[3%] whitespace-normal">Actions</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[10%] whitespace-normal">Last Visit</TableHead>
+                    <TableHead className="text-gray-900 font-semibold w-[5%] whitespace-normal">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-8">
+                      <TableCell colSpan={8} className="text-center py-8">
                         <p className="text-gray-600">Loading customers...</p>
                       </TableCell>
                     </TableRow>
                   ) : filteredCustomers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-8">
+                      <TableCell colSpan={8} className="text-center py-8">
                         <p className="text-gray-600">No customers found</p>
                       </TableCell>
                     </TableRow>
                   ) : (
                     filteredCustomers.map((customer) => {
                       const customerPoints = customer.loyalty_points || 0
-                      const totalSpent = customer.total_spent || 0
                       const lastVisit = customer.last_visit
                       
                       // Get outlet ID (string or number)
@@ -266,33 +398,20 @@ export default function CustomerManagementPage() {
                               <span className="font-semibold">{customerPoints.toLocaleString('en-US')}</span>
                             </div>
                           </TableCell>
-                          <TableCell className="font-semibold break-words">
-                            {currentBusiness?.currencySymbol || "MWK"} {totalSpent.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </TableCell>
                           <TableCell className="break-words">
                             {customer.credit_enabled ? (
-                              <div className="space-y-1">
-                                <Badge variant={customer.credit_status === 'active' ? 'default' : 'secondary'}>
-                                  {customer.credit_status || 'active'}
-                                </Badge>
-                                <div className="text-xs text-muted-foreground">
-                                  Limit: {currentBusiness?.currencySymbol || "MWK"} {Number(customer.credit_limit || 0).toFixed(2)}
-                                </div>
-                              </div>
+                              <Badge variant={customer.credit_status === 'active' ? 'default' : 'secondary'}>
+                                {customer.credit_status || 'active'}
+                              </Badge>
                             ) : (
                               <span className="text-xs text-muted-foreground">No Credit</span>
                             )}
                           </TableCell>
                           <TableCell className="break-words">
                             {customer.credit_enabled && (Number(customer.outstanding_balance) || 0) > 0 ? (
-                              <div className="space-y-1">
-                                <span className="font-medium text-orange-600">
-                                  {currentBusiness?.currencySymbol || "MWK"} {Number(customer.outstanding_balance || 0).toFixed(2)}
-                                </span>
-                                <div className="text-xs text-muted-foreground">
-                                  Available: {currentBusiness?.currencySymbol || "MWK"} {Number(customer.available_credit || 0).toFixed(2)}
-                                </div>
-                              </div>
+                              <span className="font-medium text-orange-600">
+                                {currentBusiness?.currencySymbol || "MWK"} {Number(customer.outstanding_balance || 0).toFixed(2)}
+                              </span>
                             ) : (
                               <span className="text-xs text-muted-foreground">-</span>
                             )}
@@ -348,6 +467,13 @@ export default function CustomerManagementPage() {
                                 >
                                   <Merge className="mr-2 h-4 w-4" />
                                   Merge Customer
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => {
+                                    void openCreditPaymentModal(customer)
+                                  }}
+                                >
+                                  Record Credit Payment
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
@@ -432,6 +558,109 @@ export default function CustomerManagementPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
+        <DialogContent className="sm:max-w-[420px]" aria-describedby="record-payment-desc">
+          <DialogHeader>
+            <DialogTitle>Record Credit Payment</DialogTitle>
+            <DialogDescription id="record-payment-desc">
+              Enter the amount received and payment details for this credit sale.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Credit Sale</Label>
+              {isLoadingCreditSummary ? (
+                <p className="text-sm text-muted-foreground mt-1">Loading credit sales...</p>
+              ) : creditInvoices.length === 0 ? (
+                <p className="text-sm text-muted-foreground mt-1">No unpaid credit sales for this customer.</p>
+              ) : (
+                <Select
+                  value={selectedCreditSaleId}
+                  onValueChange={(value) => {
+                    setSelectedCreditSaleId(value)
+                    const selected = creditInvoices.find((invoice) => String(invoice.id) === value)
+                    if (selected) {
+                      setPaymentAmount(Number(selected.remaining || 0).toFixed(2))
+                    }
+                  }}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue placeholder="Select credit sale" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {creditInvoices.map((invoice) => (
+                      <SelectItem key={String(invoice.id)} value={String(invoice.id)}>
+                        {invoice.receipt_number} - {currentBusiness?.currencySymbol || "MWK"} {Number(invoice.remaining || 0).toFixed(2)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+            {selectedCreditInvoice && (
+              <div className="rounded-md border border-gray-200 bg-gray-50 p-2 text-sm">
+                <p>Total: {currentBusiness?.currencySymbol || "MWK"} {Number(selectedCreditInvoice.total || 0).toFixed(2)}</p>
+                <p>Partly Paid: {currentBusiness?.currencySymbol || "MWK"} {Number(selectedCreditInvoice.amount_paid || 0).toFixed(2)}</p>
+                <p className="font-medium text-orange-700">Remaining: {currentBusiness?.currencySymbol || "MWK"} {remainingForSelectedInvoice.toFixed(2)}</p>
+                <p className="capitalize text-muted-foreground">Status: {selectedCreditInvoice.payment_status || "unpaid"}</p>
+              </div>
+            )}
+            <div>
+              <Label>Amount Received</Label>
+              <Input
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
+            <div>
+              <Label>Payment Method</Label>
+              <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as any)}>
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Select method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="mobile">Mobile Money</SelectItem>
+                  <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Reference</Label>
+              <Input
+                value={paymentRef}
+                onChange={(e) => setPaymentRef(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+            <div>
+              <Label>Notes</Label>
+              <Input
+                value={paymentNotes}
+                onChange={(e) => setPaymentNotes(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+            <Button
+              className="w-full"
+              onClick={handleRecordCreditPayment}
+              disabled={
+                isSavingPayment ||
+                isLoadingCreditSummary ||
+                creditInvoices.length === 0 ||
+                !selectedCreditSaleId ||
+                remainingForSelectedInvoice <= 0
+              }
+            >
+              {isSavingPayment ? "Saving..." : "Save Payment"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   )
 }

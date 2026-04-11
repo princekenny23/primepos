@@ -17,7 +17,6 @@ import {
   CreditCard,
   Users,
   FileText,
-  Check,
   X,
 } from "lucide-react"
 import { formatDistanceToNow, format } from "date-fns"
@@ -27,8 +26,6 @@ interface NotificationDetailModalProps {
   notification: Notification | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onMarkAsRead: (notification: Notification) => void
-  onRefresh: () => void
 }
 
 const notificationIcons: Record<string, React.ComponentType<any>> = {
@@ -54,8 +51,6 @@ export function NotificationDetailModal({
   notification,
   open,
   onOpenChange,
-  onMarkAsRead,
-  onRefresh,
 }: NotificationDetailModalProps) {
   if (!notification) return null
 
@@ -131,18 +126,6 @@ export function NotificationDetailModal({
 
         {/* Actions */}
         <div className="flex gap-2">
-          {!notification.read && (
-            <Button
-              variant="outline"
-              className="flex-1"
-              onClick={() => {
-                onMarkAsRead(notification)
-              }}
-            >
-              <Check className="mr-2 h-4 w-4" />
-              Mark as Read
-            </Button>
-          )}
           <Button
             variant="outline"
             className="flex-1"

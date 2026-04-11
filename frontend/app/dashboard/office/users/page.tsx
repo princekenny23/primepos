@@ -231,14 +231,37 @@ export default function AccountsPage() {
     }
   }, [roleToDelete, loadRoles, toast])
 
+  const staffUserIdsAtCurrentOutlet = useMemo(() => {
+    if (!currentOutletId) return new Set<string>()
+
+    return new Set(
+      staffMembers
+        .filter((staff) =>
+          (staff.outlets || []).some((outlet) => String(outlet.id) === currentOutletId)
+        )
+        .map((staff) => String(staff.user?.id || ""))
+        .filter(Boolean)
+    )
+  }, [staffMembers, currentOutletId])
+
   const filteredUsers = useMemo(() => {
-    return users.filter(user => {
-      const name = user.name || ""
-      const email = user.email || ""
-      const searchLower = searchTerm.toLowerCase()
-      return name.toLowerCase().includes(searchLower) || email.toLowerCase().includes(searchLower)
+    const term = searchTerm.trim().toLowerCase()
+
+    return users.filter((user) => {
+      const name = (user.name || "").toLowerCase()
+      const email = (user.email || "").toLowerCase()
+      const matchesSearch = name.includes(term) || email.includes(term)
+      if (!matchesSearch) return false
+
+      if (!currentOutletId) return true
+
+      const userOutletIds = (user.outletIds || []).map(String)
+      const inUserOutletIds = userOutletIds.includes(currentOutletId)
+      const inStaffAssignment = staffUserIdsAtCurrentOutlet.has(String(user.id))
+
+      return inUserOutletIds || inStaffAssignment
     })
-  }, [users, searchTerm])
+  }, [users, searchTerm, currentOutletId, staffUserIdsAtCurrentOutlet])
 
   const filteredRoles = useMemo(() => {
     return roles.filter(role => {
@@ -267,14 +290,14 @@ export default function AccountsPage() {
       value: "users",
       label: "Users",
       icon: UsersIcon,
-      badgeCount: users.length,
+      badgeCount: filteredUsers.length,
       badgeVariant: "secondary",
     },
     {
       value: "staff",
       label: "Staff",
       icon: UsersIcon,
-      badgeCount: staffMembers.length,
+      badgeCount: filteredStaff.length,
       badgeVariant: "secondary",
     },
     {

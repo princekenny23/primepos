@@ -896,25 +896,10 @@ export function BarPOS() {
       return
     }
 
-    try {
-      await saleService.voidTransaction(initiatedSaleId, "Cancelled from payment popup")
-    } catch (error: any) {
-      toast({
-        title: "Cancel failed",
-        description: error?.message || "Unable to void initiated transaction.",
-        variant: "destructive",
-      })
-    } finally {
-      setCart([])
-      setSaleDiscount(null)
-      setSelectedCustomer(null)
-      setTransactionLocked(false)
-      setInitiatedSaleId("")
-      setIsDeliveryRequired(false)
-      setIsProcessing(false)
-      setShowVoidReasonDialog(false)
-      setVoidReason("")
-    }
+    setVoidReason("")
+    setShowVoidReasonDialog(true)
+    setIsDeliveryRequired(false)
+    setIsProcessing(false)
   }
 
   const handleConfirmPaymentCancel = async (reason: string) => {
@@ -1866,12 +1851,6 @@ export function BarPOS() {
               <span>Total</span>
               <span className="text-3xl font-extrabold text-black">{formatCurrency(currentTab?.total || cartSubtotal, currentBusiness)}</span>
             </div>
-            {currentTab?.is_over_limit && (
-              <p className="text-xs text-destructive flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" />
-                Tab exceeded credit limit
-              </p>
-            )}
           </div>
 
           {/* Simplified Action Bar - Payment + More - Always visible */}
@@ -2013,11 +1992,6 @@ export function BarPOS() {
                           {customer.phone || customer.email || "No contact info"}
                         </p>
                       </div>
-                      {customer.credit_enabled && (
-                        <Badge variant="outline" className="text-xs">
-                          Credit: {formatCurrency(customer.available_credit || 0, currentBusiness)}
-                        </Badge>
-                      )}
                     </button>
                   ))}
                 </div>

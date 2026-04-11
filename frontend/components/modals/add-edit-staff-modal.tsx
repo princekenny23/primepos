@@ -221,7 +221,7 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
             {!staff && (
               <div className="space-y-2 md:col-span-2">
                 <Label>Select Users *</Label>
-                <div className="border rounded-md p-4 max-h-56 overflow-y-auto">
+                <div className="border rounded-md p-4 max-h-[10.5rem] overflow-y-auto">
                   {availableUsers.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No users available for this business.</p>
                   ) : (

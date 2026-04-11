@@ -233,15 +233,10 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
             notes=data.get('notes', ''),
         )
         
-        # Check credit limit warning
-        warning = None
-        if tab.is_over_limit:
-            warning = f"Tab has exceeded credit limit of {tab.credit_limit}"
-        
         return Response({
             'item': TabItemSerializer(item).data,
             'tab_total': float(tab.total),
-            'warning': warning,
+            'warning': None,
         }, status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['post'])

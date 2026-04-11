@@ -66,6 +66,10 @@ interface SaleDetail extends Sale {
     id: string
     name: string
   }
+  till?: {
+    id: string
+    name: string
+  }
 }
 
 interface CashierOption {
@@ -113,6 +117,13 @@ export default function TransactionsPage() {
       saleDetail.outlet = {
         id: String(sale._raw.outlet_detail.id),
         name: sale._raw.outlet_detail.name,
+      }
+    }
+
+    if (sale._raw?.till_detail) {
+      saleDetail.till = {
+        id: String(sale._raw.till_detail.id),
+        name: sale._raw.till_detail.name,
       }
     }
 
@@ -470,6 +481,7 @@ export default function TransactionsPage() {
                     <TableHead className="text-gray-900 font-semibold">Date & Time</TableHead>
                     <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
+                    <TableHead className="text-gray-900 font-semibold">Till</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Payment Method</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Amount</TableHead>
                     <TableHead className="text-gray-900 font-semibold">Status</TableHead>
@@ -488,6 +500,7 @@ export default function TransactionsPage() {
                       </TableCell>
                       <TableCell>{getUserDisplay(sale)}</TableCell>
                       <TableCell>{sale.outlet?.name || "N/A"}</TableCell>
+                      <TableCell>{sale.till?.name || "—"}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="capitalize border-gray-300">
                           {sale._raw?.payment_method || sale.payment_method || sale.paymentMethod || "cash"}

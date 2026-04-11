@@ -12,8 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Percent, X } from "lucide-react"
+import { X } from "lucide-react"
 import { useState, useEffect } from "react"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Business } from "@/lib/types"
@@ -43,9 +42,7 @@ export function SaleDiscountModal({
   onApply,
   onRemove,
 }: SaleDiscountModalProps) {
-  const [discountType, setDiscountType] = useState<"percentage" | "amount">(
-    currentDiscount?.type || "percentage"
-  )
+  const [discountType, setDiscountType] = useState<"percentage" | "amount">("amount")
   const [discountValue, setDiscountValue] = useState<string>(
     currentDiscount ? String(currentDiscount.value) : ""
   )
@@ -61,17 +58,15 @@ export function SaleDiscountModal({
         setDiscountValue(String(currentDiscount.value))
         setDiscountReason(currentDiscount.reason || "")
       } else {
-        setDiscountType("percentage")
+        setDiscountType("amount")
         setDiscountValue("")
         setDiscountReason("")
       }
     }
   }, [open, currentDiscount])
 
-  const maxDiscount = discountType === "percentage" ? 100 : subtotal
-  const calculatedDiscount = discountType === "percentage"
-    ? (subtotal * parseFloat(discountValue || "0")) / 100
-    : parseFloat(discountValue || "0")
+  const maxDiscount = subtotal
+  const calculatedDiscount = parseFloat(discountValue || "0")
 
   const finalDiscount = Math.min(Math.max(0, calculatedDiscount), maxDiscount)
   const finalTotal = subtotal - finalDiscount
@@ -82,8 +77,8 @@ export function SaleDiscountModal({
     }
 
     const discount: SaleDiscount = {
-      type: discountType,
-      value: discountType === "percentage" ? parseFloat(discountValue) : finalDiscount,
+      type: "amount",
+      value: finalDiscount,
       reason: discountReason.trim() || undefined,
     }
 
@@ -116,83 +111,26 @@ export function SaleDiscountModal({
               <p className="text-xl font-bold">{formatCurrency(subtotal, business)}</p>
             </div>
 
-            {/* Discount Type Tabs */}
-            <Tabs 
-              value={discountType} 
-              onValueChange={(value) => {
-                setDiscountType(value as "percentage" | "amount")
-                setDiscountValue("")
-              }}
-            >
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="percentage">Percentage</TabsTrigger>
-                <TabsTrigger value="amount">Amount</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="percentage" className="space-y-3 mt-4">
-                <div className="space-y-2">
-                  <Label htmlFor="discount-percent">Discount Percentage</Label>
-                  <div className="relative">
-                    <Input
-                      id="discount-percent"
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={discountValue}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        if (val === "" || (parseFloat(val) >= 0 && parseFloat(val) <= 100)) {
-                          setDiscountValue(val)
-                        }
-                      }}
-                      className="pr-10"
-                      autoFocus
-                    />
-                    <Percent className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  </div>
-                  {discountValue && (
-                    <p className="text-sm text-muted-foreground">
-                      Discount: {formatCurrency(finalDiscount, business)}
-                    </p>
-                  )}
-                </div>
-              </TabsContent>
-
-              <TabsContent value="amount" className="space-y-3 mt-4">
-                <div className="space-y-2">
-                  <Label htmlFor="discount-amount">Discount Amount</Label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground">
-                      {business.currencySymbol}
-                    </span>
-                    <Input
-                      id="discount-amount"
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      max={maxDiscount}
-                      placeholder="0.00"
-                      className="pl-7"
-                      value={discountValue}
-                      onChange={(e) => {
-                        const val = e.target.value
-                        if (val === "" || (parseFloat(val) >= 0 && parseFloat(val) <= maxDiscount)) {
-                          setDiscountValue(val)
-                        }
-                      }}
-                      autoFocus
-                    />
-                  </div>
-                  {discountValue && (
-                    <p className="text-sm text-muted-foreground">
-                      Percentage: {subtotal > 0 ? ((finalDiscount / subtotal) * 100).toFixed(2) : "0.00"}%
-                    </p>
-                  )}
-                </div>
-              </TabsContent>
-            </Tabs>
+            {/* Discount Amount */}
+            <div className="space-y-2">
+              <Label htmlFor="discount-amount">Discount Amount</Label>
+              <Input
+                id="discount-amount"
+                type="number"
+                step="0.01"
+                min="0"
+                max={maxDiscount}
+                placeholder="0.00"
+                value={discountValue}
+                onChange={(e) => {
+                  const val = e.target.value
+                  if (val === "" || (parseFloat(val) >= 0 && parseFloat(val) <= maxDiscount)) {
+                    setDiscountValue(val)
+                  }
+                }}
+                autoFocus
+              />
+            </div>
           </div>
 
           <div className="space-y-4">

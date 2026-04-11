@@ -8,7 +8,7 @@ import type { Business } from "@/lib/types"
 
 interface KPICardProps {
   title: string
-  value: string | number
+  value: React.ReactNode
   change?: number
   changeLabel?: string
   icon: React.ReactNode
@@ -80,10 +80,15 @@ export function KPICards({ data, business }: KPICardsProps) {
     <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
       <KPICard
         title="Sales"
-        value={formatCurrency(data.sales.value, business, { symbolOverride: "MWK" })}
+        value={
+          <span className="inline-flex items-center gap-1">
+            <span className="text-[10px] font-semibold tracking-wide">MWK</span>
+            {formatCurrency(data.sales.value, business, { symbolOverride: "MWK" })}
+          </span>
+        }
         change={data.sales.change}
         changeLabel="vs previous period"
-        icon={<DollarSign className="h-3.5 w-3.5" />}
+        icon={<span className="text-[9px] font-semibold tracking-wide">MWK</span>}
         trend={data.sales.change >= 0 ? "up" : "down"}
         business={business}
         colorVariant="blue"

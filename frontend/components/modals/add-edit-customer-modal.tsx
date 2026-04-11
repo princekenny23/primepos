@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { User, Mail, Phone, MapPin, CreditCard, FileText } from "lucide-react"
+import { User, Mail, Phone, MapPin, FileText } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { customerService, type Customer } from "@/lib/services/customerService"
@@ -49,7 +49,6 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
     outlet_id: "",
     // Credit fields
     credit_enabled: false,
-    credit_limit: "",
     payment_terms_days: "30",
     credit_status: "active" as "active" | "suspended" | "closed",
     credit_notes: "",
@@ -66,7 +65,6 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
           address: customer.address || "",
           outlet_id: String(customer.outlet_id || customer.outlet || ""),
           credit_enabled: customer.credit_enabled || false,
-          credit_limit: customer.credit_limit?.toString() || "",
           payment_terms_days: customer.payment_terms_days?.toString() || "30",
           credit_status: (customer.credit_status as "active" | "suspended" | "closed") || "active",
           credit_notes: customer.credit_notes || "",
@@ -80,7 +78,6 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
           address: "",
           outlet_id: "",
           credit_enabled: false,
-          credit_limit: "",
           payment_terms_days: "30",
           credit_status: "active",
           credit_notes: "",
@@ -111,15 +108,6 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
       return
     }
 
-    if (formData.credit_enabled && (!formData.credit_limit || parseFloat(formData.credit_limit) <= 0)) {
-      toast({
-        title: "Validation Error",
-        description: "Credit limit is required when credit is enabled.",
-        variant: "destructive",
-      })
-      return
-    }
-
     setIsLoading(true)
 
     try {
@@ -130,7 +118,6 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
         address: formData.address || undefined,
         outlet_id: formData.outlet_id || undefined,
         credit_enabled: formData.credit_enabled,
-        credit_limit: formData.credit_enabled ? parseFloat(formData.credit_limit) : undefined,
         payment_terms_days: formData.credit_enabled ? parseInt(formData.payment_terms_days) : undefined,
         credit_status: formData.credit_enabled ? formData.credit_status : undefined,
         credit_notes: formData.credit_notes || undefined,
@@ -288,27 +275,6 @@ export function AddEditCustomerModal({ open, onOpenChange, customer, onSuccess }
               {formData.credit_enabled && (
                 <div className="space-y-4">
                   <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="credit_limit">Credit Limit *</Label>
-                      <div className="relative">
-                        <CreditCard className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          id="credit_limit"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          className="pl-10"
-                          required={formData.credit_enabled}
-                          value={formData.credit_limit}
-                          onChange={(e) => setFormData({ ...formData, credit_limit: e.target.value })}
-                          placeholder={t("common.amount_placeholder")}
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Maximum credit amount for this customer
-                      </p>
-                    </div>
-
                     <div className="space-y-2">
                       <Label htmlFor="payment_terms_days">Payment Terms *</Label>
                       <Select

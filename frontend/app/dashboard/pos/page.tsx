@@ -4,17 +4,12 @@ import { useEffect, useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { 
   ShoppingCart, 
-  Lock, 
-  PlayCircle, 
   Clock, 
   Loader2, 
-  Store,
-  CreditCard,
   CheckCircle2,
   Calculator
 } from "lucide-react"
@@ -33,7 +28,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import Link from "next/link"
 
 interface RegisterStatus {
   outlet: { id: string; name: string }
@@ -116,7 +110,7 @@ export default function POSLandingPage() {
           
           for (const till of tills.filter(t => t.is_active)) {
             const shiftForTill = shifts.find(
-              s => s.outletId === outlet.id && s.tillId === till.id
+              s => String(s.outletId) === String(outlet.id) && String(s.tillId) === String(till.id)
             )
             
             allRegisters.push({
@@ -151,10 +145,6 @@ export default function POSLandingPage() {
       }
     }
   }, [activeShift, currentBusiness, currentOutlet, router, loadRegisterStatuses])
-
-  const handleStartNew = () => {
-    router.push("/dashboard/office/shift-management/start-shift")
-  }
 
   const handleSelectShift = async () => {
     if (!selectedShiftId) return
@@ -194,12 +184,12 @@ export default function POSLandingPage() {
   }
 
   const getShiftDisplayName = (shift: Shift): string => {
-    const outlet = outlets.find(o => o.id === shift.outletId)
+    const outlet = outlets.find(o => String(o.id) === String(shift.outletId))
     const register = registerStatuses.find(
-      r => r.outlet.id === shift.outletId && r.till.id === shift.tillId
+      r => String(r.outlet.id) === String(shift.outletId) && String(r.till.id) === String(shift.tillId)
     )
-    const tillName = register?.till.name || `Till #${shift.tillId.slice(-4)}`
-    const outletName = outlet?.name || `Outlet #${shift.outletId.slice(-4)}`
+    const tillName = register?.till.name || `Till #${String(shift.tillId).slice(-4)}`
+    const outletName = outlet?.name || `Outlet #${String(shift.outletId).slice(-4)}`
     return `${outletName} - ${tillName} (${format(new Date(shift.operatingDate), "MMM dd")})`
   }
 
@@ -223,7 +213,7 @@ export default function POSLandingPage() {
     <DashboardLayout>
       <PageLayout
         title="Point of Sale"
-        description="Select a running shift or start a new one to begin selling"
+        description="Select a running shift to begin selling"
       >
         <div className="flex items-center justify-center min-h-[calc(100vh-8rem)] py-8">
           <div className="w-full max-w-2xl space-y-8">
@@ -239,19 +229,19 @@ export default function POSLandingPage() {
           {/* Main Options Card */}
           <Card>
             <CardContent className="pt-8 pb-8">
-              <div className="space-y-6">
-                {/* Running Shifts Selection */}
-                {activeShifts.length > 0 && (
-                  <div className="space-y-4">
-                    <div className="text-center">
-                      <h3 className="text-lg font-semibold flex items-center justify-center gap-2">
-                        <Clock className="h-5 w-5 text-primary" />
-                        Running Shifts ({activeShifts.length})
-                      </h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Select an active shift to continue selling
-                      </p>
-                    </div>
+              <div className="space-y-4">
+                <div className="text-center">
+                  <h3 className="text-lg font-semibold flex items-center justify-center gap-2">
+                    <Clock className="h-5 w-5 text-primary" />
+                    Running Shifts ({activeShifts.length})
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Select an active shift to continue selling
+                  </p>
+                </div>
+
+                {activeShifts.length > 0 ? (
+                  <>
                     <Select value={selectedShiftId} onValueChange={setSelectedShiftId}>
                       <SelectTrigger className="w-full h-12 text-base">
                         <SelectValue placeholder="Select a shift from the dropdown..." />
@@ -282,43 +272,12 @@ export default function POSLandingPage() {
                         </>
                       )}
                     </Button>
-                  </div>
+                  </>
+                ) : (
+                  <p className="text-center text-sm text-muted-foreground">
+                    No running shifts available. Ask your manager to open a shift first.
+                  </p>
                 )}
-
-                {/* Divider */}
-                {activeShifts.length > 0 && (
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t" />
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-background px-2 text-muted-foreground">OR</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Start New Shift */}
-                <div className="space-y-4">
-                  <div className="text-center">
-                    <h3 className="text-lg font-semibold flex items-center justify-center gap-2">
-                      <PlayCircle className="h-5 w-5 text-primary" />
-                      Start New Shift
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Create a new shift for any outlet and till
-                    </p>
-                  </div>
-                  <Link href="/dashboard/office/shift-management/start-shift" className="block">
-                    <Button
-                      className="w-full h-12 text-base font-semibold"
-                      size="lg"
-                      variant={activeShifts.length > 0 ? "outline" : "default"}
-                    >
-                      <PlayCircle className="mr-2 h-5 w-5" />
-                      START NEW SHIFT
-                    </Button>
-                  </Link>
-                </div>
               </div>
             </CardContent>
           </Card>
@@ -338,7 +297,7 @@ export default function POSLandingPage() {
           )}
 
           {/* Summary Info */}
-          {(closedRegisters.length > 0 || openRegisters.length > 0) && (
+          {activeShifts.length > 0 && (closedRegisters.length > 0 || openRegisters.length > 0) && (
             <div className="text-center text-xs text-muted-foreground space-y-1">
               {closedRegisters.length > 0 && (
                 <p>

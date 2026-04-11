@@ -261,11 +261,6 @@ export function NotificationBell({ triggerClassName, unreadRingClassName }: Noti
             setSelectedNotification(null)
           }
         }}
-        onMarkAsRead={(notification) => handleMarkAsRead(notification.id)}
-        onRefresh={() => {
-          loadNotifications()
-          loadUnreadCount()
-        }}
       />
     </DropdownMenu>
   )

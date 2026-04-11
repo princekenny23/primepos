@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { customerService, type Customer } from "@/lib/services/customerService"
 import { useBusinessStore } from "@/stores/businessStore"
-import { Award, Calendar, Mail, MapPin, Phone, Store, Wallet } from "lucide-react"
+import { Award, Calendar, Mail, MapPin, Phone, Store } from "lucide-react"
 
 interface CustomerDetailsModalProps {
   open: boolean
@@ -76,10 +76,7 @@ export function CustomerDetailsModal({ open, onOpenChange, customer }: CustomerD
 
   const currencySymbol = currentBusiness?.currencySymbol || "MWK"
   const loyaltyPoints = details.loyalty_points || details.points || 0
-  const totalSpent = Number(details.total_spent || 0)
-  const creditLimit = Number(details.credit_limit || 0)
   const outstandingBalance = Number(details.outstanding_balance || 0)
-  const availableCredit = Number(details.available_credit || 0)
   const memberSince = details.created_at ? new Date(details.created_at).toLocaleDateString() : "N/A"
   const lastVisit = details.last_visit ? new Date(details.last_visit).toLocaleDateString() : "Never"
 
@@ -127,7 +124,7 @@ export function CustomerDetailsModal({ open, onOpenChange, customer }: CustomerD
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Membership & Activity</CardTitle>
+              <CardTitle className="text-base">Membership</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <div>
@@ -158,12 +155,6 @@ export function CustomerDetailsModal({ open, onOpenChange, customer }: CustomerD
                   {loyaltyPoints.toLocaleString("en-US")}
                 </p>
               </div>
-              <div>
-                <p className="text-muted-foreground">Lifetime Value</p>
-                <p className="font-semibold">
-                  {currencySymbol} {totalSpent.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-              </div>
             </CardContent>
           </Card>
 
@@ -185,33 +176,14 @@ export function CustomerDetailsModal({ open, onOpenChange, customer }: CustomerD
                 </div>
               </div>
               <div>
-                <p className="text-muted-foreground">Credit Limit</p>
-                <p className="font-medium">
-                  {currencySymbol} {creditLimit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div>
                 <p className="text-muted-foreground">Outstanding Balance</p>
                 <p className="font-medium text-orange-600">
                   {currencySymbol} {outstandingBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
               </div>
               <div>
-                <p className="text-muted-foreground">Available Credit</p>
-                <p className="font-medium">
-                  {currencySymbol} {availableCredit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div>
                 <p className="text-muted-foreground">Payment Terms</p>
                 <p className="font-medium">{details.payment_terms_days || 0} days</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Notes</p>
-                <p className="flex items-start gap-2 font-medium">
-                  <Wallet className="mt-0.5 h-4 w-4 text-muted-foreground" />
-                  <span>{details.credit_notes || "No credit notes"}</span>
-                </p>
               </div>
             </CardContent>
           </Card>

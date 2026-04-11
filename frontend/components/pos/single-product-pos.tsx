@@ -492,8 +492,20 @@ export function SingleProductPOS() {
       return
     }
 
+    const typedReason =
+      typeof window !== "undefined"
+        ? window.prompt("Enter void reason to cancel this payment", "")
+        : ""
+    const reason = String(typedReason || "").trim()
+
+    if (!reason) {
+      // Keep initiated transaction active until a manual reason is provided.
+      setShowPaymentMethod(true)
+      return
+    }
+
     try {
-      await saleService.voidTransaction(initiatedSaleId, "Cashier cancelled payment popup")
+      await saleService.voidTransaction(initiatedSaleId, reason)
       clearCart()
       setSelectedCustomer(null)
       toast({ title: "Transaction voided", description: "Initiated transaction was cancelled and logged." })

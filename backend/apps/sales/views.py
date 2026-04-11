@@ -71,7 +71,7 @@ class ConnectorThrottle(AnonRateThrottle):
 
 class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Sale ViewSet with atomic transactions"""
-    queryset = Sale.objects.select_related('tenant', 'outlet', 'user', 'shift', 'customer').prefetch_related(
+    queryset = Sale.objects.select_related('tenant', 'outlet', 'user', 'shift', 'customer', 'till', 'till__outlet').prefetch_related(
         'items',
         'items__product'  # Prefetch product data for sale items to avoid N+1 queries
     )
@@ -106,7 +106,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Get base queryset with optimized prefetching to avoid N+1 queries
         # Using select_related for ForeignKey relationships and prefetch_related for reverse relationships
         queryset = Sale.objects.select_related(
-            'tenant', 'outlet', 'user', 'shift', 'customer'
+            'tenant', 'outlet', 'user', 'shift', 'customer', 'till', 'till__outlet'
         ).prefetch_related(
             'items',
             'items__product'  # Prefetch product data for sale items to avoid N+1 queries
@@ -291,7 +291,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             customer = Customer.objects.get(id=customer_id, tenant=tenant)
         
         # Generate receipt number
-        receipt_number = self._generate_receipt_number(tenant)
+        receipt_number = self._generate_receipt_number(tenant, outlet=outlet)
         
         # Get table if provided
         table = None
@@ -447,11 +447,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             if not sale.customer:
                 raise serializers.ValidationError({"customer": "Customer is required for credit sales"})
             
-            # Validate credit
-            can_sell, error_message = sale.customer.can_make_credit_sale(sale.total)
-            if not can_sell:
-                raise serializers.ValidationError({"detail": error_message})
-            
             # Set due date and payment status
             sale.due_date = timezone.now() + timedelta(days=sale.customer.payment_terms_days)
             sale.amount_paid = Decimal('0')
@@ -509,12 +504,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 priority=priority,
                 notes=sale.notes
             )
-        
-        # Update customer if provided
-        if sale.customer:
-            sale.customer.total_spent += sale.total
-            sale.customer.last_visit = timezone.now()
-            sale.customer.save()
         
         response_serializer = SaleSerializer(sale)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
@@ -631,7 +620,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if total <= 0:
             return Response({"detail": "total must be greater than 0"}, status=status.HTTP_400_BAD_REQUEST)
 
-        receipt_number = self._generate_receipt_number(tenant)
+        receipt_number = self._generate_receipt_number(tenant, outlet=outlet)
         notes = request.data.get("notes", "") or ""
         reason = request.data.get("reason") or request.data.get("void_reason") or ""
         if reason:
@@ -794,7 +783,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             return Response({"detail": "total must be greater than 0"}, status=status.HTTP_400_BAD_REQUEST)
 
         sale = Sale.objects.create(
-            receipt_number=self._generate_receipt_number(tenant),
+            receipt_number=self._generate_receipt_number(tenant, outlet=outlet),
             user=request.user,
             tenant=tenant,
             outlet=outlet,
@@ -1145,7 +1134,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         change_given = cash_received - total
         
         # Generate receipt number
-        receipt_number = self._generate_receipt_number(tenant)
+        receipt_number = self._generate_receipt_number(tenant, outlet=outlet)
         
         # Get customer if provided
         customer = None
@@ -1233,12 +1222,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     reason=f"Cash sale {sale.receipt_number}"
                 )
         
-        # Update customer if provided
-        if customer:
-            customer.total_spent += total
-            customer.last_visit = timezone.now()
-            customer.save()
-        
         # Cash movement creation removed - new payment system will handle this
         
         # Auto-generate receipt PDF for completed cash sales
@@ -1267,21 +1250,20 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             "shift": shift_serializer.data if shift_serializer else {"id": shift.id, "status": shift.status}
         }, status=status.HTTP_201_CREATED)
     
-    def _generate_receipt_number(self, tenant):
-        """Generate unique receipt number"""
-        # Numeric-only receipt numbers (no date/prefix). Use global max to keep uniqueness.
-        recent_numbers = Sale.objects.order_by('-created_at').values_list('receipt_number', flat=True)[:1000]
+    def _generate_receipt_number(self, tenant, outlet=None):
+        """Generate unique receipt number scoped per outlet (starts from 1 per outlet)."""
+        qs = Sale.objects.filter(tenant=tenant)
+        if outlet:
+            qs = qs.filter(outlet=outlet)
+
+        recent_numbers = qs.order_by('-created_at').values_list('receipt_number', flat=True)[:1000]
         max_numeric = 0
         for number in recent_numbers:
             if number and str(number).isdigit():
                 max_numeric = max(max_numeric, int(number))
 
-        if max_numeric == 0:
-            max_id = Sale.objects.aggregate(max_id=Max('id')).get('max_id') or 0
-            max_numeric = max_id
-
         next_number = max_numeric + 1
-        while Sale.objects.filter(receipt_number=str(next_number)).exists():
+        while qs.filter(receipt_number=str(next_number)).exists():
             next_number += 1
 
         return str(next_number)
@@ -1380,11 +1362,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             sale.status = 'refunded'
             sale.save()
             
-            # Update customer if exists
-            if sale.customer:
-                sale.customer.total_spent = max(0, sale.customer.total_spent - refund_amount)
-                sale.customer.save()
-        
+
         serializer = self.get_serializer(sale)
         return Response(serializer.data)
 

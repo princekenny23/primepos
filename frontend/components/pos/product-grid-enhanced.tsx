@@ -85,6 +85,10 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
       <ScrollArea className="flex-1">
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-3">
           {products.map((product) => {
+            const stockQty = Number(product.stock ?? 0)
+            const lowStockThreshold = Number((product as any).low_stock_threshold ?? product.lowStockThreshold ?? 0)
+            const isLowStock = Boolean((product as any).is_low_stock || (lowStockThreshold > 0 && stockQty <= lowStockThreshold))
+
             return (
               <Card
                 key={product.id}
@@ -96,7 +100,8 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
                     {product.name}
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-auto">
-                    Stock: {product.stock ?? 0}
+                    Stock: {stockQty}
+                    {isLowStock ? <span className="ml-1 font-semibold text-destructive">LOW</span> : null}
                   </p>
                 </CardContent>
               </Card>

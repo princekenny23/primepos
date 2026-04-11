@@ -101,6 +101,7 @@ class CustomerViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         outstanding_credit = Sale.objects.filter(
             customer__in=queryset,
             payment_method__in=['credit', 'tab'],
+            status__in=['completed', 'pending'],
             payment_status__in=['unpaid', 'partially_paid', 'overdue'],
         ).aggregate(total=Sum(outstanding_expression))['total'] or Decimal('0')
 
@@ -218,11 +219,12 @@ class CustomerViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         tenant = getattr(request, 'tenant', None) or request.user.tenant
         
         # Get unpaid credit sales
-        # Include both formal credit invoices and customer-linked tabs in the unpaid list
+        # Include both formal credit invoices and customer-linked tabs in the unpaid list (exclude voided)
         unpaid_sales = Sale.objects.filter(
             customer=customer,
             tenant=tenant,
             payment_method__in=['credit', 'tab'],
+            status__in=['completed', 'pending'],
             payment_status__in=['unpaid', 'partially_paid', 'overdue']
         ).order_by('created_at')
         

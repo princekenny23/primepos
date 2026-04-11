@@ -205,8 +205,6 @@ export function PaymentPopup({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="mobile">Mobile Money</SelectItem>
                   <SelectItem value="tab">Tab/Credit</SelectItem>
                 </SelectContent>
               </Select>

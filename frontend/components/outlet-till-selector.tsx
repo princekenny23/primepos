@@ -36,13 +36,13 @@ export function OutletTillSelector() {
       {tills.length > 0 && (
         <div className="flex items-center gap-2">
           <Monitor className="h-4 w-4 text-muted-foreground" />
-          <Select value={currentTill?.id || ""} onValueChange={setCurrentTill}>
+          <Select value={currentTill ? String(currentTill.id) : ""} onValueChange={setCurrentTill}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Select till" />
             </SelectTrigger>
             <SelectContent>
               {tills.map((till) => (
-                <SelectItem key={till.id} value={till.id}>
+                <SelectItem key={till.id} value={String(till.id)}>
                   {till.name}
                 </SelectItem>
               ))}

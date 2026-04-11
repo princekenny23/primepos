@@ -247,7 +247,7 @@ export function RetailPOS() {
     try {
       const outletId = currentOutlet?.id ? String(currentOutlet.id) : undefined
       const [productsData, categoriesData] = await Promise.all([
-        productService.list({ is_active: true, page, outlet: outletId }),
+        productService.list({ is_active: true, page, outlet: outletId, limit: 18 }),
         page === 1
           ? categoryService.list({ outlet: outletId })
           : Promise.resolve(categories.filter((c) => c !== "all").map((name) => ({ name } as any))),
@@ -1018,25 +1018,10 @@ export function RetailPOS() {
       return
     }
 
-    try {
-      await saleService.voidTransaction(initiatedSaleId, "Cancelled from payment popup")
-    } catch (error: any) {
-      toast({
-        title: "Cancel failed",
-        description: error?.message || "Unable to void initiated transaction.",
-        variant: "destructive",
-      })
-    } finally {
-      clearCart()
-      setSaleDiscount(null)
-      setSelectedCustomer(null)
-      setTransactionLocked(false)
-      setInitiatedSaleId("")
-      setIsProcessingPayment(false)
-      setIsDeliveryRequired(false)
-      setShowVoidReasonDialog(false)
-      setVoidReason("")
-    }
+    setVoidReason("")
+    setShowVoidReasonDialog(true)
+    setIsProcessingPayment(false)
+    setIsDeliveryRequired(false)
   }
 
   const handleConfirmPaymentCancel = async (reason: string) => {
@@ -1159,193 +1144,8 @@ export function RetailPOS() {
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Products Panel - Clean List View */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-background">
-          <div className="flex-1 flex min-h-0 overflow-hidden">
-            {/* Category Filter - Fixed Sidebar */}
-            {categories.length > 1 && (
-              <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2">
-                <div className="mb-2">
-                  <span className="text-xs font-medium">Categories</span>
-                </div>
-                <div className="max-h-[22rem] overflow-y-auto">
-                  <div className="grid grid-cols-1 gap-2 justify-items-center">
-                  <Button
-                    key="all"
-                    variant={selectedCategory === "all" ? "default" : "outline"}
-                    className="h-20 w-20 p-1 justify-center items-center text-[11px] overflow-hidden"
-                    onClick={() => setSelectedCategory("all")}
-                    title="All"
-                  >
-                    <span className="truncate text-center">All</span>
-                  </Button>
-                  {categories
-                    .filter((category) => category !== "all")
-                    .map((category) => (
-                      <Button
-                        key={category}
-                        variant={selectedCategory === category ? "default" : "outline"}
-                        className="h-20 w-20 p-1 justify-center items-center text-[11px] overflow-hidden"
-                        onClick={() => setSelectedCategory(category)}
-                        title={category}
-                      >
-                        <span className="truncate text-center">{category}</span>
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Products Grid - Enhanced */}
-            <div className="relative flex-1 overflow-y-auto bg-gray-200 p-3">
-              {isLoadingProducts ? (
-                <div className="p-8 text-center text-muted-foreground">Loading products...</div>
-              ) : productsError ? (
-                <div className="p-8 text-center text-destructive">{productsError}</div>
-              ) : filteredProducts.length === 0 ? (
-                <div className="p-8 text-center text-muted-foreground">No products found</div>
-              ) : (
-                <ProductGrid
-                  products={filteredProducts as any}
-                  onAddToCart={(
-                    product,
-                    unit,
-                    quantity
-                  ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
-                />
-              )}
-              <div className="absolute bottom-4 right-4 flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shadow-lg"
-                  onClick={handlePreviousProductsPage}
-                  disabled={productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage}
-                  title={productsPage > 1 ? "Load previous products" : "Already first page"}
-                >
-                  Previous Products
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shadow-lg"
-                  onClick={handleNextProductsPage}
-                  disabled={!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage}
-                  title={hasNextProductsPage ? "Load next products" : "No more products"}
-                >
-                  {isLoadingNextProductsPage ? "Loading..." : hasNextProductsPage ? "Next Products" : "No More"}
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="border-t bg-card px-2 py-2">
-            <div className="flex flex-wrap gap-1.5">
-              <Button
-                size="sm"
-                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
-                onClick={() => requestRowActionConfirmation("discount")}
-              >
-                <Tag className="h-6 w-6" />
-                Discount
-              </Button>
-              <Button
-                size="sm"
-                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-blue-600 text-white hover:bg-blue-700"
-                onClick={() => requestRowActionConfirmation("refund")}
-              >
-                <RotateCcw className="h-6 w-6" />
-                Refund
-              </Button>
-              <Button
-                size="sm"
-                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
-                onClick={handleHoldSale}
-              >
-                <PauseCircle className="h-6 w-6" />
-                Hold
-              </Button>
-              <Button
-                size="sm"
-                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700"
-                onClick={() => requestRowActionConfirmation("retrieve")}
-              >
-                <History className="h-6 w-6" />
-                Retrieve
-              </Button>
-              <Button
-                size="sm"
-                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-orange-600 text-white hover:bg-orange-700"
-                onClick={() => requestRowActionConfirmation("drawer")}
-              >
-                <Wallet className="h-6 w-6" />
-                Drawer
-              </Button>
-              <Button
-                size="sm"
-                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-slate-600 text-white hover:bg-slate-700"
-                onClick={() => requestRowActionConfirmation("close")}
-              >
-                <Lock className="h-6 w-6" />
-                Close
-              </Button>
-              {showDeliveryAction && (
-                <Button
-                  size="sm"
-                  className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-sky-600 text-white hover:bg-sky-700"
-                  onClick={() => requestRowActionConfirmation("delivery")}
-                >
-                  <Truck className="h-6 w-6" />
-                  Delivery
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Cart Panel - Table Based */}
-        <div className="flex-1 lg:flex-none w-full lg:w-[560px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col overflow-hidden">
-          {/* Cart Header */}
-          <div className="p-2 border-b space-y-1.5">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold">Cart ({cartItemCount})</div>
-              <Select value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
-                <SelectTrigger className="h-8 w-[9.5rem] border-blue-900 bg-blue-900 px-3 text-xs font-semibold text-white hover:bg-blue-800 focus:ring-blue-900 [&>span]:text-white [&>svg]:text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="retail">Retail</SelectItem>
-                  <SelectItem value="wholesale">Wholesale</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Customer Selection */}
-            {selectedCustomer ? (
-              <div className="flex items-center justify-between rounded bg-blue-50 p-2 text-xs border border-blue-200">
-                <span className="truncate font-medium text-blue-900">{selectedCustomer.name}</span>
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="h-7 bg-blue-900 px-3 text-xs font-semibold text-white hover:bg-blue-800"
-                  onClick={() => setSelectedCustomer(null)}
-                >
-                  Change
-                </Button>
-              </div>
-            ) : (
-              <Button
-                variant="default"
-                size="sm"
-                className="h-8 w-full bg-blue-900 text-xs font-semibold text-white hover:bg-blue-800"
-                onClick={() => setShowCustomerSelect(true)}
-              >
-                Select Customer
-              </Button>
-            )}
-
-            <div className="relative mt-1">
+          <div className="border-b bg-card p-2">
+            <div className="relative">
               <Input
                 ref={searchInputRef}
                 placeholder={t("pos.search_placeholder")}
@@ -1427,117 +1227,6 @@ export function RetailPOS() {
                   }
                 }}
               />
-
-              {showQuickSelectDropdown && quickSelectItems.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-[400px] overflow-y-auto">
-                  <div className="px-3 py-2 border-b bg-muted/50">
-                    <div className="text-xs font-medium text-muted-foreground">
-                      Quick Select ({quickSelectItems.length} items)
-                    </div>
-                  </div>
-                  {quickSelectItems.map((product: any) => {
-                    const price = getProductPrice(product)
-                    const sellingUnits = product.selling_units || []
-                    const activeUnits = sellingUnits.filter((u: any) => u.is_active !== false)
-                    const hasUnits = activeUnits.length > 0
-
-                    const handleQuickSelectUnitSelect = (unitId: string) => {
-                      if (unitId === "base") {
-                        const price = getProductPrice(product)
-                        addToCart({
-                          id: `cart_${Date.now()}_${Math.random()}`,
-                          productId: String(product.id),
-                          name: product.name,
-                          price: price,
-                          quantity: 1,
-                          saleType: saleType,
-                        })
-                      } else {
-                        const selectedUnit = activeUnits.find((u: any) => String(u.id) === unitId)
-                        if (selectedUnit) {
-                          const unitPrice = saleType === "wholesale" && selectedUnit.wholesale_price
-                            ? parseFloat(String(selectedUnit.wholesale_price))
-                            : parseFloat(String(selectedUnit.retail_price))
-                          const displayName = `${product.name} (${selectedUnit.unit_name})`
-                          addToCart({
-                            id: `cart_${Date.now()}_${Math.random()}`,
-                            productId: String(product.id),
-                            name: displayName,
-                            price: unitPrice,
-                            quantity: 1,
-                            saleType: saleType,
-                          })
-                        }
-                      }
-                      setShowQuickSelectDropdown(false)
-                      setTimeout(() => {
-                        searchInputRef.current?.focus()
-                      }, 100)
-                    }
-
-                    return (
-                      <div
-                        key={product.id}
-                        className="w-full px-4 py-3 hover:bg-accent border-b last:border-b-0 transition-colors"
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          if (!hasUnits) {
-                            handleAddToCart(product)
-                            setShowQuickSelectDropdown(false)
-                            setTimeout(() => {
-                              searchInputRef.current?.focus()
-                            }, 100)
-                          }
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium text-sm truncate">{product.name}</div>
-                            <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                              {product.sku && <span>SKU: {product.sku}</span>}
-                              {product.barcode && <span>Barcode: {product.barcode}</span>}
-                              {product.stock !== undefined && (
-                                <span className={product.stock <= 10 ? "text-destructive font-medium" : ""}>
-                                  Stock: {product.stock}
-                                </span>
-                              )}
-                            </div>
-                            {hasUnits && (
-                              <div className="mt-2">
-                                <Select onValueChange={handleQuickSelectUnitSelect}>
-                                  <SelectTrigger className="w-full h-8 text-xs">
-                                    <SelectValue placeholder={t("pos.select_unit")} />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="base">
-                                      Base Unit - {formatCurrency(price, currentBusiness)}
-                                    </SelectItem>
-                                    {activeUnits.map((unit: any) => {
-                                      const unitPrice = saleType === "wholesale" && unit.wholesale_price
-                                        ? parseFloat(String(unit.wholesale_price))
-                                        : parseFloat(String(unit.retail_price))
-                                      return (
-                                        <SelectItem key={unit.id} value={String(unit.id)}>
-                                          {unit.unit_name} - {formatCurrency(unitPrice, currentBusiness)}
-                                        </SelectItem>
-                                      )
-                                    })}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            )}
-                          </div>
-                          {!hasUnits && (
-                            <div className="ml-4 text-right">
-                              <div className="font-bold text-sm">{formatCurrency(price, currentBusiness)}</div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
 
               {showSearchDropdown && searchResults.length > 0 && (
                 <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-[400px] overflow-y-auto">
@@ -1647,6 +1336,194 @@ export function RetailPOS() {
                 </div>
               )}
             </div>
+          </div>
+          <div className="flex-1 flex min-h-0 overflow-hidden">
+            {/* Category Filter - Fixed Sidebar */}
+            {categories.length > 1 && (
+              <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2">
+                <div className="mb-2">
+                  <span className="text-xs font-medium">Categories</span>
+                </div>
+                <div className="max-h-[22rem] overflow-y-auto">
+                  <div className="grid grid-cols-1 gap-2 justify-items-center">
+                  <Button
+                    key="all"
+                    variant={selectedCategory === "all" ? "default" : "outline"}
+                    className="h-20 w-20 p-1 justify-center items-center text-[11px] overflow-hidden"
+                    onClick={() => setSelectedCategory("all")}
+                    title="All"
+                  >
+                    <span className="truncate text-center">All</span>
+                  </Button>
+                  {categories
+                    .filter((category) => category !== "all")
+                    .map((category) => (
+                      <Button
+                        key={category}
+                        variant={selectedCategory === category ? "default" : "outline"}
+                        className="h-20 w-20 p-1 justify-center items-center text-[11px] overflow-hidden"
+                        onClick={() => setSelectedCategory(category)}
+                        title={category}
+                      >
+                        <span className="truncate text-center">{category}</span>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Products Grid - Enhanced */}
+            <div className="relative flex-1 overflow-hidden bg-gray-200 p-3">
+              {isLoadingProducts ? (
+                <div className="p-8 text-center text-muted-foreground">Loading products...</div>
+              ) : productsError ? (
+                <div className="p-8 text-center text-destructive">{productsError}</div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="p-8 text-center text-muted-foreground">No products found</div>
+              ) : (
+                <ProductGrid
+                  products={filteredProducts as any}
+                  onAddToCart={(
+                    product,
+                    unit,
+                    quantity
+                  ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
+                />
+              )}
+              <div className="absolute bottom-4 right-4 flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shadow-lg"
+                  onClick={handlePreviousProductsPage}
+                  disabled={productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage}
+                  title={productsPage > 1 ? "Load previous products" : "Already first page"}
+                >
+                  Previous Products
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shadow-lg"
+                  onClick={handleNextProductsPage}
+                  disabled={!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage}
+                  title={hasNextProductsPage ? "Load next products" : "No more products"}
+                >
+                  {isLoadingNextProductsPage ? "Loading..." : hasNextProductsPage ? "Next Products" : "No More"}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t bg-card px-2 py-2">
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                onClick={() => requestRowActionConfirmation("discount")}
+              >
+                <Tag className="h-6 w-6" />
+                Discount
+              </Button>
+              <Button
+                size="sm"
+                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-blue-600 text-white hover:bg-blue-700"
+                onClick={() => requestRowActionConfirmation("refund")}
+              >
+                <RotateCcw className="h-6 w-6" />
+                Refund
+              </Button>
+              <Button
+                size="sm"
+                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700"
+                onClick={handleHoldSale}
+              >
+                <PauseCircle className="h-6 w-6" />
+                Hold
+              </Button>
+              <Button
+                size="sm"
+                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700"
+                onClick={() => setShowHoldSales(true)}
+              >
+                <History className="h-6 w-6" />
+                Retrieve
+              </Button>
+              <Button
+                size="sm"
+                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-orange-600 text-white hover:bg-orange-700"
+                onClick={() => requestRowActionConfirmation("drawer")}
+              >
+                <Wallet className="h-6 w-6" />
+                Drawer
+              </Button>
+              <Button
+                size="sm"
+                className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-slate-600 text-white hover:bg-slate-700"
+                onClick={() => requestRowActionConfirmation("close")}
+              >
+                <Lock className="h-6 w-6" />
+                Close
+              </Button>
+              {showDeliveryAction && (
+                <Button
+                  size="sm"
+                  className="h-[5.25rem] w-[5.25rem] shrink-0 rounded-md px-1 py-2 text-sm font-semibold leading-tight whitespace-normal flex-col gap-1.5 bg-sky-600 text-white hover:bg-sky-700"
+                  onClick={() => requestRowActionConfirmation("delivery")}
+                >
+                  <Truck className="h-6 w-6" />
+                  Delivery
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Cart Panel - Table Based */}
+        <div className="flex-1 lg:flex-none w-full lg:w-[560px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col overflow-hidden">
+          {/* Cart Header */}
+          <div className="p-2 border-b space-y-1.5">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold">Cart ({cartItemCount})</div>
+              <Select value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
+                <SelectTrigger className="h-8 w-[9.5rem] border-blue-900 bg-blue-900 px-3 text-xs font-semibold text-white hover:bg-blue-800 focus:ring-blue-900 [&>span]:text-white [&>svg]:text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="retail">Retail</SelectItem>
+                  <SelectItem value="wholesale">Wholesale</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Customer Selection */}
+            {selectedCustomer ? (
+              <div className="flex items-center justify-between rounded bg-blue-50 p-2 text-xs border border-blue-200">
+                <span className="truncate font-medium text-blue-900">{selectedCustomer.name}</span>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="h-7 bg-blue-900 px-3 text-xs font-semibold text-white hover:bg-blue-800"
+                  onClick={() => setSelectedCustomer(null)}
+                >
+                  Change
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="default"
+                size="sm"
+                className="h-8 w-full bg-blue-900 text-xs font-semibold text-white hover:bg-blue-800"
+                onClick={() => setShowCustomerSelect(true)}
+              >
+                Select Customer
+              </Button>
+            )}
+
+            <div className="relative mt-1 hidden" />
           </div>
 
           {/* Cart Items Table */}

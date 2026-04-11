@@ -288,10 +288,8 @@ class Tab(models.Model):
     
     @property
     def is_over_limit(self):
-        """Check if tab has exceeded credit limit"""
-        if self.credit_limit is None:
-            return False
-        return self.total > self.credit_limit
+        """Credit limit is not enforced in MVP mode."""
+        return False
 
 
 class TabItem(models.Model):
