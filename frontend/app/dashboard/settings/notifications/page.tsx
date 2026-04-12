@@ -233,8 +233,6 @@ export default function NotificationsPage() {
         notification={selectedNotification}
         open={showDetailModal}
         onOpenChange={setShowDetailModal}
-        onMarkAsRead={handleMarkAsRead}
-        onRefresh={loadNotifications}
       />
     </DashboardLayout>
   )
