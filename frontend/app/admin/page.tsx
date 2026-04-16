@@ -162,7 +162,7 @@ export default function AdminDashboard() {
         )}
 
         {/* Platform Stats Cards */}
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Businesses</CardTitle>
@@ -170,9 +170,7 @@ export default function AdminDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{adminStats?.totalBusinesses || businesses.length}</div>
-              <p className="text-xs text-muted-foreground">
-                Active businesses on platform
-              </p>
+              <p className="text-xs text-muted-foreground">Active businesses on platform</p>
             </CardContent>
           </Card>
 
@@ -183,9 +181,7 @@ export default function AdminDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{adminStats?.totalOutlets || 0}</div>
-              <p className="text-xs text-muted-foreground">
-                Across all businesses
-              </p>
+              <p className="text-xs text-muted-foreground">Across all businesses</p>
             </CardContent>
           </Card>
 
@@ -196,48 +192,43 @@ export default function AdminDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{adminStats?.totalUsers || 0}</div>
-              <p className="text-xs text-muted-foreground">
-                Platform users
-              </p>
+              <p className="text-xs text-muted-foreground">Platform users</p>
             </CardContent>
           </Card>
 
-        </div>
-
-        {/* Business Type Distribution */}
-        {adminStats && (
           <Card>
-            <CardHeader>
-              <CardTitle>Businesses by Type</CardTitle>
-              <CardDescription>Distribution across industries</CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Retail</CardTitle>
+              <div className="h-4 w-4 rounded-full bg-blue-500" />
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-blue-500" />
-                    <span className="text-sm font-medium">Retail</span>
-                  </div>
-                  <span className="text-lg font-bold">{adminStats.businessesByType?.retail || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-green-500" />
-                    <span className="text-sm font-medium">Restaurant</span>
-                  </div>
-                  <span className="text-lg font-bold">{adminStats.businessesByType?.restaurant || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="h-3 w-3 rounded-full bg-purple-500" />
-                    <span className="text-sm font-medium">Bar</span>
-                  </div>
-                  <span className="text-lg font-bold">{adminStats.businessesByType?.bar || 0}</span>
-                </div>
-              </div>
+              <div className="text-2xl font-bold">{adminStats?.businessesByType?.retail || 0}</div>
+              <p className="text-xs text-muted-foreground">Retail businesses</p>
             </CardContent>
           </Card>
-        )}
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Restaurant</CardTitle>
+              <div className="h-4 w-4 rounded-full bg-green-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{adminStats?.businessesByType?.restaurant || 0}</div>
+              <p className="text-xs text-muted-foreground">Restaurant businesses</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Bar</CardTitle>
+              <div className="h-4 w-4 rounded-full bg-purple-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{adminStats?.businessesByType?.bar || 0}</div>
+              <p className="text-xs text-muted-foreground">Bar businesses</p>
+            </CardContent>
+          </Card>
+        </div>
 
         {/* Businesses Grid */}
         {filteredBusinesses.length > 0 ? (
@@ -296,9 +287,18 @@ export default function AdminDashboard() {
                       </div>
                     )}
                     <div className="pt-2">
-                      <p className="text-xs text-muted-foreground">
-                        Created: {new Date(business.createdAt || Date.now()).toLocaleDateString()}
-                      </p>
+                      {(() => {
+                        const createdRaw = (business as any).createdAt || (business as any).created_at
+                        const createdDate = createdRaw ? new Date(createdRaw) : null
+                        const createdLabel = createdDate && !Number.isNaN(createdDate.getTime())
+                          ? createdDate.toLocaleDateString()
+                          : "N/A"
+                        return (
+                          <p className="text-xs text-muted-foreground">
+                            Created: {createdLabel}
+                          </p>
+                        )
+                      })()}
                     </div>
                   </div>
                 </CardContent>

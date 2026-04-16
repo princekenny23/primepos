@@ -63,9 +63,16 @@ export function DeleteTenantModal({ open, onOpenChange, tenant, onDelete }: Dele
         variant: "destructive",
       })
     } catch (error: any) {
+      const blockedModels = Array.isArray(error?.data?.blocked_by_models)
+        ? error.data.blocked_by_models.join(", ")
+        : ""
+      const isProtectedDelete = error?.status === 409
+
       toast({
-        title: "Error",
-        description: error.message || "Failed to delete tenant",
+        title: isProtectedDelete ? "Tenant Has Linked Records" : "Error",
+        description: isProtectedDelete
+          ? `${error?.message || "Tenant cannot be deleted."}${blockedModels ? ` Blocked by: ${blockedModels}.` : ""} You can suspend this tenant instead.`
+          : (error.message || "Failed to delete tenant"),
         variant: "destructive",
       })
     } finally {
@@ -82,7 +89,7 @@ export function DeleteTenantModal({ open, onOpenChange, tenant, onDelete }: Dele
             Delete Tenant
           </DialogTitle>
           <DialogDescription>
-            This action cannot be undone. This will permanently delete {tenantName} and all associated data.
+            This action cannot be undone. If this tenant has linked records, deletion will be blocked.
           </DialogDescription>
         </DialogHeader>
         

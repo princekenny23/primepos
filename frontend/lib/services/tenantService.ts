@@ -38,6 +38,7 @@ export const tenantService = {
       posType: (tenant.pos_type || tenant.posType || "standard") as Business["posType"],
       currency: normalizeCurrencyLabel(tenant.currency || "MWK"),
       currencySymbol: normalizeCurrencyLabel(tenant.currency_symbol || tenant.currencySymbol || "MWK"),
+      createdAt: tenant.created_at || tenant.createdAt || "",
       logo: tenant.logo || "",
     }))
   },

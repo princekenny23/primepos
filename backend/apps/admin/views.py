@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db.models import Count, Sum, Q
+from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from datetime import timedelta
@@ -57,6 +58,24 @@ class AdminTenantViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'email', 'phone']
     ordering_fields = ['created_at', 'name']
     ordering = ['-created_at']
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete tenant safely and return a user-friendly conflict when protected relations exist."""
+        instance = self.get_object()
+        try:
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError as exc:
+            blocked_models = sorted({obj.__class__.__name__ for obj in exc.protected_objects})
+            return Response(
+                {
+                    "detail": "Tenant cannot be deleted because it still has linked records.",
+                    "blocked_by_models": blocked_models,
+                    "blocked_count": len(exc.protected_objects),
+                    "suggestion": "Suspend the tenant first, or delete related records before retrying.",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
     
     @action(detail=True, methods=['post'])
     def suspend(self, request, pk=None):

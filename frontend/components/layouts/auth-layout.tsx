@@ -9,7 +9,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="border-b bg-background">
+      <header className="border-b bg-blue-900">
         <div className="container mx-auto px-4 py-4">
           <Link href="/">
             <img

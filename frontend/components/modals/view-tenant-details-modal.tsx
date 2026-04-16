@@ -58,7 +58,7 @@ export function ViewTenantDetailsModal({ open, onOpenChange, tenant }: ViewTenan
     phone: tenant.phone || "N/A",
     address: tenant.address || "N/A",
     taxId: tenant.tax_id || "N/A",
-    registrationDate: tenant.created_at || tenant.joined || new Date().toISOString(),
+    registrationDate: tenant.created_at || tenant.createdAt || tenant.joined || "",
     subscriptionEnd: tenant.subscription_end || null,
     plan: tenant.plan || "N/A",
     status: tenant.is_active ? "Active" : "Suspended",
@@ -66,6 +66,11 @@ export function ViewTenantDetailsModal({ open, onOpenChange, tenant }: ViewTenan
     outlets: tenant.outlets || [],
     users: tenant.users || [],
   }
+
+  const registrationDateObj = tenantDetails.registrationDate ? new Date(tenantDetails.registrationDate) : null
+  const registrationDateLabel = registrationDateObj && !Number.isNaN(registrationDateObj.getTime())
+    ? registrationDateObj.toLocaleDateString()
+    : "N/A"
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -159,7 +164,7 @@ export function ViewTenantDetailsModal({ open, onOpenChange, tenant }: ViewTenan
                 <p className="text-sm text-muted-foreground">Registration Date</p>
                 <p className="font-medium flex items-center gap-2">
                   <Calendar className="h-3 w-3" />
-                  {new Date(tenantDetails.registrationDate).toLocaleDateString()}
+                  {registrationDateLabel}
                 </p>
               </div>
               {tenantDetails.subscriptionEnd && (
