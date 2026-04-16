@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAuthStore } from "@/stores/authStore"
 import { useBusinessStore } from "@/stores/businessStore"
@@ -32,7 +32,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
  * Onboarding redirect page
  * Redirects to the multi-page onboarding flow
  */
-export default function OnboardingPage() {
+function OnboardingPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user, setUser, refreshUser } = useAuthStore()
@@ -758,6 +758,14 @@ export default function OnboardingPage() {
         onClose={handleSuccessClose}
       />
     </AuthLayout>
+  )
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={null}>
+      <OnboardingPageContent />
+    </Suspense>
   )
 }
 

@@ -28,7 +28,6 @@ export interface Shift {
   closing_cash_balance?: number
   cash_total?: number
   system_total?: number
-  difference?: number
   start_time?: string
   end_time?: string
 }
