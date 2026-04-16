@@ -48,7 +48,7 @@ class Sale(models.Model):
     guests = models.PositiveIntegerField(null=True, blank=True, help_text="Number of guests at table")
     priority = models.CharField(max_length=20, choices=[('normal', 'Normal'), ('high', 'High'), ('urgent', 'Urgent')], default='normal', help_text="Order priority for kitchen")
     
-    receipt_number = models.CharField(max_length=50, unique=True, db_index=True)
+    receipt_number = models.CharField(max_length=50, db_index=True)
     subtotal = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
     tax = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
     tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
@@ -160,6 +160,12 @@ class Sale(models.Model):
         verbose_name = 'Sale'
         verbose_name_plural = 'Sales'
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'outlet', 'receipt_number'],
+                name='uniq_sale_receipt_per_outlet'
+            ),
+        ]
         indexes = [
             models.Index(fields=['tenant']),
             models.Index(fields=['outlet']),
@@ -233,6 +239,14 @@ class SaleItem(models.Model):
     quantity = models.IntegerField(validators=[MinValueValidator(1)], help_text="Quantity sold in the selected unit")
     quantity_in_base_units = models.IntegerField(validators=[MinValueValidator(1)], default=1, help_text="Quantity in base units (for inventory deduction)")
     price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    cost = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text="Cost captured at time of sale"
+    )
     discount = models.DecimalField(
         max_digits=10,
         decimal_places=2,
@@ -293,6 +307,24 @@ class SaleItem(models.Model):
         if self.unit_name:
             display_name += f" ({self.unit_name})"
         return f"{display_name} x{self.quantity}"
+
+    @property
+    def effective_cost(self):
+        if self.cost is not None:
+            return self.cost
+
+        return None
+
+    @property
+    def effective_cogs_total(self):
+        effective_cost = self.effective_cost
+        if effective_cost is not None:
+            return effective_cost * Decimal(self.quantity)
+
+        if self.product and self.product.cost is not None:
+            return Decimal(str(self.product.cost)) * Decimal(self.quantity_in_base_units)
+
+        return Decimal('0.00')
 
 
 class Receipt(models.Model):

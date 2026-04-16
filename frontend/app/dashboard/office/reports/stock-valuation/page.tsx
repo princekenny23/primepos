@@ -65,7 +65,7 @@ const DATE_PRESETS = [
 
 export default function StockValuationReportPage() {
   const { t } = useI18n()
-  const { currentBusiness } = useBusinessStore()
+  const { currentBusiness, currentOutlet } = useBusinessStore()
   const { toast } = useToast()
 
   const [isLoading, setIsLoading] = useState(true)
@@ -113,6 +113,7 @@ export default function StockValuationReportPage() {
     setIsLoading(true)
     try {
       const response = await reportService.getInventoryValuation({
+        outlet: currentOutlet ? String(currentOutlet.id) : undefined,
         start_date: startDate,
         end_date: endDate,
       })
@@ -127,7 +128,7 @@ export default function StockValuationReportPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [dateRange.end, dateRange.start, t, toast])
+  }, [currentOutlet, dateRange.end, dateRange.start, t, toast])
 
   useEffect(() => {
     loadReportData()
@@ -199,6 +200,7 @@ export default function StockValuationReportPage() {
       await reportService.downloadReport(
         apiEndpoints.reports.inventoryValuationPdf,
         {
+          outlet: currentOutlet ? String(currentOutlet.id) : "",
           start_date: startDate,
           end_date: endDate,
         },
@@ -379,7 +381,7 @@ export default function StockValuationReportPage() {
                     <TableCell
                       className={`text-right ${(item.discrepancy || 0) !== 0 ? "text-amber-700 font-semibold" : ""}`}
                     >
-                      {formatCurrency(item.discrepancy || 0)}
+                      {formatCurrency(item.discrepancy_value || 0)}
                     </TableCell>
                     <TableCell className="text-right text-green-700 font-semibold">
                       {(item.surplus_qty || 0).toLocaleString()}
@@ -416,7 +418,7 @@ export default function StockValuationReportPage() {
                       {(report.totals.discrepancy || 0).toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right text-amber-700">
-                      {formatCurrency(report.totals.discrepancy || 0)}
+                      {formatCurrency(report.totals.discrepancy_value || 0)}
                     </TableCell>
                     <TableCell className="text-right text-green-700">
                       {(report.totals.surplus_qty || 0).toLocaleString()}

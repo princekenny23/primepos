@@ -10,6 +10,7 @@ export interface Shift {
   floatingCash: number
   closingCashBalance?: number
   totalSales?: number
+  cashTotal?: number
   totalExpense?: number
   systemTotal?: number
   difference?: number
@@ -25,7 +26,9 @@ export interface Shift {
   opening_cash_balance?: number
   floating_cash?: number
   closing_cash_balance?: number
+  cash_total?: number
   system_total?: number
+  difference?: number
   start_time?: string
   end_time?: string
 }
@@ -49,11 +52,20 @@ function transformShift(backendShift: any): Shift {
     operatingDate: backendShift.operating_date || backendShift.operatingDate,
     openingCashBalance: parseFloat(backendShift.opening_cash_balance || backendShift.openingCashBalance || 0),
     floatingCash: parseFloat(backendShift.floating_cash || backendShift.floatingCash || 0),
-    closingCashBalance: backendShift.closing_cash_balance || backendShift.closingCashBalance ? parseFloat(backendShift.closing_cash_balance || backendShift.closingCashBalance) : undefined,
+    closingCashBalance: backendShift.closing_cash_balance !== undefined && backendShift.closing_cash_balance !== null
+      ? parseFloat(backendShift.closing_cash_balance)
+      : backendShift.closingCashBalance !== undefined && backendShift.closingCashBalance !== null
+      ? parseFloat(backendShift.closingCashBalance)
+      : undefined,
     totalSales: backendShift.total_sales !== undefined ? parseFloat(backendShift.total_sales) : undefined,
+    cashTotal: backendShift.cash_total !== undefined ? parseFloat(backendShift.cash_total) : undefined,
     totalExpense: backendShift.total_expense !== undefined ? parseFloat(backendShift.total_expense) : undefined,
-    systemTotal: backendShift.system_total || backendShift.systemTotal ? parseFloat(backendShift.system_total || backendShift.systemTotal) : undefined,
-    difference: backendShift.difference ? parseFloat(backendShift.difference) : undefined,
+    systemTotal: backendShift.system_total !== undefined && backendShift.system_total !== null
+      ? parseFloat(backendShift.system_total)
+      : backendShift.systemTotal !== undefined && backendShift.systemTotal !== null
+      ? parseFloat(backendShift.systemTotal)
+      : undefined,
+    difference: backendShift.difference !== undefined && backendShift.difference !== null ? parseFloat(backendShift.difference) : undefined,
     status: backendShift.status,
     startTime: backendShift.start_time || backendShift.startTime,
     endTime: backendShift.end_time || backendShift.endTime,

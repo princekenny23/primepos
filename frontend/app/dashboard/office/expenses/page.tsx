@@ -92,10 +92,6 @@ const expenseCategories = [
 
 const paymentMethods = [
   "cash",
-  "card",
-  "bank_transfer",
-  "check",
-  "other"
 ]
 
 export default function ExpensesPage() {
@@ -376,7 +372,6 @@ export default function ExpensesPage() {
                       <TableHead>Expense #</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead>Title</TableHead>
-                      <TableHead>Category</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead>Vendor</TableHead>
                       <TableHead>Amount</TableHead>
@@ -391,7 +386,6 @@ export default function ExpensesPage() {
                         <TableCell className="font-medium">{expense.expense_number}</TableCell>
                         <TableCell>{format(new Date(expense.expense_date), "MMM dd, yyyy")}</TableCell>
                         <TableCell className="font-medium">{expense.title}</TableCell>
-                        <TableCell>{expense.category}</TableCell>
                         <TableCell className="max-w-[200px] truncate">{expense.description}</TableCell>
                         <TableCell>{expense.vendor || "N/A"}</TableCell>
                         <TableCell className="font-semibold">

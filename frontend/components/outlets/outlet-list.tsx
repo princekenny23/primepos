@@ -30,6 +30,29 @@ import { useToast } from "@/components/ui/use-toast"
 import { AddEditOutletModal } from "@/components/modals/add-edit-outlet-modal"
 import { useBusinessStore } from "@/stores/businessStore"
 import { getOutletBusinessTypeDisplay, normalizeOutletBusinessType } from "@/lib/utils/outlet-business-type"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { EyeOff } from "lucide-react"
+import { useAuthStore } from "@/stores/authStore"
+import { authService } from "@/lib/services/authService"
 
 interface OutletListProps {
   onOutletUpdated?: () => void
@@ -47,6 +70,14 @@ export function OutletList(props: OutletListProps = {}) {
   const [isTogglingStatus, setIsTogglingStatus] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [isSwitching, setIsSwitching] = useState<string | null>(null)
+  const [outletToDelete, setOutletToDelete] = useState<any>(null)
+  const [switchAuthOpen, setSwitchAuthOpen] = useState(false)
+  const [pendingOutlet, setPendingOutlet] = useState<any>(null)
+  const [switchUsername, setSwitchUsername] = useState("")
+  const [switchPassword, setSwitchPassword] = useState("")
+  const [showSwitchPassword, setShowSwitchPassword] = useState(false)
+  const [isVerifyingSwitch, setIsVerifyingSwitch] = useState(false)
+  const { user } = useAuthStore()
 
   const getBusinessTypeBadgeClass = (type?: string) => {
     switch (normalizeOutletBusinessType(type)) {
@@ -171,11 +202,11 @@ export function OutletList(props: OutletListProps = {}) {
     }
   }
 
-  const handleDelete = async (outlet: any) => {
-    if (!confirm(`Are you sure you want to delete "${outlet.name}"? This action cannot be undone.`)) {
-      return
-    }
+  const requestDelete = (outlet: any) => {
+    setOutletToDelete(outlet)
+  }
 
+  const handleDelete = async (outlet: any) => {
     setIsDeleting(outlet.id)
     try {
       await outletService.delete(outlet.id)
@@ -193,6 +224,7 @@ export function OutletList(props: OutletListProps = {}) {
         title: "Success",
         description: `Outlet "${outlet.name}" has been deleted successfully`,
       })
+      setOutletToDelete(null)
     } catch (error: any) {
       console.error("Failed to delete outlet:", error)
       toast({
@@ -228,6 +260,53 @@ export function OutletList(props: OutletListProps = {}) {
       })
     } finally {
       setIsSwitching(null)
+    }
+  }
+
+  const requestSwitchOutlet = (outlet: any) => {
+    if (!outlet || String(outlet.id) === String(currentOutlet?.id || "")) return
+    setPendingOutlet(outlet)
+    setSwitchUsername(user?.email || "")
+    setSwitchPassword("")
+    setSwitchAuthOpen(true)
+  }
+
+  const closeSwitchAuth = () => {
+    setSwitchAuthOpen(false)
+    setPendingOutlet(null)
+    setSwitchUsername("")
+    setSwitchPassword("")
+    setShowSwitchPassword(false)
+    setIsVerifyingSwitch(false)
+  }
+
+  const confirmSwitchOutlet = async () => {
+    if (!pendingOutlet || !user?.email) {
+      closeSwitchAuth()
+      return
+    }
+
+    if (!switchUsername.trim() || !switchPassword.trim()) {
+      toast({
+        title: "Login details required",
+        description: "Enter your username and password to switch outlet.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsVerifyingSwitch(true)
+    try {
+      await authService.verifyCredentials(switchUsername.trim(), switchPassword)
+      await handleSwitchOutlet(pendingOutlet)
+      closeSwitchAuth()
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error?.message || "Invalid login details. Please try again.",
+        variant: "destructive",
+      })
+      setIsVerifyingSwitch(false)
     }
   }
 
@@ -349,7 +428,7 @@ export function OutletList(props: OutletListProps = {}) {
                             
                             {currentOutlet?.id !== outlet.id && outlet.isActive && (
                               <DropdownMenuItem
-                                onClick={() => handleSwitchOutlet(outlet)}
+                                onClick={() => requestSwitchOutlet(outlet)}
                                 disabled={isSwitching === outlet.id}
                               >
                                 {isSwitching === outlet.id ? (
@@ -378,7 +457,7 @@ export function OutletList(props: OutletListProps = {}) {
                             </DropdownMenuItem>
                             
                             <DropdownMenuItem
-                              onClick={() => handleDelete(outlet)}
+                              onClick={() => requestDelete(outlet)}
                               disabled={isDeleting === outlet.id}
                               className="text-destructive"
                             >
@@ -409,6 +488,87 @@ export function OutletList(props: OutletListProps = {}) {
           onOutletCreated={handleOutletUpdated}
         />
       )}
+
+      <AlertDialog open={!!outletToDelete} onOpenChange={(open) => !open && setOutletToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Outlet</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`Are you sure you want to delete "${outletToDelete?.name || "this outlet"}"? This action cannot be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => outletToDelete && handleDelete(outletToDelete)}
+              disabled={!!isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Deleting..." : "Delete Outlet"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={switchAuthOpen} onOpenChange={(open) => (!open ? closeSwitchAuth() : setSwitchAuthOpen(open))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Login</DialogTitle>
+            <DialogDescription>
+              Enter your password to switch outlet.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="switch-list-outlet-username">Username</Label>
+              <Input
+                id="switch-list-outlet-username"
+                type="text"
+                value={switchUsername}
+                onChange={(event) => setSwitchUsername(event.target.value)}
+                placeholder="Enter username or email"
+                disabled={isVerifyingSwitch}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="switch-list-outlet-password">Password</Label>
+              <div className="relative">
+                <Input
+                  id="switch-list-outlet-password"
+                  type={showSwitchPassword ? "text" : "password"}
+                  value={switchPassword}
+                  onChange={(event) => setSwitchPassword(event.target.value)}
+                  placeholder="Enter your password"
+                  disabled={isVerifyingSwitch}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSwitchPassword(!showSwitchPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  disabled={isVerifyingSwitch}
+                >
+                  {showSwitchPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={closeSwitchAuth} disabled={isVerifyingSwitch}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={confirmSwitchOutlet} disabled={isVerifyingSwitch}>
+              {isVerifyingSwitch ? "Verifying..." : "Verify & Switch"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }

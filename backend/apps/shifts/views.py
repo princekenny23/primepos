@@ -282,6 +282,14 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         """Get shift history"""
         queryset = self.filter_queryset(self.get_queryset())
         queryset = queryset.filter(status='CLOSED')
+
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        if start_date:
+            queryset = queryset.filter(operating_date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(operating_date__lte=end_date)
+
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)

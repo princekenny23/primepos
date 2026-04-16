@@ -59,11 +59,6 @@ export function ExpenseApprovalModal({
         await expenseService.reject(expense.id, notes)
       }
 
-      toast({
-        title: action === "approve" ? "Expense Approved" : "Expense Rejected",
-        description: `${expense.expense_number} has been ${action === "approve" ? "approved" : "rejected"} successfully.`,
-      })
-
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("expense-updated", { detail: { action, expenseId: expense.id } }))
       }

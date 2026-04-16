@@ -60,20 +60,27 @@ export default function ProfitLossReportsPage() {
     
     setIsLoading(true)
     try {
-      const response = await reportService.getProfitLoss({
-        outlet: String(currentOutlet.id),
-        start_date: startDate,
-        end_date: endDate,
-      })
+      const [response, dailySales] = await Promise.all([
+        reportService.getProfitLoss({
+          outlet: String(currentOutlet.id),
+          start_date: startDate,
+          end_date: endDate,
+        }),
+        reportService.getDailySales({
+          outlet: String(currentOutlet.id),
+          start_date: startDate,
+          end_date: endDate,
+        }),
+      ])
       
       if (response) {
-        const revenue = response.total_revenue || 0
-        const cogs = response.total_cost || 0
-        const grossProfit = response.gross_profit || (revenue - cogs)
-        const grossMargin = response.gross_margin || (revenue > 0 ? (grossProfit / revenue) * 100 : 0)
-        const expenses = response.expenses || 0
-        const netProfit = grossProfit - expenses
-        const netMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0
+        const revenue = response.total_revenue ?? 0
+        const cogs = response.total_cost ?? 0
+        const grossProfit = response.gross_profit ?? (revenue - cogs)
+        const grossMargin = response.gross_margin ?? (revenue > 0 ? (grossProfit / revenue) * 100 : 0)
+        const expenses = response.expenses ?? 0
+        const netProfit = response.net_profit ?? (grossProfit - expenses)
+        const netMargin = response.net_margin ?? (revenue > 0 ? (netProfit / revenue) * 100 : 0)
         
         setData({
           revenue,
@@ -85,9 +92,18 @@ export default function ProfitLossReportsPage() {
           netMargin,
         })
         
-        setChartData([
-          { date: startDate, revenue, profit: netProfit },
-        ])
+        const dailyRows = Array.isArray(dailySales?.daily) ? dailySales.daily : []
+        const profitRatio = revenue > 0 ? netProfit / revenue : 0
+        setChartData(
+          dailyRows.map((row: any) => {
+            const sales = Number(row?.total_sales ?? 0)
+            return {
+              date: row?.date || row?.day || startDate,
+              sales,
+              profit: sales * profitRatio,
+            }
+          })
+        )
       } else {
         setData({
           revenue: 0,
@@ -119,8 +135,7 @@ export default function ProfitLossReportsPage() {
 
   useEffect(() => {
     loadReportData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentBusiness, currentOutlet])
+  }, [currentBusiness, currentOutlet, startDate, endDate])
 
   const handleApplyFilters = () => {
     loadReportData()

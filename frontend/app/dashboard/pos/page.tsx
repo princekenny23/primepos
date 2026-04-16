@@ -69,13 +69,9 @@ export default function POSLandingPage() {
       return
     }
 
-    // Route based on POS type
+    // Keep users on landing to select shift/till explicitly.
+    // Do not auto-redirect to terminal from sidebar click.
     if (currentBusiness.posType === "single_product") {
-      // For single-product POS, redirect directly if shift is active
-      if (activeShift) {
-        router.push("/pos/single-product")
-      }
-      // Otherwise stay on landing page (single-product POS doesn't need register selection)
       return
     }
 
@@ -134,16 +130,9 @@ export default function POSLandingPage() {
     }
   }, [currentBusiness, outlets])
 
-  // If user already has an active shift, redirect to appropriate POS
+  // Always keep user on POS landing and require explicit shift selection.
   useEffect(() => {
     loadRegisterStatuses()
-    if (activeShift && currentBusiness) {
-      if (currentBusiness.posType === "single_product") {
-        router.push("/pos/single-product")
-      } else {
-        router.push(getOutletPOSRoute(currentOutlet, currentBusiness))
-      }
-    }
   }, [activeShift, currentBusiness, currentOutlet, router, loadRegisterStatuses])
 
   const handleSelectShift = async () => {
@@ -296,21 +285,7 @@ export default function POSLandingPage() {
             </Card>
           )}
 
-          {/* Summary Info */}
-          {activeShifts.length > 0 && (closedRegisters.length > 0 || openRegisters.length > 0) && (
-            <div className="text-center text-xs text-muted-foreground space-y-1">
-              {closedRegisters.length > 0 && (
-                <p>
-                  {closedRegisters.length} closed register{closedRegisters.length !== 1 ? "s" : ""} available
-                </p>
-              )}
-              {openRegisters.length > 0 && (
-                <p>
-                  {openRegisters.length} open register{openRegisters.length !== 1 ? "s" : ""} with active shifts
-                </p>
-              )}
-            </div>
-          )}
+
         </div>
       </div>
       </PageLayout>

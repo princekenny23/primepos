@@ -46,7 +46,7 @@ export function SingleProductPOS() {
   const { user } = useAuthStore()
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { cart, addToCart, updateCartItem, removeFromCart, clearCart } = usePOSStore()
-  const { activeShift } = useShift()
+  const { activeShift, getTillsForOutlet } = useShift()
   const { toast } = useToast()
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [selectedUnit, setSelectedUnit] = useState<ProductUnit | null>(null)
@@ -63,6 +63,19 @@ export function SingleProductPOS() {
   const [products, setProducts] = useState<Product[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
   const showDeliveryAction = isDistributionEnabledForOutlet(user, currentOutlet)
+  const [tillName, setTillName] = useState<string>("")
+
+  // Resolve till name from active shift
+  useEffect(() => {
+    if (!activeShift?.tillId || !activeShift?.outletId) {
+      setTillName("")
+      return
+    }
+    getTillsForOutlet(activeShift.outletId).then((tills) => {
+      const till = tills.find((t) => String(t.id) === String(activeShift.tillId))
+      setTillName(till?.name || "")
+    }).catch(() => setTillName(""))
+  }, [activeShift?.tillId, activeShift?.outletId])
 
   // Load products on mount
   useEffect(() => {
@@ -747,6 +760,13 @@ export function SingleProductPOS() {
               <ShoppingCart className="h-5 w-5" />
               Cart ({cart.length})
             </h2>
+            {tillName && (
+              <div className="text-center mt-1">
+                <span className="font-bold text-sm">
+                  {tillName.toUpperCase()}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-2">

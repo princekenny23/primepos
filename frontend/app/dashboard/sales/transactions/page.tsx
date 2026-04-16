@@ -447,6 +447,7 @@ export default function TransactionsPage() {
               </SelectContent>
             </Select>
             <DateRangeFilter
+              defaultPreset="today"
               onRangeChange={(range) => {
                 setDateRange({ start: range.start, end: range.end })
               }}

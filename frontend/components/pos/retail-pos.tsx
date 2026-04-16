@@ -124,7 +124,7 @@ export function RetailPOS() {
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { currentOutlet: tenantOutlet } = useTenant()
   const { cart, addToCart, updateCartItem, removeFromCart, clearCart, holdSale, retrieveHoldSale } = usePOSStore()
-  const { activeShift } = useShift()
+  const { activeShift, getTillsForOutlet } = useShift()
   const { toast } = useToast()
   const { t } = useI18n()
   const [saleType, setSaleType] = useState<SaleType>("retail")
@@ -173,10 +173,23 @@ export function RetailPOS() {
   const [isVerifyingRowAction, setIsVerifyingRowAction] = useState(false)
   const [transactionLocked, setTransactionLocked] = useState(false)
   const [initiatedSaleId, setInitiatedSaleId] = useState("")
+  const [tillName, setTillName] = useState<string>("")
   const [showVoidReasonDialog, setShowVoidReasonDialog] = useState(false)
   const [voidReason, setVoidReason] = useState("")
   const [isSubmittingVoid, setIsSubmittingVoid] = useState(false)
   
+  // Resolve till name from active shift
+  useEffect(() => {
+    if (!activeShift?.tillId || !activeShift?.outletId) {
+      setTillName("")
+      return
+    }
+    getTillsForOutlet(activeShift.outletId).then((tills) => {
+      const till = tills.find((t) => String(t.id) === String(activeShift.tillId))
+      setTillName(till?.name || "")
+    }).catch(() => setTillName(""))
+  }, [activeShift?.tillId, activeShift?.outletId])
+
   // Focus search on mount and after actions
   const searchInputRef = useRef<HTMLInputElement>(null)
   const paymentCloseByConfirmRef = useRef(false)
@@ -1486,17 +1499,26 @@ export function RetailPOS() {
         <div className="flex-1 lg:flex-none w-full lg:w-[560px] min-h-0 border-t lg:border-t-0 lg:border-l bg-card flex flex-col overflow-hidden">
           {/* Cart Header */}
           <div className="p-2 border-b space-y-1.5">
-            <div className="flex items-center justify-between">
+            <div className="grid grid-cols-3 items-center">
               <div className="font-semibold">Cart ({cartItemCount})</div>
-              <Select value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
-                <SelectTrigger className="h-8 w-[9.5rem] border-blue-900 bg-blue-900 px-3 text-xs font-semibold text-white hover:bg-blue-800 focus:ring-blue-900 [&>span]:text-white [&>svg]:text-white">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="retail">Retail</SelectItem>
-                  <SelectItem value="wholesale">Wholesale</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="text-center">
+                {tillName && (
+                  <span className="font-bold text-sm">
+                    {tillName.toUpperCase()}
+                  </span>
+                )}
+              </div>
+              <div className="flex justify-end">
+                <Select value={saleType} onValueChange={(value) => handleSaleTypeChange(value as SaleType)}>
+                  <SelectTrigger className="h-8 w-[9.5rem] border-blue-900 bg-blue-900 px-3 text-xs font-semibold text-white hover:bg-blue-800 focus:ring-blue-900 [&>span]:text-white [&>svg]:text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="retail">Retail</SelectItem>
+                    <SelectItem value="wholesale">Wholesale</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Customer Selection */}

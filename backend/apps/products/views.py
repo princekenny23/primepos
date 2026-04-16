@@ -867,7 +867,26 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     if 'barcode' in column_mapping:
                         barcode_val = first_row[column_mapping['barcode']]
                         if pd.notna(barcode_val):
-                            barcode = str(barcode_val).strip() or None
+                            # Normalize common Excel numeric barcode artifacts (e.g., trailing .0 / scientific notation)
+                            if isinstance(barcode_val, float):
+                                if barcode_val.is_integer():
+                                    barcode = str(int(barcode_val))
+                                else:
+                                    barcode = format(barcode_val, 'f').rstrip('0').rstrip('.')
+                            else:
+                                barcode_raw = str(barcode_val).strip()
+                                if barcode_raw:
+                                    normalized = barcode_raw
+                                    if 'e' in barcode_raw.lower() or barcode_raw.endswith('.0'):
+                                        try:
+                                            numeric_candidate = Decimal(barcode_raw)
+                                            if numeric_candidate == numeric_candidate.to_integral_value():
+                                                normalized = format(numeric_candidate.quantize(Decimal('1')), 'f')
+                                            else:
+                                                normalized = format(numeric_candidate.normalize(), 'f').rstrip('0').rstrip('.')
+                                        except Exception:
+                                            normalized = barcode_raw
+                                    barcode = normalized or None
                     
                     cost = None
                     if 'cost' in column_mapping:
@@ -885,6 +904,22 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         desc_val = first_row[column_mapping['description']]
                         if pd.notna(desc_val):
                             description = str(desc_val).strip()
+
+                    expiry_date = None
+                    # Accept common expiry header variants used in import templates.
+                    expiry_col_key = next(
+                        (k for k in ('batch_expiry_date', 'expiry_date', 'batch_expiry', 'expiry', 'best_before') if k in column_mapping),
+                        None,
+                    )
+                    if expiry_col_key:
+                        expiry_val = first_row[column_mapping[expiry_col_key]]
+                        if pd.notna(expiry_val):
+                            try:
+                                parsed_expiry = pd.to_datetime(expiry_val, errors='coerce')
+                                if pd.notna(parsed_expiry):
+                                    expiry_date = parsed_expiry.date()
+                            except (ValueError, TypeError):
+                                expiry_date = None
                     
                     # Handle business-specific fields (add to product description)
                     business_specific_info = []
@@ -975,6 +1010,10 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     
                     if cost is not None:
                         product_data['cost'] = str(cost)
+
+                    if expiry_date is not None:
+                        product_data['expiry_date'] = expiry_date
+                        product_data['track_expiration'] = True
                     
                     # Handle cost_price column (backward compatibility)
                     if 'cost_price' in column_mapping:

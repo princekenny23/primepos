@@ -120,6 +120,7 @@ export default function ProductsPage() {
 
   // Data-driven column visibility — only show a column if at least one product has a value
   const hasSkuColumn = useMemo(() => products.some(p => p.sku), [products])
+  const hasBarcodeColumn = useMemo(() => products.some(p => String(p.barcode || "").trim() !== ""), [products])
   const hasCategoryColumn = useMemo(() => products.some(p => p.category?.name || p.categoryId), [products])
   const hasOutletColumn = useMemo(() => products.some(p => p.outlet || p.outlet_id || p.outlet_name), [products])
   const hasCostColumn = useMemo(() => products.some(p => p.cost && Number(p.cost) > 0), [products])
@@ -276,8 +277,10 @@ export default function ProductsPage() {
   // Filter products based on search and category
   const baseFilteredProducts = useMemo(() => {
     return products.filter(product => {
-      const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           (product.sku && product.sku.toLowerCase().includes(searchTerm.toLowerCase()))
+      const q = searchTerm.toLowerCase()
+      const matchesSearch = product.name.toLowerCase().includes(q) ||
+                           (product.sku && product.sku.toLowerCase().includes(q)) ||
+                           (product.barcode && String(product.barcode).toLowerCase().includes(q))
       const matchesCategory = categoryFilter === "all" || 
                              (product.categoryId && categories.find(c => c.id === product.categoryId)?.name === categoryFilter) ||
                              (product.category?.name && product.category.name === categoryFilter)
@@ -613,6 +616,7 @@ export default function ProductsPage() {
                         <TableRow className="bg-gray-50">
                           <TableHead className="text-gray-900 font-semibold">Product</TableHead>
                           {hasSkuColumn && <TableHead className="text-gray-900 font-semibold">SKU</TableHead>}
+                          {hasBarcodeColumn && <TableHead className="text-gray-900 font-semibold">Barcode</TableHead>}
                           {hasCategoryColumn && <TableHead className="text-gray-900 font-semibold">Category</TableHead>}
                           {hasOutletColumn && <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>}
                           {hasCostColumn && <TableHead className="text-gray-900 font-semibold">Cost</TableHead>}
@@ -663,6 +667,7 @@ export default function ProductsPage() {
                         </div>
                       </TableCell>
                       {hasSkuColumn && <TableCell>{product.sku || "—"}</TableCell>}
+                      {hasBarcodeColumn && <TableCell>{product.barcode || "—"}</TableCell>}
                       {hasCategoryColumn && <TableCell>{categoryName}</TableCell>}
                       {hasOutletColumn && <TableCell>{outletName}</TableCell>}
                       {hasCostColumn && (
@@ -780,9 +785,10 @@ export default function ProductsPage() {
                       <TableHeader>
                         <TableRow className="bg-gray-50">
                           <TableHead className="text-gray-900 font-semibold">Product</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">SKU</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">Category</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
+                          {hasSkuColumn && <TableHead className="text-gray-900 font-semibold">SKU</TableHead>}
+                          {hasBarcodeColumn && <TableHead className="text-gray-900 font-semibold">Barcode</TableHead>}
+                          {hasCategoryColumn && <TableHead className="text-gray-900 font-semibold">Category</TableHead>}
+                          {hasOutletColumn && <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>}
                           <TableHead className="text-gray-900 font-semibold">Current Stock</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Low Stock Threshold</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Status</TableHead>
@@ -792,7 +798,16 @@ export default function ProductsPage() {
                   <TableBody>
                     {filteredProducts.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                        <TableCell
+                          colSpan={
+                            5 +
+                            (hasSkuColumn ? 1 : 0) +
+                            (hasBarcodeColumn ? 1 : 0) +
+                            (hasCategoryColumn ? 1 : 0) +
+                            (hasOutletColumn ? 1 : 0)
+                          }
+                          className="text-center py-8 text-muted-foreground"
+                        >
                           No low stock products found
                         </TableCell>
                       </TableRow>
@@ -835,9 +850,10 @@ export default function ProductsPage() {
                                 </Link>
                               </div>
                             </TableCell>
-                            <TableCell>{product.sku || "N/A"}</TableCell>
-                            <TableCell>{categoryName}</TableCell>
-                            <TableCell>{outletName}</TableCell>
+                            {hasSkuColumn && <TableCell>{product.sku || "N/A"}</TableCell>}
+                            {hasBarcodeColumn && <TableCell>{product.barcode || "N/A"}</TableCell>}
+                            {hasCategoryColumn && <TableCell>{categoryName}</TableCell>}
+                            {hasOutletColumn && <TableCell>{outletName}</TableCell>}
                             <TableCell className={status === "out-of-stock" ? "text-red-600 font-semibold" : "text-orange-600 font-semibold"}>
                               {stock}
                             </TableCell>
@@ -909,9 +925,10 @@ export default function ProductsPage() {
                       <TableHeader>
                         <TableRow className="bg-gray-50">
                           <TableHead className="text-gray-900 font-semibold">Product</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">SKU</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">Category</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
+                          {hasSkuColumn && <TableHead className="text-gray-900 font-semibold">SKU</TableHead>}
+                          {hasBarcodeColumn && <TableHead className="text-gray-900 font-semibold">Barcode</TableHead>}
+                          {hasCategoryColumn && <TableHead className="text-gray-900 font-semibold">Category</TableHead>}
+                          {hasOutletColumn && <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>}
                           <TableHead className="text-gray-900 font-semibold">Manufacturing Date</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Expiry Date</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Days Left</TableHead>
@@ -922,7 +939,16 @@ export default function ProductsPage() {
                       <TableBody>
                         {filteredProducts.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={9} className="text-center py-8 text-gray-600">
+                            <TableCell
+                              colSpan={
+                                6 +
+                                (hasSkuColumn ? 1 : 0) +
+                                (hasBarcodeColumn ? 1 : 0) +
+                                (hasCategoryColumn ? 1 : 0) +
+                                (hasOutletColumn ? 1 : 0)
+                              }
+                              className="text-center py-8 text-gray-600"
+                            >
                               No expiring products found
                             </TableCell>
                           </TableRow>
@@ -930,6 +956,10 @@ export default function ProductsPage() {
                           paginatedProducts.map((product) => {
                             const categoryName = product.category?.name || (product.categoryId ? categories.find(c => c.id === product.categoryId)?.name : "N/A")
                             const expiryStatus = getExpiryStatus(product.expiry_date)
+                            const outletName = product.outlet?.name || product.outlet_name ||
+                              (product.outlet_id ? outlets?.find(o => String(o.id) === String(product.outlet_id))?.name : null) ||
+                              (product.outlet ? outlets?.find(o => String(o.id) === String(product.outlet))?.name : null) ||
+                              "N/A"
                             
                             return (
                               <TableRow key={product.id} className="border-gray-300">
@@ -955,9 +985,10 @@ export default function ProductsPage() {
                                 </Link>
                               </div>
                             </TableCell>
-                            <TableCell>{product.sku || "N/A"}</TableCell>
-                            <TableCell>{categoryName}</TableCell>
-                            <TableCell>{product.outlet?.name || product.outlet_name || "N/A"}</TableCell>
+                            {hasSkuColumn && <TableCell>{product.sku || "N/A"}</TableCell>}
+                            {hasBarcodeColumn && <TableCell>{product.barcode || "N/A"}</TableCell>}
+                            {hasCategoryColumn && <TableCell>{categoryName}</TableCell>}
+                            {hasOutletColumn && <TableCell>{outletName}</TableCell>}
                             <TableCell>
                               {product.manufacturing_date 
                                 ? new Date(product.manufacturing_date).toLocaleDateString()

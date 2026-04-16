@@ -68,6 +68,7 @@ type CashupRow = {
   till?: string | null
   openingCash: number
   closingCash: number
+  cashSales: number
   totalSales: number
   expectedCash: number
   difference: number
@@ -224,7 +225,8 @@ export default function CashupReportPage() {
         const openingCash = Number(shift.opening_cash_balance || shift.openingCashBalance || 0)
         const closingCash = Number(shift.closing_cash_balance || shift.closingCashBalance || 0)
         const totalSales = Number(shift.totalSales ?? (shift as any).total_sales ?? shift.system_total ?? shift.systemTotal ?? 0)
-        const expectedCash = openingCash + totalSales
+        const cashSales = Number(shift.cashTotal ?? (shift as any).cash_total ?? 0)
+        const expectedCash = openingCash + cashSales
         const difference = shift.difference !== null && shift.difference !== undefined
           ? Number(shift.difference)
           : closingCash - expectedCash
@@ -241,6 +243,7 @@ export default function CashupReportPage() {
           till: shift.till?.name || "-",
           openingCash,
           closingCash,
+          cashSales,
           totalSales,
           expectedCash,
           difference,
@@ -273,7 +276,7 @@ export default function CashupReportPage() {
 
   const totals = useMemo(() => {
     const totalShifts = rows.length
-    const totalCashSales = rows.reduce((sum, row) => sum + row.totalSales, 0)
+    const totalCashSales = rows.reduce((sum, row) => sum + row.cashSales, 0)
     const totalRevenue = rows.reduce((sum, row) => sum + row.totalSales, 0)
     const totalVariance = rows.reduce((sum, row) => sum + row.difference, 0)
     return { totalShifts, totalCashSales, totalRevenue, totalVariance }
@@ -285,7 +288,7 @@ export default function CashupReportPage() {
       const label = isValid(parsed) ? format(parsed, "MMM dd") : row.operatingDate
       return {
         label,
-        cashSales: row.totalSales,
+        cashSales: row.cashSales,
         totalRevenue: row.totalSales,
       }
     })

@@ -6,10 +6,11 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.throttling import AnonRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from django.db import transaction, models
+from django.db import transaction, models, IntegrityError, connection
 from django.db.models import Max
 from django.utils import timezone
 from django.template import engines
+import json
 import logging
 import secrets
 from datetime import timedelta
@@ -83,6 +84,17 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     search_fields = ['receipt_number', 'notes']
     ordering_fields = ['created_at', 'total']
     ordering = ['-created_at']
+
+    def _snapshot_cost(self, product, unit=None):
+        """Capture the product cost at sale time for historical COGS."""
+        if not product or product.cost is None:
+            return None
+
+        cost = Decimal(str(product.cost))
+        if unit:
+            cost *= Decimal(str(unit.convert_to_base_units(1)))
+
+        return cost.quantize(Decimal('0.01'))
     
     def get_queryset(self):
         """Ensure tenant and outlet filtering is applied correctly with strict isolation"""
@@ -290,9 +302,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             from apps.customers.models import Customer
             customer = Customer.objects.get(id=customer_id, tenant=tenant)
         
-        # Generate receipt number
-        receipt_number = self._generate_receipt_number(tenant, outlet=outlet)
-        
         # Get table if provided
         table = None
         if table_id:
@@ -303,11 +312,10 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 logger.warning(f"Table {table_id} not found, continuing without table")
         
         # Create sale
-        sale = Sale.objects.create(
-            receipt_number=receipt_number,
-            user=request.user,
+        sale = self._create_sale_with_unique_receipt(
             tenant=tenant,
             outlet=outlet,
+            user=request.user,
             shift=shift,
             customer=customer,
             table=table,
@@ -319,7 +327,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             **serializer.validated_data
         )
         
-        logger.info(f"Sale created: {sale.id}, Receipt: {receipt_number}")
+        logger.info(f"Sale created: {sale.id}, Receipt: {sale.receipt_number}")
         
         # Process items and deduct stock
         total_subtotal = Decimal('0')
@@ -404,6 +412,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 quantity=quantity,
                 quantity_in_base_units=quantity_in_base_units,
                 price=price,
+                cost=self._snapshot_cost(product, unit),
                 tax_rate_at_sale=Decimal('0'),
                 total=item_total,
                 notes=item_notes,
@@ -604,6 +613,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 "quantity": quantity,
                 "quantity_in_base_units": quantity_in_base_units,
                 "price": price.quantize(Decimal("0.01")),
+                "cost": self._snapshot_cost(product, unit),
                 "discount": item_discount,
                 "total": item_total,
                 "notes": item_data.get("notes", ""),
@@ -620,17 +630,15 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if total <= 0:
             return Response({"detail": "total must be greater than 0"}, status=status.HTTP_400_BAD_REQUEST)
 
-        receipt_number = self._generate_receipt_number(tenant, outlet=outlet)
         notes = request.data.get("notes", "") or ""
         reason = request.data.get("reason") or request.data.get("void_reason") or ""
         if reason:
             notes = f"{notes} Void reason: {reason}".strip() if notes else f"Void reason: {reason}"
 
-        sale = Sale.objects.create(
-            receipt_number=receipt_number,
-            user=request.user,
+        sale = self._create_sale_with_unique_receipt(
             tenant=tenant,
             outlet=outlet,
+            user=request.user,
             shift=shift,
             customer=customer,
             subtotal=subtotal.quantize(Decimal("0.01")),
@@ -658,6 +666,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 quantity=item["quantity"],
                 quantity_in_base_units=item["quantity_in_base_units"],
                 price=item["price"],
+                cost=item["cost"],
                 discount=item["discount"] or Decimal("0"),
                 tax_rate_at_sale=Decimal("0"),
                 total=item["total"],
@@ -676,13 +685,13 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         """Create a pending sale when cashier clicks Pay, before payment confirmation."""
         logger = logging.getLogger(__name__)
 
-        tenant = self.get_tenant_for_request(request)
+        tenant = self.get_tenant_for_request(request) or getattr(request.user, "tenant", None)
         if not tenant and not request.user.is_saas_admin:
             return Response({"detail": "User must have a tenant"}, status=status.HTTP_400_BAD_REQUEST)
         if not tenant:
             return Response({"detail": "Tenant is required. Please provide tenant_id in request data."}, status=status.HTTP_400_BAD_REQUEST)
 
-        outlet_id = request.data.get("outlet")
+        outlet_id = request.data.get("outlet") or request.data.get("outlet_id") or request.query_params.get("outlet")
         if not outlet_id:
             return Response({"detail": "outlet is required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -693,7 +702,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             return Response({"detail": "Invalid outlet"}, status=status.HTTP_400_BAD_REQUEST)
 
         shift = None
-        shift_id = request.data.get("shift")
+        shift_id = request.data.get("shift") or request.data.get("shift_id")
         if shift_id:
             from apps.shifts.models import Shift
             try:
@@ -702,7 +711,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 return Response({"detail": "Invalid shift"}, status=status.HTTP_400_BAD_REQUEST)
 
         customer = None
-        customer_id = request.data.get("customer")
+        customer_id = request.data.get("customer") or request.data.get("customer_id")
         if customer_id:
             from apps.customers.models import Customer
             try:
@@ -711,6 +720,11 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 return Response({"detail": "Invalid customer"}, status=status.HTTP_400_BAD_REQUEST)
 
         items_data = request.data.get("items_data") or request.data.get("items") or []
+        if isinstance(items_data, str):
+            try:
+                items_data = json.loads(items_data)
+            except json.JSONDecodeError:
+                return Response({"detail": "items_data must be valid JSON"}, status=status.HTTP_400_BAD_REQUEST)
         if not items_data:
             return Response({"detail": "items_data is required"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -726,7 +740,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         computed_subtotal = Decimal("0")
 
         for idx, item_data in enumerate(items_data):
-            product_id = item_data.get("product_id") or item_data.get("productId")
+            product_id = item_data.get("product_id") or item_data.get("productId") or item_data.get("id")
             if not product_id:
                 raise serializers.ValidationError(f"Item {idx + 1}: product_id is required")
 
@@ -737,7 +751,11 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             if quantity <= 0:
                 raise serializers.ValidationError(f"Item {idx + 1}: Quantity must be greater than 0")
 
-            price = to_decimal(item_data.get("price", "0"), f"items_data[{idx}].price", Decimal("0"))
+            price = to_decimal(
+                item_data.get("price", item_data.get("unit_price", item_data.get("selling_price", "0"))),
+                f"items_data[{idx}].price",
+                Decimal("0")
+            )
             if price <= 0:
                 raise serializers.ValidationError(f"Item {idx + 1}: Price must be greater than 0")
 
@@ -768,6 +786,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 "quantity": quantity,
                 "quantity_in_base_units": quantity_in_base_units,
                 "price": price.quantize(Decimal("0.01")),
+                "cost": self._snapshot_cost(product, unit),
                 "total": line_total,
                 "notes": item_data.get("notes", ""),
             })
@@ -782,11 +801,10 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if total <= 0:
             return Response({"detail": "total must be greater than 0"}, status=status.HTTP_400_BAD_REQUEST)
 
-        sale = Sale.objects.create(
-            receipt_number=self._generate_receipt_number(tenant, outlet=outlet),
-            user=request.user,
+        sale = self._create_sale_with_unique_receipt(
             tenant=tenant,
             outlet=outlet,
+            user=request.user,
             shift=shift,
             customer=customer,
             subtotal=subtotal,
@@ -815,6 +833,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 quantity=item["quantity"],
                 quantity_in_base_units=item["quantity_in_base_units"],
                 price=item["price"],
+                cost=item["cost"],
                 tax_rate_at_sale=Decimal("0"),
                 total=item["total"],
                 notes=item["notes"],
@@ -1115,6 +1134,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 'product_name': product.name,
                 'quantity': quantity,
                 'price': price,
+                'cost': self._snapshot_cost(product),
                 'total': item_total,
             })
         
@@ -1133,9 +1153,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         change_given = cash_received - total
         
-        # Generate receipt number
-        receipt_number = self._generate_receipt_number(tenant, outlet=outlet)
-        
         # Get customer if provided
         customer = None
         customer_id = request.data.get('customer')
@@ -1147,11 +1164,10 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 logger.warning(f"Customer {customer_id} not found, continuing without customer")
         
         # Create sale with atomic transaction
-        sale = Sale.objects.create(
-            receipt_number=receipt_number,
-            user=request.user,
+        sale = self._create_sale_with_unique_receipt(
             tenant=tenant,
             outlet=outlet,
+            user=request.user,
             shift=shift,
             customer=customer,
             subtotal=subtotal,
@@ -1183,6 +1199,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 quantity=item_data['quantity'],
                 quantity_in_base_units=item_data['quantity'],
                 price=item_data['price'],
+                cost=item_data['cost'],
                 tax_rate_at_sale=Decimal('0'),
                 total=item_data['total'],
             )
@@ -1251,22 +1268,47 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         }, status=status.HTTP_201_CREATED)
     
     def _generate_receipt_number(self, tenant, outlet=None):
-        """Generate unique receipt number scoped per outlet (starts from 1 per outlet)."""
-        qs = Sale.objects.filter(tenant=tenant)
-        if outlet:
-            qs = qs.filter(outlet=outlet)
+        """Generate the next numeric receipt number per tenant/outlet scope."""
+        if not outlet:
+            raise serializers.ValidationError("Outlet is required for receipt generation.")
 
-        recent_numbers = qs.order_by('-created_at').values_list('receipt_number', flat=True)[:1000]
-        max_numeric = 0
-        for number in recent_numbers:
-            if number and str(number).isdigit():
-                max_numeric = max(max_numeric, int(number))
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COALESCE(MAX(CASE WHEN receipt_number ~ '^[0-9]+$' "
+                "THEN receipt_number::bigint ELSE 0 END), 0) "
+                "FROM sales_sale WHERE tenant_id = %s AND outlet_id = %s",
+                [tenant.id, outlet.id],
+            )
+            max_num = int(cursor.fetchone()[0])
 
-        next_number = max_numeric + 1
-        while qs.filter(receipt_number=str(next_number)).exists():
-            next_number += 1
+        return str(max_num + 1)
 
-        return str(next_number)
+    def _create_sale_with_unique_receipt(self, tenant, outlet, **sale_kwargs):
+        """Create a sale with retries to avoid receipt number race collisions."""
+        max_attempts = 5
+
+        for _ in range(max_attempts):
+            receipt_number = self._generate_receipt_number(tenant, outlet=outlet)
+            try:
+                with transaction.atomic():
+                    return Sale.objects.create(
+                        receipt_number=receipt_number,
+                        tenant=tenant,
+                        outlet=outlet,
+                        **sale_kwargs,
+                    )
+            except IntegrityError as exc:
+                # Retry only for receipt_number unique collisions; re-raise all others.
+                err_msg = str(exc).lower()
+                is_receipt_unique_collision = (
+                    "receipt_number" in err_msg
+                    and ("unique" in err_msg or "duplicate key" in err_msg)
+                )
+                if not is_receipt_unique_collision:
+                    raise
+                continue
+
+        raise serializers.ValidationError("Could not generate a unique receipt number. Please retry.")
     
     @action(detail=True, methods=['post'])
     def refund(self, request, pk=None):
@@ -1623,6 +1665,14 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             sales=Sum('total'),
             count=Count('id')
         ).order_by('date')
+
+        daily_costs = {}
+        sale_items = SaleItem.objects.filter(sale__in=queryset).select_related('product').annotate(
+            date=TruncDate('sale__created_at')
+        )
+        for item in sale_items:
+            item_date = str(item.date)
+            daily_costs[item_date] = daily_costs.get(item_date, Decimal('0.00')) + item.effective_cogs_total
         
         # Create a map of date -> stats
         stats_map = {str(item['date']): item for item in daily_stats}
@@ -1638,7 +1688,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             chart_data.append({
                 'date': date.strftime('%a'),  # Weekday abbreviation
                 'sales': float(day_stats['sales'] or 0),
-                'profit': float(day_stats['sales'] or 0) * 0.7,  # TODO: Calculate properly with expenses
+                'profit': float((Decimal(str(day_stats['sales'] or 0)) - daily_costs.get(date_str, Decimal('0.00')))),
             })
         
         return Response(chart_data)

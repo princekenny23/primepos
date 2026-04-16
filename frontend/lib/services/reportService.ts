@@ -60,6 +60,7 @@ export interface InventoryValuationItem {
   counted_qty: number
   counted_value: number
   discrepancy: number
+  discrepancy_value: number
   surplus_qty: number
   surplus_value: number
   shortage_qty: number
@@ -84,6 +85,7 @@ export interface InventoryValuationReport {
     counted_qty: number
     counted_value: number
     discrepancy: number
+    discrepancy_value: number
     surplus_qty: number
     surplus_value: number
     shortage_qty: number
@@ -219,9 +221,10 @@ export const reportService = {
     }
   },
 
-  async getCashSummary(date?: string): Promise<any> {
+  async getCashSummary(filters?: { date?: string; outlet?: string }): Promise<any> {
     const params = new URLSearchParams()
-    if (date) params.append("date", date)
+    if (filters?.date) params.append("date", filters.date)
+    if (filters?.outlet) params.append("outlet", filters.outlet)
     
     const query = params.toString()
     try {

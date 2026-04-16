@@ -235,7 +235,7 @@ export default function SalesReportsLandingPage() {
     const totalDiscount = Number(summary?.total_discount || 0)
     const totalTax = Number(summary?.total_tax || 0)
     const totalTransactions = Number(summary?.total_transactions || summary?.total_sales || 0)
-    const netSales = totalRevenue - totalDiscount
+    const netSales = totalRevenue
 
     return [
       { label: "Gross Sales", value: formatCurrency(totalRevenue) },

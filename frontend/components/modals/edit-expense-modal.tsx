@@ -113,11 +113,6 @@ export function EditExpenseModal({
         expense_date: formData.expense_date.toISOString().split('T')[0],
       })
 
-      toast({
-        title: "Expense Updated",
-        description: "Expense has been updated successfully.",
-      })
-
       onOpenChange(false)
       onSuccess?.()
     } catch (error: any) {

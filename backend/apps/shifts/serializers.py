@@ -12,6 +12,7 @@ class ShiftSerializer(serializers.ModelSerializer):
     till = TillSerializer(read_only=True)
     user = UserSerializer(read_only=True)
     total_sales = serializers.SerializerMethodField()
+    cash_total = serializers.SerializerMethodField()
     total_expense = serializers.SerializerMethodField()
     outlet_id = serializers.IntegerField(write_only=True)
     till_id = serializers.IntegerField(write_only=True)
@@ -21,7 +22,7 @@ class ShiftSerializer(serializers.ModelSerializer):
         fields = ('id', 'outlet', 'outlet_id', 'till', 'till_id', 'user', 'operating_date',
                   'opening_cash_balance', 'floating_cash', 'closing_cash_balance',
                   'status', 'notes', 'start_time', 'end_time', 'device_id', 'sync_status',
-                  'total_sales', 'total_expense')
+                  'total_sales', 'cash_total', 'total_expense')
         read_only_fields = ('id', 'outlet', 'till', 'user', 'status', 'start_time', 'end_time')
 
     def get_total_sales(self, obj):
@@ -32,5 +33,14 @@ class ShiftSerializer(serializers.ModelSerializer):
     def get_total_expense(self, obj):
         """Sum approved expenses linked to this shift."""
         total = obj.expenses.filter(status='approved').aggregate(sum=Sum('amount'))['sum']
+        return total or 0
+
+    def get_cash_total(self, obj):
+        """Sum completed, non-void cash sales linked to this shift."""
+        total = obj.sales.filter(
+            status='completed',
+            is_void=False,
+            payment_method='cash',
+        ).aggregate(sum=Sum('total'))['sum']
         return total or 0
 

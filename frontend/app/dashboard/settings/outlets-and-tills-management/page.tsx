@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
 import { Button } from "@/components/ui/button"
-import { Plus, Store, RefreshCw, ChevronDown, Pencil, Trash2, Menu } from "lucide-react"
+import { Plus, Store, RefreshCw, ChevronDown, Pencil, Trash2, Menu, Eye, EyeOff } from "lucide-react"
 import { OutletList } from "@/components/outlets/outlet-list"
 import { AddEditOutletModal } from "@/components/modals/add-edit-outlet-modal"
 import { AddEditTillModal } from "@/components/modals/add-edit-till-modal"
@@ -36,13 +36,25 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { useTenant } from "@/contexts/tenant-context"
 import { useBusinessStore } from "@/stores/businessStore"
+import { useAuthStore } from "@/stores/authStore"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
 import { tillService, type Till } from "@/lib/services/tillService"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
 import { useI18n } from "@/contexts/i18n-context"
+import { authService } from "@/lib/services/authService"
 
 export default function OutletsAndTillsManagementPage() {
   const [isOutletModalOpen, setIsOutletModalOpen] = useState(false)
@@ -55,9 +67,16 @@ export default function OutletsAndTillsManagementPage() {
   const [isLoadingTills, setIsLoadingTills] = useState(true)
   const [editingTill, setEditingTill] = useState<Till | null>(null)
   const [deletingTill, setDeletingTill] = useState<Till | null>(null)
+  const [switchAuthOpen, setSwitchAuthOpen] = useState(false)
+  const [pendingOutletId, setPendingOutletId] = useState<string | null>(null)
+  const [switchUsername, setSwitchUsername] = useState("")
+  const [switchPassword, setSwitchPassword] = useState("")
+  const [showSwitchPassword, setShowSwitchPassword] = useState(false)
+  const [isVerifyingSwitch, setIsVerifyingSwitch] = useState(false)
   
   const { outlets, currentOutlet, setOutlets, switchOutlet } = useTenant()
   const { currentBusiness, loadOutlets } = useBusinessStore()
+  const { user } = useAuthStore()
   const { toast } = useToast()
   const router = useRouter()
   const { t } = useI18n()
@@ -164,6 +183,53 @@ export default function OutletsAndTillsManagementPage() {
       })
     } finally {
       setIsSwitching(null)
+    }
+  }
+
+  const requestOutletSwitch = (outletId: string) => {
+    if (!outletId || outletId === String(currentOutlet?.id || "")) return
+    setPendingOutletId(outletId)
+    setSwitchUsername(user?.email || "")
+    setSwitchPassword("")
+    setSwitchAuthOpen(true)
+  }
+
+  const closeSwitchAuth = () => {
+    setSwitchAuthOpen(false)
+    setPendingOutletId(null)
+    setSwitchUsername("")
+    setSwitchPassword("")
+    setShowSwitchPassword(false)
+    setIsVerifyingSwitch(false)
+  }
+
+  const confirmOutletSwitch = async () => {
+    if (!pendingOutletId || !user?.email) {
+      closeSwitchAuth()
+      return
+    }
+
+    if (!switchUsername.trim() || !switchPassword.trim()) {
+      toast({
+        title: "Login details required",
+        description: "Enter your username and password to switch outlet.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsVerifyingSwitch(true)
+    try {
+      await authService.verifyCredentials(switchUsername.trim(), switchPassword)
+      await handleSwitchOutlet(pendingOutletId)
+      closeSwitchAuth()
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error?.message || "Invalid login details. Please try again.",
+        variant: "destructive",
+      })
+      setIsVerifyingSwitch(false)
     }
   }
 
@@ -276,7 +342,7 @@ export default function OutletsAndTillsManagementPage() {
                             availableOutlets.map((outlet) => (
                               <DropdownMenuItem
                                 key={outlet.id}
-                                onClick={() => handleSwitchOutlet(String(outlet.id))}
+                                onClick={() => requestOutletSwitch(String(outlet.id))}
                                 disabled={isSwitching === String(outlet.id)}
                               >
                                 {isSwitching === String(outlet.id) ? (
@@ -412,6 +478,66 @@ export default function OutletsAndTillsManagementPage() {
           till={editingTill}
           onSuccess={handleTillModalSuccess}
         />
+
+        <Dialog open={switchAuthOpen} onOpenChange={(open) => (!open ? closeSwitchAuth() : setSwitchAuthOpen(open))}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Confirm Login</DialogTitle>
+              <DialogDescription>
+                Enter your password to switch outlet.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3 py-2">
+              <div className="space-y-1">
+                <Label htmlFor="switch-outlet-username">Username</Label>
+                <Input
+                  id="switch-outlet-username"
+                  type="text"
+                  value={switchUsername}
+                  onChange={(event) => setSwitchUsername(event.target.value)}
+                  placeholder="Enter username or email"
+                  disabled={isVerifyingSwitch}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="switch-outlet-password">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="switch-outlet-password"
+                    type={showSwitchPassword ? "text" : "password"}
+                    value={switchPassword}
+                    onChange={(event) => setSwitchPassword(event.target.value)}
+                    placeholder="Enter your password"
+                    disabled={isVerifyingSwitch}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSwitchPassword(!showSwitchPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    disabled={isVerifyingSwitch}
+                  >
+                    {showSwitchPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeSwitchAuth} disabled={isVerifyingSwitch}>
+                Cancel
+              </Button>
+              <Button type="button" onClick={confirmOutletSwitch} disabled={isVerifyingSwitch}>
+                {isVerifyingSwitch ? "Verifying..." : "Verify & Switch"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Delete Till Confirmation Dialog */}
         <AlertDialog open={!!deletingTill} onOpenChange={(open) => !open && setDeletingTill(null)}>

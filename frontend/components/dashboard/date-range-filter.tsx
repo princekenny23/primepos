@@ -16,6 +16,7 @@ import { format } from "date-fns"
 
 interface DateRangeFilterProps {
   onRangeChange?: (range: { start: Date | undefined; end: Date | undefined }) => void
+  defaultPreset?: string
 }
 
 const presetRanges = [
@@ -29,15 +30,54 @@ const presetRanges = [
   { label: "Custom Range", value: "custom" },
 ]
 
-export function DateRangeFilter({ onRangeChange }: DateRangeFilterProps) {
-  const [selectedPreset, setSelectedPreset] = useState<string>("last7")
-  const [startDate, setStartDate] = useState<Date | undefined>(() => {
-    const today = new Date()
-    const start = new Date(today)
-    start.setDate(start.getDate() - 6)
-    return start
-  })
-  const [endDate, setEndDate] = useState<Date | undefined>(() => new Date())
+function getPresetRange(value: string) {
+  const today = new Date()
+  let start: Date | undefined
+  let end: Date | undefined = today
+
+  switch (value) {
+    case "today":
+      start = today
+      end = today
+      break
+    case "yesterday":
+      start = new Date(today)
+      start.setDate(start.getDate() - 1)
+      end = start
+      break
+    case "last7":
+      start = new Date(today)
+      start.setDate(start.getDate() - 6)
+      break
+    case "last30":
+      start = new Date(today)
+      start.setDate(start.getDate() - 29)
+      break
+    case "thisMonth":
+      start = new Date(today.getFullYear(), today.getMonth(), 1)
+      break
+    case "lastMonth":
+      start = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+      end = new Date(today.getFullYear(), today.getMonth(), 0)
+      break
+    case "thisYear":
+      start = new Date(today.getFullYear(), 0, 1)
+      break
+    default:
+      start = new Date(today)
+      start.setDate(start.getDate() - 6)
+      break
+  }
+
+  return { start, end }
+}
+
+export function DateRangeFilter({ onRangeChange, defaultPreset = "last7" }: DateRangeFilterProps) {
+  const initialRange = getPresetRange(defaultPreset)
+
+  const [selectedPreset, setSelectedPreset] = useState<string>(defaultPreset)
+  const [startDate, setStartDate] = useState<Date | undefined>(initialRange.start)
+  const [endDate, setEndDate] = useState<Date | undefined>(initialRange.end)
 
   useEffect(() => {
     onRangeChange?.({ start: startDate, end: endDate })
@@ -47,45 +87,12 @@ export function DateRangeFilter({ onRangeChange }: DateRangeFilterProps) {
 
   const handlePresetChange = (value: string) => {
     setSelectedPreset(value)
-    
+
     if (value === "custom") {
       return
     }
 
-    const today = new Date()
-    let start: Date | undefined
-    let end: Date | undefined = today
-
-    switch (value) {
-      case "today":
-        start = today
-        end = today
-        break
-      case "yesterday":
-        start = new Date(today)
-        start.setDate(start.getDate() - 1)
-        end = start
-        break
-      case "last7":
-        start = new Date(today)
-        start.setDate(start.getDate() - 6)
-        break
-      case "last30":
-        start = new Date(today)
-        start.setDate(start.getDate() - 29)
-        break
-      case "thisMonth":
-        start = new Date(today.getFullYear(), today.getMonth(), 1)
-        break
-      case "lastMonth":
-        start = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-        end = new Date(today.getFullYear(), today.getMonth(), 0)
-        break
-      case "thisYear":
-        start = new Date(today.getFullYear(), 0, 1)
-        break
-    }
-
+    const { start, end } = getPresetRange(value)
     setStartDate(start)
     setEndDate(end)
     onRangeChange?.({ start, end })
@@ -162,4 +169,3 @@ export function DateRangeFilter({ onRangeChange }: DateRangeFilterProps) {
     </div>
   )
 }
-

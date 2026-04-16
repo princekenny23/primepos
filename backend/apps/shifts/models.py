@@ -38,6 +38,23 @@ class Shift(models.Model):
         """Alias for user (cashier) - for backward compatibility"""
         return self.user
 
+    @property
+    def system_total(self):
+        """Expected till cash: opening balance plus completed cash sales."""
+        sales_total = self.sales.filter(
+            status='completed',
+            is_void=False,
+            payment_method='cash',
+        ).aggregate(total=models.Sum('total'))['total'] or Decimal('0')
+        return self.opening_cash_balance + sales_total
+
+    @property
+    def difference(self):
+        """Cash variance between counted and expected cash."""
+        if self.closing_cash_balance is None:
+            return None
+        return self.closing_cash_balance - self.system_total
+
     class Meta:
         db_table = 'shifts_shift'
         verbose_name = 'Shift'

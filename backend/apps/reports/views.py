@@ -23,13 +23,30 @@ from reportlab.lib.styles import getSampleStyleSheet
 
 
 def get_outlet_id_from_request(request):
-    """Helper to get outlet ID from request (header or query param)"""
+    """Helper to get outlet ID from request with tenant safety check."""
     # Check header first (X-Outlet-ID)
     outlet_id = request.headers.get('X-Outlet-ID')
     # Fall back to query param
     if not outlet_id:
         outlet_id = request.query_params.get('outlet_id') or request.query_params.get('outlet')
+
+    tenant = getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
+    if outlet_id and tenant:
+        from apps.outlets.models import Outlet
+        if not Outlet.objects.filter(id=outlet_id, tenant=tenant).exists():
+            return None
+
     return outlet_id
+
+
+def _report_metadata(request, tenant, outlet_id=None, filters=None):
+    return {
+        'generated_at': timezone.now().isoformat(),
+        'timezone': str(timezone.get_current_timezone()),
+        'tenant_id': tenant.id if tenant else None,
+        'outlet_id': str(outlet_id) if outlet_id is not None else None,
+        'filters_applied': filters or {},
+    }
 
 
 @api_view(['GET'])
@@ -49,16 +66,28 @@ def sales_report(request):
     if not outlet_id:
         return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
     
-    queryset = Sale.objects.filter(tenant=tenant, status='completed')
-    
-    queryset = queryset.filter(outlet_id=outlet_id)
+    queryset = Sale.objects.filter(
+        tenant=tenant,
+        outlet_id=outlet_id,
+        is_void=False,
+    ).filter(
+        Q(status='completed') |
+        Q(status='pending', payment_method__in=['tab', 'credit'])
+    )
+
+    # Keep primary sales totals unchanged (completed only), but include
+    # on-account sales in payment mix so tab/credit remain visible.
+    payment_queryset = queryset
     
     if start_date:
-        queryset = queryset.filter(created_at__gte=start_date)
+        queryset = queryset.filter(created_at__date__gte=start_date)
+        payment_queryset = payment_queryset.filter(created_at__date__gte=start_date)
     if end_date:
-        queryset = queryset.filter(created_at__lte=end_date)
+        queryset = queryset.filter(created_at__date__lte=end_date)
+        payment_queryset = payment_queryset.filter(created_at__date__lte=end_date)
     if payment_method:
         queryset = queryset.filter(payment_method=payment_method)
+        payment_queryset = payment_queryset.filter(payment_method=payment_method)
     
     # Aggregations
     total_transactions = queryset.count()
@@ -66,7 +95,7 @@ def sales_report(request):
     total_tax = queryset.aggregate(Sum('tax'))['tax__sum'] or 0
     total_discount = queryset.aggregate(Sum('discount'))['discount__sum'] or 0
 
-    by_payment_method = queryset.values('payment_method').annotate(
+    by_payment_method = payment_queryset.values('payment_method').annotate(
         count=Count('id'),
         total=Sum('total')
     )
@@ -85,6 +114,16 @@ def sales_report(request):
         'total_discount': float(total_discount),
         'by_payment_method': list(by_payment_method),
         'top_products': list(top_products),
+        'meta': _report_metadata(
+            request,
+            tenant,
+            outlet_id=outlet_id,
+            filters={
+                'start_date': start_date,
+                'end_date': end_date,
+                'payment_method': payment_method,
+            },
+        ),
     })
 
 
@@ -105,7 +144,14 @@ def products_report(request):
     
     # Products are now outlet-specific
     queryset = Product.objects.filter(tenant=tenant, outlet_id=outlet_id)
-    sales_queryset = Sale.objects.filter(tenant=tenant, outlet_id=outlet_id, status='completed')
+    sales_queryset = Sale.objects.filter(
+        tenant=tenant,
+        outlet_id=outlet_id,
+        is_void=False,
+    ).filter(
+        Q(status='completed') |
+        Q(status='pending', payment_method__in=['tab', 'credit'])
+    )
     
     if start_date:
         sales_queryset = sales_queryset.filter(created_at__gte=start_date)
@@ -190,24 +236,28 @@ def profit_loss_report(request):
     if not outlet_id:
         return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
     
-    sales_queryset = Sale.objects.filter(tenant=tenant, outlet_id=outlet_id, status='completed')
+    sales_queryset = Sale.objects.filter(
+        tenant=tenant,
+        outlet_id=outlet_id,
+        is_void=False,
+    ).filter(
+        Q(status='completed') |
+        Q(status='pending', payment_method__in=['tab', 'credit'])
+    )
     
     if start_date:
-        sales_queryset = sales_queryset.filter(created_at__gte=start_date)
+        sales_queryset = sales_queryset.filter(created_at__date__gte=start_date)
     if end_date:
-        sales_queryset = sales_queryset.filter(created_at__lte=end_date)
-    if outlet_id:
-        sales_queryset = sales_queryset.filter(outlet_id=outlet_id)
+        sales_queryset = sales_queryset.filter(created_at__date__lte=end_date)
     
     # Revenue
     total_revenue = sales_queryset.aggregate(Sum('total'))['total__sum'] or 0
     
     # Cost of goods sold
-    sale_items = SaleItem.objects.filter(sale__in=sales_queryset)
-    total_cost = 0
+    sale_items = SaleItem.objects.filter(sale__in=sales_queryset).select_related('product')
+    total_cost = Decimal('0.00')
     for item in sale_items:
-        if item.product and item.product.cost:
-            total_cost += item.product.cost * item.quantity
+        total_cost += item.effective_cogs_total
     
     # Expenses
     expense_qs = Expense.objects.filter(tenant=tenant, status='approved')
@@ -221,7 +271,9 @@ def profit_loss_report(request):
 
     # Gross profit
     gross_profit = total_revenue - total_cost
+    net_profit = gross_profit - total_expenses
     gross_margin = (gross_profit / total_revenue * 100) if total_revenue > 0 else 0
+    net_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else 0
     
     return Response({
         'total_revenue': float(total_revenue),
@@ -229,6 +281,17 @@ def profit_loss_report(request):
         'gross_profit': float(gross_profit),
         'gross_margin': float(gross_margin),
         'expenses': float(total_expenses),
+        'net_profit': float(net_profit),
+        'net_margin': float(net_margin),
+        'meta': _report_metadata(
+            request,
+            tenant,
+            outlet_id=outlet_id,
+            filters={
+                'start_date': start_date,
+                'end_date': end_date,
+            },
+        ),
     })
 
 
@@ -297,7 +360,10 @@ def daily_sales_report(request):
     queryset = Sale.objects.filter(
         tenant=tenant,
         outlet_id=outlet_id,
-        status='completed'
+        is_void=False,
+    ).filter(
+        Q(status='completed') |
+        Q(status='pending', payment_method__in=['tab', 'credit'])
     )
 
     if start_date or end_date:
@@ -326,6 +392,15 @@ def daily_sales_report(request):
                 }
                 for row in daily
             ],
+            'meta': _report_metadata(
+                request,
+                tenant,
+                outlet_id=outlet_id,
+                filters={
+                    'start_date': start_date,
+                    'end_date': end_date,
+                },
+            ),
         })
 
     queryset = queryset.filter(created_at__date=report_date)
@@ -365,6 +440,12 @@ def daily_sales_report(request):
                 'transactions': total_sales,
             }
         ],
+        'meta': _report_metadata(
+            request,
+            tenant,
+            outlet_id=outlet_id,
+            filters={'date': report_date.isoformat()},
+        ),
     })
 
 
@@ -477,6 +558,12 @@ def cash_summary_report(request):
         'total_change_given': float(total_change_given),
         'total_cash_amount': float(total_cash_amount),
         'shifts': shift_summaries,
+        'meta': _report_metadata(
+            request,
+            tenant,
+            outlet_id=outlet_id,
+            filters={'date': report_date.isoformat()},
+        ),
     })
 
 
@@ -504,8 +591,8 @@ def shift_summary_report(request):
     if end_date:
         queryset = queryset.filter(operating_date__lte=end_date)
     
-    # Get closed shifts with summaries (include all statuses for now to allow testing)
-    shifts_to_report = queryset.select_related('outlet', 'till', 'user')
+    # Only closed shifts are valid for reconciliation reporting.
+    shifts_to_report = queryset.filter(status='CLOSED').select_related('outlet', 'till', 'user')
     
     shift_summaries = []
     for shift in shifts_to_report:
@@ -537,7 +624,16 @@ def shift_summary_report(request):
         'period': {
             'start_date': start_date,
             'end_date': end_date,
-        }
+        },
+        'meta': _report_metadata(
+            request,
+            tenant,
+            outlet_id=outlet_id,
+            filters={
+                'start_date': start_date,
+                'end_date': end_date,
+            },
+        ),
     })
 
 
@@ -588,6 +684,23 @@ def inventory_valuation_report(request):
         created_at__date__gte=start_dt,
         created_at__date__lte=end_dt
     )
+
+    # Get all movements before the period to compute opening stock from ledger.
+    pre_period_movements = StockMovement.objects.filter(
+        tenant=tenant,
+        outlet_id=outlet_id,
+        created_at__date__lt=start_dt
+    )
+
+    # Pre-aggregate movement quantities once to avoid N x movement-type queries.
+    period_movement_totals = {
+        (row['product_id'], row['movement_type']): row['qty']
+        for row in movements.values('product_id', 'movement_type').annotate(qty=Sum('quantity'))
+    }
+    pre_period_movement_totals = {
+        (row['product_id'], row['movement_type']): row['qty']
+        for row in pre_period_movements.values('product_id', 'movement_type').annotate(qty=Sum('quantity'))
+    }
     
     # Get latest stock take (if any)
     latest_stock_take = StockTake.objects.filter(
@@ -597,6 +710,13 @@ def inventory_valuation_report(request):
         operating_date__gte=start_dt,
         operating_date__lte=end_dt
     ).order_by('-completed_at').first()
+
+    counted_qty_by_product = {}
+    if latest_stock_take:
+        counted_qty_by_product = {
+            row['product_id']: row['counted_quantity']
+            for row in StockTakeItem.objects.filter(stock_take=latest_stock_take).values('product_id', 'counted_quantity')
+        }
     
     # Build report data
     report_items = []
@@ -609,60 +729,60 @@ def inventory_valuation_report(request):
         'stock_qty': 0, 'stock_value': Decimal('0'),
         'counted_qty': 0, 'counted_value': Decimal('0'),
         'discrepancy': 0,
+        'discrepancy_value': Decimal('0'),
         'surplus_qty': 0, 'surplus_value': Decimal('0'),
         'shortage_qty': 0, 'shortage_value': Decimal('0'),
     }
     
+    def movement_qty(aggregated, product_id, movement_type):
+        return aggregated.get((product_id, movement_type), 0) or 0
+
     for product in products:
         retail_price = product.retail_price or Decimal('0')
         cost_price = product.cost or retail_price  # Use cost if available, else retail
-        
-        # Get movements by type for this product
-        product_movements = movements.filter(product=product)
+
+        # Opening stock from ledger before start date.
+        pre_received = movement_qty(pre_period_movement_totals, product.id, 'purchase')
+        pre_transferred_in = movement_qty(pre_period_movement_totals, product.id, 'transfer_in')
+        pre_transferred_out = movement_qty(pre_period_movement_totals, product.id, 'transfer_out')
+        pre_adjusted = movement_qty(pre_period_movement_totals, product.id, 'adjustment')
+        pre_sold = movement_qty(pre_period_movement_totals, product.id, 'sale')
+        pre_returns = movement_qty(pre_period_movement_totals, product.id, 'return')
+        pre_damage = movement_qty(pre_period_movement_totals, product.id, 'damage')
+        pre_expiry = movement_qty(pre_period_movement_totals, product.id, 'expiry')
+
+        opening_stock = (
+            pre_received + pre_transferred_in + pre_returns + pre_adjusted
+            - pre_sold - pre_transferred_out - pre_damage - pre_expiry
+        )
         
         # Calculate quantities by movement type
-        received = product_movements.filter(movement_type='purchase').aggregate(
-            qty=Sum('quantity'))['qty'] or 0
-        
-        transferred_in = product_movements.filter(movement_type='transfer_in').aggregate(
-            qty=Sum('quantity'))['qty'] or 0
-        transferred_out = product_movements.filter(movement_type='transfer_out').aggregate(
-            qty=Sum('quantity'))['qty'] or 0
+        received = movement_qty(period_movement_totals, product.id, 'purchase')
+        transferred_in = movement_qty(period_movement_totals, product.id, 'transfer_in')
+        transferred_out = movement_qty(period_movement_totals, product.id, 'transfer_out')
         transferred = transferred_in - transferred_out
+
+        adjusted = movement_qty(period_movement_totals, product.id, 'adjustment')
+        sold = movement_qty(period_movement_totals, product.id, 'sale')
+        returns = movement_qty(period_movement_totals, product.id, 'return')
+        damage = movement_qty(period_movement_totals, product.id, 'damage')
+        expiry = movement_qty(period_movement_totals, product.id, 'expiry')
         
-        adjusted = product_movements.filter(movement_type='adjustment').aggregate(
-            qty=Sum('quantity'))['qty'] or 0
-        
-        sold = product_movements.filter(movement_type='sale').aggregate(
-            qty=Sum('quantity'))['qty'] or 0
-        
-        returns = product_movements.filter(movement_type='return').aggregate(
-            qty=Sum('quantity'))['qty'] or 0
-        
-        damage = product_movements.filter(movement_type='damage').aggregate(
-            qty=Sum('quantity'))['qty'] or 0
-        
-        expiry = product_movements.filter(movement_type='expiry').aggregate(
-            qty=Sum('quantity'))['qty'] or 0
-        
-        # Current stock (from product or calculate)
-        current_stock = product.stock or 0
-        
-        # Calculate opening stock: current + sold + transferred_out + damage + expiry - received - transferred_in - returns - adjusted
-        opening_stock = current_stock + sold + transferred_out + damage + expiry - received - transferred_in - returns - adjusted
+        # Closing stock from opening + in-period net movements.
+        current_stock = (
+            opening_stock + received + transferred_in + returns + adjusted
+            - sold - transferred_out - damage - expiry
+        )
         
         # Get stock take data if available
         counted_qty = 0
-        if latest_stock_take:
-            stock_take_item = StockTakeItem.objects.filter(
-                stock_take=latest_stock_take,
-                product=product
-            ).first()
-            if stock_take_item:
-                counted_qty = stock_take_item.counted_quantity
+        has_counted_stock = False
+        if product.id in counted_qty_by_product:
+            counted_qty = counted_qty_by_product[product.id]
+            has_counted_stock = True
         
         # Calculate discrepancy
-        discrepancy = counted_qty - current_stock if counted_qty > 0 else 0
+        discrepancy = counted_qty - current_stock if has_counted_stock else 0
         surplus = max(0, discrepancy)
         shortage = abs(min(0, discrepancy))
         
@@ -671,9 +791,10 @@ def inventory_valuation_report(request):
         received_value = received * cost_price
         transferred_value = transferred * cost_price
         adjusted_value = adjusted * cost_price
-        sold_value = sold * retail_price  # Use retail for sold
+        sold_value = sold * cost_price
         stock_value = current_stock * cost_price
         counted_value = counted_qty * cost_price
+        discrepancy_value = discrepancy * cost_price
         surplus_value = surplus * cost_price
         shortage_value = shortage * cost_price
         
@@ -717,6 +838,7 @@ def inventory_valuation_report(request):
             
             # Discrepancy
             'discrepancy': discrepancy,
+            'discrepancy_value': float(discrepancy_value),
             
             # Surplus/Shortage
             'surplus_qty': surplus,
@@ -743,6 +865,7 @@ def inventory_valuation_report(request):
         totals['counted_qty'] += counted_qty
         totals['counted_value'] += counted_value
         totals['discrepancy'] += discrepancy
+        totals['discrepancy_value'] += discrepancy_value
         totals['surplus_qty'] += surplus
         totals['surplus_value'] += surplus_value
         totals['shortage_qty'] += shortage
@@ -765,6 +888,16 @@ def inventory_valuation_report(request):
         'has_stock_take': latest_stock_take is not None,
         'stock_take_date': latest_stock_take.operating_date.isoformat() if latest_stock_take else None,
         'item_count': len(report_items),
+        'meta': _report_metadata(
+            request,
+            tenant,
+            outlet_id=outlet_id,
+            filters={
+                'start_date': start_date,
+                'end_date': end_date,
+                'category': category_id,
+            },
+        ),
     })
 
 
@@ -808,7 +941,16 @@ def expenses_report(request):
         'period': {
             'start_date': start_date,
             'end_date': end_date,
-        }
+        },
+        'meta': _report_metadata(
+            request,
+            tenant,
+            outlet_id=outlet_id,
+            filters={
+                'start_date': start_date,
+                'end_date': end_date,
+            },
+        ),
     })
 
 
@@ -1037,6 +1179,8 @@ def export_profit_loss_report_xlsx(request):
         ['Gross Profit', data.get('gross_profit')],
         ['Gross Margin (%)', data.get('gross_margin')],
         ['Expenses', data.get('expenses')],
+        ['Net Profit', data.get('net_profit')],
+        ['Net Margin (%)', data.get('net_margin')],
     ]
 
     return _xlsx_response_from_sheets('profit_loss_report', {'Summary': (headers, rows)})
@@ -1057,6 +1201,8 @@ def export_profit_loss_report_pdf(request):
         ['Gross Profit', data.get('gross_profit')],
         ['Gross Margin (%)', data.get('gross_margin')],
         ['Expenses', data.get('expenses')],
+        ['Net Profit', data.get('net_profit')],
+        ['Net Margin (%)', data.get('net_margin')],
     ]
 
     return _pdf_response_from_tables('profit_loss_report', 'Profit & Loss', [('Summary', headers, rows)])

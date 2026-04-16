@@ -130,7 +130,7 @@ export function BarPOS() {
   const { user } = useAuthStore()
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { currentOutlet: tenantOutlet } = useTenant()
-  const { activeShift } = useShift()
+  const { activeShift, getTillsForOutlet } = useShift()
   const { toast } = useToast()
   const outlet = tenantOutlet || currentOutlet
   const showDeliveryAction = isDistributionEnabledForOutlet(user, outlet)
@@ -204,6 +204,7 @@ export function BarPOS() {
   const [showVoidReasonDialog, setShowVoidReasonDialog] = useState(false)
   const [voidReason, setVoidReason] = useState("")
   const [isSubmittingVoid, setIsSubmittingVoid] = useState(false)
+  const [tillName, setTillName] = useState<string>("")
 
   // Processing states
   const [isProcessing, setIsProcessing] = useState(false)
@@ -243,6 +244,18 @@ export function BarPOS() {
   // Merge form
   const [selectedTabsToMerge, setSelectedTabsToMerge] = useState<string[]>([])
   const [mergeTargetId, setMergeTargetId] = useState<string>("")
+
+  // Resolve till name from active shift
+  useEffect(() => {
+    if (!activeShift?.tillId || !activeShift?.outletId) {
+      setTillName("")
+      return
+    }
+    getTillsForOutlet(activeShift.outletId).then((tills) => {
+      const till = tills.find((t) => String(t.id) === String(activeShift.tillId))
+      setTillName(till?.name || "")
+    }).catch(() => setTillName(""))
+  }, [activeShift?.tillId, activeShift?.outletId])
 
   // ==================== Data Loading ====================
 
@@ -703,7 +716,10 @@ export function BarPOS() {
   }
 
   const handleVoidItem = async (itemId: string) => {
-    if (!currentTab) return
+    if (!currentTab) {
+      setCart(prev => prev.filter(ci => ci.id !== itemId))
+      return
+    }
     
     try {
       await tabService.voidItem(currentTab.id, itemId, "Removed by bartender")
@@ -734,13 +750,8 @@ export function BarPOS() {
   }
 
   const handleVoidSale = async (reasonInput?: string) => {
-    if (cart.length === 0) {
-      toast({ title: "Void Sale", description: "Cart is already empty." })
-      return
-    }
-
-    if (!outlet) {
-      toast({ title: "Void Sale", description: "Outlet not available.", variant: "destructive" })
+    if (!transactionLocked || !initiatedSaleId) {
+      toast({ title: "Void", description: "Void is available only after PAY is clicked and transaction is initiated.", variant: "destructive" })
       return
     }
 
@@ -753,27 +764,7 @@ export function BarPOS() {
     setIsSubmittingVoid(true)
 
     try {
-      const voidSale = transactionLocked && initiatedSaleId
-        ? await saleService.voidTransaction(initiatedSaleId, reason)
-        : await saleService.void({
-            outlet: outlet.id,
-            shift: activeShift?.id,
-            customer: selectedCustomer?.id || undefined,
-            items_data: cart.map((item) => ({
-              product_id: item.productId,
-              unit_id: (item as any).unitId || undefined,
-              quantity: item.quantity,
-              price: Math.round(item.price * 100) / 100,
-              notes: item.notes || "",
-            })),
-            subtotal: Math.round(cartSubtotal * 100) / 100,
-            tax: 0,
-            discount: Math.round(discountAmount * 100) / 100,
-            total: Math.round((cartSubtotal - discountAmount) * 100) / 100,
-            payment_method: "cash",
-            notes: "Voided sale from POS",
-            reason,
-          })
+      const voidSale = await saleService.voidTransaction(initiatedSaleId, reason)
 
       const receiptNumber =
         voidSale._raw?.receipt_number ||
@@ -1427,6 +1418,13 @@ export function BarPOS() {
             New Tab
           </Button>
         
+          {/* Till Name - Right Corner */}
+          {tillName && (
+            <div className="ml-auto font-bold text-sm">
+              {tillName.toUpperCase()}
+            </div>
+          )}
+        
           
           
         
@@ -1441,6 +1439,59 @@ export function BarPOS() {
           {/* Products View */}
           {activeView === "products" && (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              {/* Search Bar */}
+              <div className="border-b bg-card p-2 flex-shrink-0">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    ref={searchInputRef}
+                    placeholder="Search drinks by name, SKU, or barcode..."
+                    className="pl-9 w-full"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onFocus={() => setShowSearchDropdown(searchResults.length > 0)}
+                    onBlur={() => setTimeout(() => setShowSearchDropdown(false), 120)}
+                    onKeyDown={(e) => { if (e.key === "Escape") setShowSearchDropdown(false) }}
+                    autoFocus
+                  />
+                  {showSearchDropdown && searchResults.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-[320px] overflow-y-auto">
+                      {searchResults.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          className="w-full px-3 py-2 text-left hover:bg-accent border-b last:border-b-0 transition-colors"
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            handleAddItemToTab(product)
+                            setSearchTerm("")
+                            setShowSearchDropdown(false)
+                            setTimeout(() => searchInputRef.current?.focus(), 100)
+                          }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">{product.name}</div>
+                              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                                {product.sku && <span>SKU: {product.sku}</span>}
+                                {product.barcode && <span>Barcode: {product.barcode}</span>}
+                                {product.stock !== undefined && (
+                                  <span className={product.stock <= 10 ? "text-destructive font-medium" : ""}>
+                                    Stock: {product.stock}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="ml-3 text-right">
+                              <div className="font-bold text-sm">{formatCurrency(product.price, currentBusiness)}</div>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
               <div className="flex-1 flex min-h-0 overflow-hidden">
                 {/* Category Sidebar - Fixed */}
                 <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2 flex flex-col gap-2">
@@ -1702,64 +1753,6 @@ export function BarPOS() {
               </div>
             )}
 
-            {activeView === "products" && (
-              <div className="mt-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    ref={searchInputRef}
-                    placeholder="Search drinks by name, SKU, or barcode..."
-                    className="pl-9"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    onFocus={() => setShowSearchDropdown(searchResults.length > 0)}
-                    onBlur={() => setTimeout(() => setShowSearchDropdown(false), 120)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setShowSearchDropdown(false)
-                      }
-                    }}
-                  />
-
-                  {showSearchDropdown && searchResults.length > 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-popover border rounded-lg shadow-lg max-h-[320px] overflow-y-auto">
-                      {searchResults.map((product) => (
-                        <button
-                          key={product.id}
-                          type="button"
-                          className="w-full px-3 py-2 text-left hover:bg-accent border-b last:border-b-0 transition-colors"
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            handleAddItemToTab(product)
-                            setSearchTerm("")
-                            setShowSearchDropdown(false)
-                            setTimeout(() => searchInputRef.current?.focus(), 100)
-                          }}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-sm truncate">{product.name}</div>
-                              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                                {product.sku && <span>SKU: {product.sku}</span>}
-                                {product.barcode && <span>Barcode: {product.barcode}</span>}
-                                {product.stock !== undefined && (
-                                  <span className={product.stock <= 10 ? "text-destructive font-medium" : ""}>
-                                    Stock: {product.stock}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="ml-3 text-right">
-                              <div className="font-bold text-sm">{formatCurrency(product.price, currentBusiness)}</div>
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Cart Items - SCROLLABLE */}
@@ -1873,15 +1866,6 @@ export function BarPOS() {
             {/* Quick Tab Actions (when tab is selected) */}
             {currentTab && (
               <div className="flex gap-1">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 text-xs"
-                  onClick={() => setShowDiscountModal(true)}
-                >
-                  <Percent className="h-3 w-3 mr-1" />
-                  Discount
-                </Button>
                 <Button
                   variant="outline"
                   size="sm"
