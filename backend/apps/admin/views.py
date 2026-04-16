@@ -6,6 +6,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db.models import Count, Sum, Q
 from django.db.models.deletion import ProtectedError
+from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from datetime import timedelta
@@ -59,11 +60,25 @@ class AdminTenantViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'name']
     ordering = ['-created_at']
 
+    def _purge_tenant_dependencies(self, tenant):
+        from apps.bar.models import Tab, TabItem
+        from apps.distribution.models import DeliveryOrder, DeliveryOrderItem, Trip
+        from apps.storefronts.models import Storefront
+
+        Storefront.objects.filter(tenant=tenant).delete()
+        Trip.objects.filter(tenant=tenant).delete()
+        DeliveryOrderItem.objects.filter(tenant=tenant).delete()
+        DeliveryOrder.objects.filter(tenant=tenant).delete()
+        TabItem.objects.filter(tab__tenant=tenant).delete()
+        Tab.objects.filter(tenant=tenant).delete()
+
     def destroy(self, request, *args, **kwargs):
         """Delete tenant safely and return a user-friendly conflict when protected relations exist."""
         instance = self.get_object()
         try:
-            self.perform_destroy(instance)
+            with transaction.atomic():
+                self._purge_tenant_dependencies(instance)
+                self.perform_destroy(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ProtectedError as exc:
             blocked_models = sorted({obj.__class__.__name__ for obj in exc.protected_objects})
