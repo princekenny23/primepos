@@ -208,32 +208,65 @@ def create_user(request):
         try:
             from apps.staff.models import Staff, StaffOutletRole, Role
             from apps.outlets.models import Outlet
+            from apps.accounts.models import create_default_roles_for_tenant
+            import logging
+            logger = logging.getLogger(__name__)
             
             outlet = Outlet.objects.get(pk=outlet_id, tenant=tenant)
-            # Reuse the auto-created staff profile when present and assign the selected outlet.
+            
+            # Get or create staff profile
             staff, _ = Staff.objects.get_or_create(
                 user=user,
                 tenant=tenant,
                 defaults={"is_active": True},
             )
 
-            # Keep Staff role aligned with the role chosen during onboarding/user creation.
+            # CRITICAL: Ensure default roles exist for this tenant
+            # This handles cases where tenant was created before this code existed
+            # or if the signal failed silently
+            existing_roles = Role.objects.filter(tenant=tenant, is_active=True)
+            if not existing_roles.exists():
+                logger.warning(f"No roles found for tenant {tenant.id}, creating defaults...")
+                create_default_roles_for_tenant(tenant)
+
+            # Assign the appropriate role based on user.role string
             role_keyword_map = {
                 'admin': 'admin',
                 'manager': 'manager',
                 'cashier': 'cashier',
                 'staff': 'staff',
             }
-            role_keyword = role_keyword_map.get((user.role or '').lower())
-            if role_keyword:
+            role_keyword = role_keyword_map.get((user.role or '').lower(), 'staff')
+            
+            matched_role = Role.objects.filter(
+                tenant=tenant,
+                is_active=True,
+                name__icontains=role_keyword,
+            ).first()
+            
+            # FALLBACK: If no matching role found, use Admin (safest default) and log
+            if not matched_role:
+                logger.warning(
+                    f"No role found for keyword '{role_keyword}' in tenant {tenant.id}. "
+                    f"Falling back to Admin role."
+                )
                 matched_role = Role.objects.filter(
                     tenant=tenant,
                     is_active=True,
-                    name__icontains=role_keyword,
+                    name__icontains='admin',
                 ).first()
-                if matched_role and staff.role_id != matched_role.id:
+            
+            # ALWAYS assign role to staff (critical for permission system)
+            if matched_role:
+                if staff.role_id != matched_role.id:
                     staff.role = matched_role
                     staff.save(update_fields=['role', 'updated_at'])
+                    logger.info(f"Assigned role '{matched_role.name}' to staff {staff.id} for user {user.email}")
+            else:
+                logger.error(
+                    f"CRITICAL: Could not assign any role to staff {staff.id} (user {user.email}). "
+                    f"Tenant {tenant.id} has no default roles! User will have NO permissions."
+                )
 
             StaffOutletRole.objects.update_or_create(
                 staff=staff,
@@ -244,7 +277,7 @@ def create_user(request):
             # Log error but don't fail user creation
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to assign outlet for user {user.id}: {str(e)}")
+            logger.error(f"Failed to assign outlet/role for user {user.id}: {str(e)}", exc_info=True)
     
     serializer = UserSerializer(user)
     response_data = {

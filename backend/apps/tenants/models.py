@@ -109,12 +109,16 @@ def create_default_tenant_roles(sender, instance, created, **kwargs):
     """Automatically create default roles for a new tenant"""
     if created:
         from apps.accounts.models import create_default_roles_for_tenant
+        import logging
+        logger = logging.getLogger(__name__)
         try:
-            create_default_roles_for_tenant(instance)
+            roles_created = create_default_roles_for_tenant(instance)
+            logger.info(f"Created {len(roles_created)} default roles for tenant {instance.id} ({instance.name})")
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to create default roles for tenant {instance.id}: {str(e)}")
+            logger.error(
+                f"FAILED to create default roles for tenant {instance.id} ({instance.name}): {str(e)}",
+                exc_info=True
+            )
 
 
 class TenantPermissions(models.Model):
