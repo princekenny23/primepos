@@ -235,6 +235,7 @@ def create_user(request):
                 'manager': 'manager',
                 'cashier': 'cashier',
                 'staff': 'staff',
+                'driver': 'driver',
             }
             role_keyword = role_keyword_map.get((user.role or '').lower(), 'staff')
             
