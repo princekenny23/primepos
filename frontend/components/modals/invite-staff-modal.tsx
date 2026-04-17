@@ -87,7 +87,7 @@ export function InviteStaffModal({ open, onOpenChange }: InviteStaffModalProps) 
                   <SelectItem value="manager">Manager</SelectItem>
                   <SelectItem value="staff">Staff</SelectItem>
                   <SelectItem value="cashier">Cashier</SelectItem>
-                  <SelectItem value="supervisor">Supervisor</SelectItem>
+                  <SelectItem value="driver">Driver</SelectItem>
                 </SelectContent>
               </Select>
             </div>

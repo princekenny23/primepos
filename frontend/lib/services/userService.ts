@@ -6,7 +6,7 @@ export interface CreateUserData {
   name: string
   username?: string
   phone?: string
-  role?: "admin" | "manager" | "cashier" | "staff"
+  role?: "admin" | "manager" | "cashier" | "staff" | "driver"
   tenant: string  // Tenant ID
   outlet?: string  // Optional Outlet ID for Staff assignment
   password?: string  // Optional, will generate if not provided
@@ -20,7 +20,7 @@ export interface CreateUserResponse {
 export interface UpdateUserData {
   name?: string
   phone?: string
-  role?: "admin" | "manager" | "cashier" | "staff"
+  role?: "admin" | "manager" | "cashier" | "staff" | "driver"
   password?: string
 }
 

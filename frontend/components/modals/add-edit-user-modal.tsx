@@ -11,6 +11,13 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { User, Mail, Phone, Eye, EyeOff } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
@@ -38,7 +45,7 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
     lastName: "",
     email: "",
     phone: "",
-    role: "staff" as "admin" | "manager" | "cashier" | "staff",
+    role: "staff" as "admin" | "manager" | "cashier" | "staff" | "driver",
     password: "",
     confirmPassword: "",
   })
@@ -275,6 +282,24 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
                   onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 />
               </div>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="role">Role *</Label>
+              <Select
+                value={formData.role}
+                onValueChange={(value) => setFormData({ ...formData, role: value as typeof formData.role })}
+              >
+                <SelectTrigger id="role">
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Administrator</SelectItem>
+                  <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="cashier">Cashier</SelectItem>
+                  <SelectItem value="staff">Staff</SelectItem>
+                  <SelectItem value="driver">Driver</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {!user && (

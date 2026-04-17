@@ -50,7 +50,7 @@ export interface User {
   email: string
   name: string
   phone?: string
-  role: "admin" | "manager" | "cashier" | "staff"
+  role: "admin" | "manager" | "cashier" | "staff" | "driver"
   effective_role?: string
   businessId: string
   outletIds: string[]
@@ -236,7 +236,7 @@ export interface Staff {
   name: string
   email: string
   phone?: string
-  role: "admin" | "manager" | "cashier" | "staff"
+  role: "admin" | "manager" | "cashier" | "staff" | "driver"
   outletIds: string[]
   isActive: boolean
   createdAt: string

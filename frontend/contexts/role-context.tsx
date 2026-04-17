@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react"
 import { useAuthStore } from "@/stores/authStore"
 
-type UserRole = "admin" | "cashier" | "staff" | "manager"
+type UserRole = "admin" | "cashier" | "staff" | "manager" | "driver"
 
 interface RoleContextType {
   role: UserRole
@@ -31,6 +31,7 @@ export function RoleProvider({ children }: RoleProviderProps) {
     if (lower.includes("admin")) return "admin"
     if (lower.includes("manager")) return "manager"
     if (lower.includes("cashier")) return "cashier"
+    if (lower.includes("driver")) return "driver"
     if (lower.includes("staff")) return "staff"
     return null
   }

@@ -15,6 +15,7 @@ const normalizeRole = (value?: string, isSaasAdmin?: boolean): string => {
   if (lower.includes("admin")) return "admin"
   if (lower.includes("manager")) return "manager"
   if (lower.includes("cashier")) return "cashier"
+  if (lower.includes("driver")) return "driver"
   if (lower.includes("staff")) return "staff"
   return "staff"
 }

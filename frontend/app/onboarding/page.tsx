@@ -77,7 +77,7 @@ function OnboardingPageContent() {
     phone: "",
     password: "",
     confirmPassword: "",
-    role: "admin" as "admin" | "manager" | "cashier" | "staff",
+    role: "admin" as "admin" | "manager" | "cashier" | "staff" | "driver",
   })
   
   useEffect(() => {
@@ -717,6 +717,7 @@ function OnboardingPageContent() {
                         <SelectItem value="manager">Manager</SelectItem>
                         <SelectItem value="cashier">Cashier</SelectItem>
                         <SelectItem value="staff">Staff</SelectItem>
+                        <SelectItem value="driver">Driver</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

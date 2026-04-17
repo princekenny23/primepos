@@ -25,6 +25,7 @@ export function RoleSwitcher() {
           <SelectItem value="manager">Manager</SelectItem>
           <SelectItem value="cashier">Cashier</SelectItem>
           <SelectItem value="staff">Staff</SelectItem>
+          <SelectItem value="driver">Driver</SelectItem>
         </SelectContent>
       </Select>
     </div>
