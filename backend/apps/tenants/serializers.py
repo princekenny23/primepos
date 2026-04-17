@@ -68,6 +68,15 @@ class TenantSerializer(serializers.ModelSerializer):
         result = []
         
         for user in users:
+            staff_profile = user.staff_profiles.filter(tenant_id=obj.id).first()
+            outlet_ids = []
+            if staff_profile:
+                outlet_ids = [
+                    str(outlet_id)
+                    for outlet_id in staff_profile.outlet_roles.values_list('outlet_id', flat=True)
+                    if outlet_id is not None
+                ]
+
             user_data = {
                 'id': user.id,
                 'email': user.email,
@@ -80,6 +89,7 @@ class TenantSerializer(serializers.ModelSerializer):
                 'is_active': user.is_active,
                 'date_joined': user.date_joined.isoformat() if user.date_joined else None,
                 'permissions': user.get_permissions(),
+                'outlet_ids': outlet_ids,
             }
             
             # Add staff role information if available

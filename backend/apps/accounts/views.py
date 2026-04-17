@@ -206,22 +206,25 @@ def create_user(request):
     outlet_id = request.data.get('outlet')
     if outlet_id:
         try:
-            from apps.staff.models import Staff
+            from apps.staff.models import Staff, StaffOutletRole
             from apps.outlets.models import Outlet
             
             outlet = Outlet.objects.get(pk=outlet_id, tenant=tenant)
-            # Create Staff record to link user to tenant and outlet
-            staff = Staff.objects.create(
+            # Reuse the auto-created staff profile when present and assign the selected outlet.
+            staff, _ = Staff.objects.get_or_create(
                 user=user,
-                tenant=tenant,  # Use tenant instance, not tenant_id
+                tenant=tenant,
+                defaults={"is_active": True},
             )
-            staff.outlets.add(outlet)
-            staff.save()
+            StaffOutletRole.objects.get_or_create(
+                staff=staff,
+                outlet=outlet,
+            )
         except Exception as e:
             # Log error but don't fail user creation
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to create Staff record for user {user.id}: {str(e)}")
+            logger.warning(f"Failed to assign outlet for user {user.id}: {str(e)}")
     
     serializer = UserSerializer(user)
     response_data = {
