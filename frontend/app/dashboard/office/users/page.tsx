@@ -527,18 +527,19 @@ export default function AccountsPage() {
                         <TableHead className="text-gray-900 font-semibold">Role</TableHead>
                         <TableHead className="text-gray-900 font-semibold">Outlets</TableHead>
                         <TableHead className="text-gray-900 font-semibold">Status</TableHead>
+                        <TableHead className="text-gray-900 font-semibold">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {isStaffLoading ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center py-8">
+                          <TableCell colSpan={6} className="text-center py-8">
                             <p className="text-gray-600">Loading staff...</p>
                           </TableCell>
                         </TableRow>
                       ) : filteredStaff.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center py-8">
+                          <TableCell colSpan={6} className="text-center py-8">
                             <p className="text-gray-600">No staff found</p>
                           </TableCell>
                         </TableRow>
@@ -555,6 +556,19 @@ export default function AccountsPage() {
                               <span className={`px-2 py-1 rounded-full text-xs ${staff.is_active ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}`}>
                                 {staff.is_active ? "Active" : "Inactive"}
                               </span>
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setSelectedStaff(staff)
+                                  setShowAddStaff(true)
+                                }}
+                                aria-label={`Edit role for ${staff.user?.name || staff.user?.email || "staff member"}`}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
                             </TableCell>
                           </TableRow>
                         ))

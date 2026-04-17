@@ -206,7 +206,7 @@ def create_user(request):
     outlet_id = request.data.get('outlet')
     if outlet_id:
         try:
-            from apps.staff.models import Staff, StaffOutletRole
+            from apps.staff.models import Staff, StaffOutletRole, Role
             from apps.outlets.models import Outlet
             
             outlet = Outlet.objects.get(pk=outlet_id, tenant=tenant)
@@ -216,9 +216,29 @@ def create_user(request):
                 tenant=tenant,
                 defaults={"is_active": True},
             )
-            StaffOutletRole.objects.get_or_create(
+
+            # Keep Staff role aligned with the role chosen during onboarding/user creation.
+            role_keyword_map = {
+                'admin': 'admin',
+                'manager': 'manager',
+                'cashier': 'cashier',
+                'staff': 'staff',
+            }
+            role_keyword = role_keyword_map.get((user.role or '').lower())
+            if role_keyword:
+                matched_role = Role.objects.filter(
+                    tenant=tenant,
+                    is_active=True,
+                    name__icontains=role_keyword,
+                ).first()
+                if matched_role and staff.role_id != matched_role.id:
+                    staff.role = matched_role
+                    staff.save(update_fields=['role', 'updated_at'])
+
+            StaffOutletRole.objects.update_or_create(
                 staff=staff,
                 outlet=outlet,
+                defaults={'role_id': staff.role_id},
             )
         except Exception as e:
             # Log error but don't fail user creation
