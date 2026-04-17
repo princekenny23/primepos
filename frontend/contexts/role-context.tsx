@@ -14,56 +14,7 @@ interface RoleContextType {
 
 const RoleContext = createContext<RoleContextType | undefined>(undefined)
 
-// Role permissions mapping
-const rolePermissions: Record<UserRole, string[]> = {
-  admin: [
-    "dashboard",
-    "sales",
-    "inventory",
-    "distribution",
-    "outlets",
-    "office",
-    "settings",
-    "products",
-    "pos",
-    "notifications",
-    "activity-log",
-    "storefront",
-    "switch_outlet",
-  ],
-  manager: [
-    "dashboard",
-    "sales",
-    "inventory",
-    "distribution",
-    "outlets",
-    "office",
-    "products",
-    "pos",
-    "notifications",
-    "activity-log",
-    "storefront",
-    "switch_outlet",
-  ],
-  cashier: [
-    "dashboard",
-    "sales",
-    "distribution",
-    "office",
-    "pos",
-    "notifications",
-    "switch_outlet",
-  ],
-  staff: [
-    "dashboard",
-    "sales",
-    "inventory",
-    "distribution",
-    "products",
-    "pos",
-    "notifications",
-  ],
-}
+// No static role permissions — all access is driven by staff role can_* flags from the backend.
 
 interface RoleProviderProps {
   children: React.ReactNode
@@ -102,7 +53,7 @@ export function RoleProvider({ children }: RoleProviderProps) {
 
     if (typeof window !== "undefined") {
       const savedRole = localStorage.getItem("userRole") as UserRole | null
-      if (savedRole && rolePermissions[savedRole]) {
+      if (savedRole) {
         setRole(savedRole)
       } else {
         setRole("staff")
@@ -139,9 +90,11 @@ export function RoleProvider({ children }: RoleProviderProps) {
       if (key) {
         return Boolean(userPermissions[key])
       }
+      // Unknown permission key — deny by default
+      return false
     }
-    const permissions = rolePermissions[role] || []
-    return permissions.includes(permission)
+    // No permissions object from backend — deny by default (user data not yet loaded)
+    return false
   }
 
   const handleSetRole = (newRole: UserRole) => {

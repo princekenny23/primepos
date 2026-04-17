@@ -205,6 +205,18 @@ export function isTenantFeatureEnabled(
   return isOutletModulePermissionEnabled(permissionKey, outlet)
 }
 
+/**
+ * Helper: check a user's can_* permission flag from their staff role.
+ * Returns true for saas_admin, false if no permissions object loaded yet.
+ */
+function userCan(user: User | null | undefined, flag: string): boolean {
+  if (!user) return false
+  if ((user as any).is_saas_admin) return true
+  const perms = (user as any)?.permissions
+  if (!perms) return false
+  return Boolean(perms[flag])
+}
+
 export function canAccessTenantPath(
   user: User | null | undefined,
   pathname: string,
@@ -225,7 +237,11 @@ export function canAccessTenantPath(
     }
   }
 
+  // Deny access to the whole dashboard if can_dashboard is off
+  if (pathname.startsWith("/dashboard") && !userCan(user, "can_dashboard")) return false
+
   if (pathname.startsWith("/dashboard/sales")) {
+    if (!userCan(user, "can_sales")) return false
     if (!isTenantFeatureEnabled(user, "allow_sales", outlet)) return false
     if (pathname.startsWith("/dashboard/sales/credits") && !isTenantFeatureEnabled(user, "allow_sales_create", outlet)) return false
     if (pathname.startsWith("/dashboard/sales/returns") && !isTenantFeatureEnabled(user, "allow_sales_refund", outlet)) return false
@@ -236,9 +252,13 @@ export function canAccessTenantPath(
 
   if (pathname.startsWith("/dashboard/returns") && !isTenantFeatureEnabled(user, "allow_sales_refund", outlet)) return false
   if (pathname.startsWith("/dashboard/discounts") && !isTenantFeatureEnabled(user, "allow_pos_discounts", outlet)) return false
-  if (pathname.startsWith("/dashboard/reports") && !isTenantFeatureEnabled(user, "allow_sales_reports", outlet)) return false
+  if (pathname.startsWith("/dashboard/reports")) {
+    if (!userCan(user, "can_reports")) return false
+    if (!isTenantFeatureEnabled(user, "allow_sales_reports", outlet)) return false
+  }
 
   if (pathname.startsWith("/dashboard/pos") || pathname.startsWith("/pos/") || pathname.startsWith("/dashboard/restaurant") || pathname.startsWith("/dashboard/bar")) {
+    if (!userCan(user, "can_sales")) return false
     if (!isTenantFeatureEnabled(user, "allow_pos", outlet)) return false
     const hasAnyPosMode =
       isTenantFeatureEnabled(user, "allow_pos_retail", outlet) ||
@@ -250,11 +270,13 @@ export function canAccessTenantPath(
   }
 
   if (pathname.startsWith("/dashboard/retail")) {
+    if (!userCan(user, "can_sales")) return false
     if (!isTenantFeatureEnabled(user, "allow_pos", outlet)) return false
     if (!isTenantFeatureEnabled(user, "allow_pos_retail", outlet)) return false
   }
 
   if (pathname.startsWith("/dashboard/inventory")) {
+    if (!userCan(user, "can_inventory")) return false
     if (!isTenantFeatureEnabled(user, "allow_inventory", outlet)) return false
     if (pathname.startsWith("/dashboard/inventory/products") && !isTenantFeatureEnabled(user, "allow_inventory_products", outlet)) return false
     if (pathname.startsWith("/dashboard/inventory/stock-taking") && !isTenantFeatureEnabled(user, "allow_inventory_stock_take", outlet)) return false
@@ -268,11 +290,13 @@ export function canAccessTenantPath(
   }
 
   if (pathname.startsWith("/dashboard/distribution")) {
+    if (!userCan(user, "can_dashboard")) return false
     if (!isTenantFeatureEnabled(user, "has_distribution", outlet)) return false
     if (!isDistributionEnabledForOutlet(user, outlet)) return false
   }
 
   if (pathname.startsWith("/dashboard/storefront")) {
+    if (!userCan(user, "can_storefront")) return false
     if (!isTenantFeatureEnabled(user, "allow_storefront", outlet)) return false
     if (pathname.startsWith("/dashboard/storefront/sites") && !isTenantFeatureEnabled(user, "allow_storefront_sites", outlet)) return false
     if (pathname.startsWith("/dashboard/storefront/orders") && !isTenantFeatureEnabled(user, "allow_storefront_orders", outlet)) return false
@@ -281,6 +305,7 @@ export function canAccessTenantPath(
   }
 
   if (pathname.startsWith("/dashboard/office")) {
+    if (!userCan(user, "can_staff")) return false
     if (!isTenantFeatureEnabled(user, "allow_office", outlet)) return false
     if (pathname.startsWith("/dashboard/office/users") && !isTenantFeatureEnabled(user, "allow_office_users", outlet)) return false
     if (pathname.startsWith("/dashboard/office/staff") && !isTenantFeatureEnabled(user, "allow_office_users", outlet)) return false
@@ -291,6 +316,7 @@ export function canAccessTenantPath(
   }
 
   if (pathname.startsWith("/dashboard/settings")) {
+    if (!userCan(user, "can_settings")) return false
     if (!isTenantFeatureEnabled(user, "allow_settings", outlet)) return false
     if (pathname.startsWith("/dashboard/settings/outlets-and-tills-management") && !isTenantFeatureEnabled(user, "allow_settings_outlets", outlet)) return false
     if (pathname.startsWith("/dashboard/settings/integrations") && !isTenantFeatureEnabled(user, "allow_settings_integrations", outlet)) return false

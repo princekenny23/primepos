@@ -73,21 +73,12 @@ class User(AbstractUser):
         if self.is_saas_admin or self.is_superuser:
             return True
         
-        # Check through staff role
+        # Check through staff role — single source of truth
         staff_role = self.staff_role
         if staff_role:
             return getattr(staff_role, permission, False)
         
-        # Fallback to basic role checking for backward compatibility
-        if self.role == 'admin':
-            return True
-        elif self.role == 'manager':
-            return permission in ['can_sales', 'can_inventory', 'can_products', 'can_customers', 'can_reports', 'can_dashboard', 'can_storefront', 'can_switch_outlet']
-        elif self.role == 'cashier':
-            return permission in ['can_sales', 'can_customers', 'can_dashboard', 'can_switch_outlet']
-        elif self.role == 'staff':
-            return permission in ['can_sales', 'can_dashboard', 'can_switch_outlet']
-        
+        # No staff role assigned — deny all non-admin access
         return False
     
     def get_permissions(self):
@@ -113,37 +104,14 @@ class User(AbstractUser):
         if self.is_saas_admin or self.is_superuser:
             return {key: True for key in permissions}
         
-        # Check through staff role
+        # Check through staff role — single source of truth
         staff_role = self.staff_role
         if staff_role:
             for key in permissions:
                 permissions[key] = getattr(staff_role, key, False)
             return permissions
         
-        # Fallback to basic role checking
-        if self.role == 'admin':
-            permissions = {key: True for key in permissions}
-        elif self.role == 'manager':
-            permissions.update({
-                'can_sales': True,
-                'can_inventory': True,
-                'can_products': True,
-                'can_customers': True,
-                'can_reports': True,
-                'can_dashboard': True,
-            })
-        elif self.role == 'cashier':
-            permissions.update({
-                'can_sales': True,
-                'can_customers': True,
-                'can_dashboard': True,
-            })
-        elif self.role == 'staff':
-            permissions.update({
-                'can_sales': True,
-                'can_dashboard': True,
-            })
-        
+        # No staff role assigned — all permissions denied
         return permissions
 
 
