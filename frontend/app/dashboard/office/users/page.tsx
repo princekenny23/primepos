@@ -880,6 +880,52 @@ export default function AccountsPage() {
                           </div>
                         </div>
 
+                        {/* Distribution */}
+                        <div className="space-y-3">
+                          <h4 className="font-semibold text-base">Distribution</h4>
+                          <div className="space-y-2 pl-4">
+                            <div className="flex items-center gap-2">
+                              {role.can_distribution ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                              )}
+                              <span className="text-sm">Access Distribution Workspace</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Business-Specific POS */}
+                        <div className="space-y-3">
+                          <h4 className="font-semibold text-base">Business-Specific POS</h4>
+                          <div className="space-y-2 pl-4">
+                            <div className="flex items-center gap-2">
+                              {role.can_pos_retail ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                              )}
+                              <span className="text-sm">Retail POS</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {role.can_pos_restaurant ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                              )}
+                              <span className="text-sm">Restaurant POS</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {role.can_pos_bar ? (
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
+                              )}
+                              <span className="text-sm">Bar POS</span>
+                            </div>
+                          </div>
+                        </div>
+
                         {/* Switch Outlet */}
                         <div className="space-y-3">
                           <h4 className="font-semibold text-base">Switch Outlet</h4>

@@ -32,7 +32,7 @@ export const userService = {
       username: data.username || data.email.split('@')[0],
       name: data.name,
       phone: data.phone || "",
-      role: data.role || "admin",
+      role: data.role || "staff",
       tenant: data.tenant,
     }
     

@@ -48,7 +48,7 @@ export const fullNavigation: NavigationItem[] = [
   { name: "Sales / POS", href: "/dashboard/pos", icon: Monitor, permission: "pos" },
   { name: "Inventory", href: "/dashboard/inventory", icon: Package, permission: "inventory" },
   { name: "Distribution", href: "/dashboard/distribution", icon: Package2, permission: "distribution" },
-  { name: "Storefront", href: "/dashboard/storefront", icon: Store, permission: "office" },
+  { name: "Storefront", href: "/dashboard/storefront", icon: Store, permission: "storefront" },
   { name: "Office", href: "/dashboard/office", icon: Building2, permission: "office" },
   { name: "Settings", href: "/dashboard/settings", icon: Settings, permission: "settings" },
 ]
@@ -64,12 +64,12 @@ export const universalNavigation: NavigationItem[] = [
 
 // Restaurant-specific navigation items - Now consolidated into landing page
 export const restaurantNavigation: NavigationItem[] = [
-  { name: "Restaurant", href: "/dashboard/restaurant", icon: UtensilsCrossed, permission: "pos" },
+  { name: "Restaurant", href: "/dashboard/restaurant", icon: UtensilsCrossed, permission: "pos_restaurant" },
 ]
 
 // Bar-specific navigation items - Now consolidated into landing page
 export const barNavigation: NavigationItem[] = [
-  { name: "Bar", href: "/dashboard/bar", icon: Wine, permission: "pos" },
+  { name: "Bar", href: "/dashboard/bar", icon: Wine, permission: "pos_bar" },
 ]
 
 /**

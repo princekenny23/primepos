@@ -265,12 +265,15 @@ export function canAccessTenantPath(
       isTenantFeatureEnabled(user, "allow_pos_restaurant", outlet) ||
       isTenantFeatureEnabled(user, "allow_pos_bar", outlet)
     if (!hasAnyPosMode) return false
+    if (pathname.startsWith("/dashboard/restaurant") && !userCan(user, "can_pos_restaurant")) return false
+    if (pathname.startsWith("/dashboard/bar") && !userCan(user, "can_pos_bar")) return false
     if (pathname.startsWith("/dashboard/restaurant") && !isTenantFeatureEnabled(user, "allow_pos_restaurant", outlet)) return false
     if (pathname.startsWith("/dashboard/bar") && !isTenantFeatureEnabled(user, "allow_pos_bar", outlet)) return false
   }
 
   if (pathname.startsWith("/dashboard/retail")) {
     if (!userCan(user, "can_sales")) return false
+    if (!userCan(user, "can_pos_retail")) return false
     if (!isTenantFeatureEnabled(user, "allow_pos", outlet)) return false
     if (!isTenantFeatureEnabled(user, "allow_pos_retail", outlet)) return false
   }
@@ -290,7 +293,7 @@ export function canAccessTenantPath(
   }
 
   if (pathname.startsWith("/dashboard/distribution")) {
-    if (!userCan(user, "can_dashboard")) return false
+    if (!userCan(user, "can_distribution")) return false
     if (!isTenantFeatureEnabled(user, "has_distribution", outlet)) return false
     if (!isDistributionEnabledForOutlet(user, outlet)) return false
   }

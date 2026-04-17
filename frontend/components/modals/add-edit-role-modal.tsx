@@ -43,6 +43,9 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
     can_dashboard: true,
     can_distribution: false,
     can_storefront: false,
+    can_pos_retail: true,
+    can_pos_restaurant: true,
+    can_pos_bar: true,
     can_switch_outlet: true,
     is_active: true,
   })
@@ -64,6 +67,9 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
           can_dashboard: role.can_dashboard !== undefined ? role.can_dashboard : true,
           can_distribution: role.can_distribution || false,
           can_storefront: role.can_storefront || false,
+          can_pos_retail: role.can_pos_retail !== undefined ? role.can_pos_retail : true,
+          can_pos_restaurant: role.can_pos_restaurant !== undefined ? role.can_pos_restaurant : true,
+          can_pos_bar: role.can_pos_bar !== undefined ? role.can_pos_bar : true,
           can_switch_outlet: role.can_switch_outlet !== undefined ? role.can_switch_outlet : true,
           is_active: role.is_active !== undefined ? role.is_active : true,
         })
@@ -82,6 +88,9 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
           can_dashboard: true,
           can_distribution: false,
           can_storefront: false,
+          can_pos_retail: true,
+          can_pos_restaurant: true,
+          can_pos_bar: true,
           can_switch_outlet: true,
           is_active: true,
         })
@@ -127,6 +136,9 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
         can_dashboard: formData.can_dashboard,
         can_distribution: formData.can_distribution,
         can_storefront: formData.can_storefront,
+        can_pos_retail: formData.can_pos_retail,
+        can_pos_restaurant: formData.can_pos_restaurant,
+        can_pos_bar: formData.can_pos_bar,
         can_switch_outlet: formData.can_switch_outlet,
         is_active: formData.is_active,
       }
@@ -315,6 +327,42 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
                     id="can_distribution"
                     checked={formData.can_distribution}
                     onCheckedChange={(checked) => setFormData({ ...formData, can_distribution: checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between space-x-2">
+                  <Label htmlFor="can_pos_retail" className="flex flex-col space-y-1">
+                    <span>Retail POS</span>
+                    <span className="font-normal text-xs text-muted-foreground">Access retail-specific POS screens</span>
+                  </Label>
+                  <Switch
+                    id="can_pos_retail"
+                    checked={formData.can_pos_retail}
+                    onCheckedChange={(checked) => setFormData({ ...formData, can_pos_retail: checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between space-x-2">
+                  <Label htmlFor="can_pos_restaurant" className="flex flex-col space-y-1">
+                    <span>Restaurant POS</span>
+                    <span className="font-normal text-xs text-muted-foreground">Access restaurant-specific POS screens</span>
+                  </Label>
+                  <Switch
+                    id="can_pos_restaurant"
+                    checked={formData.can_pos_restaurant}
+                    onCheckedChange={(checked) => setFormData({ ...formData, can_pos_restaurant: checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between space-x-2">
+                  <Label htmlFor="can_pos_bar" className="flex flex-col space-y-1">
+                    <span>Bar POS</span>
+                    <span className="font-normal text-xs text-muted-foreground">Access bar-specific POS screens</span>
+                  </Label>
+                  <Switch
+                    id="can_pos_bar"
+                    checked={formData.can_pos_bar}
+                    onCheckedChange={(checked) => setFormData({ ...formData, can_pos_bar: checked })}
                   />
                 </div>
 

@@ -106,6 +106,12 @@ export interface User {
     can_staff: boolean
     can_settings: boolean
     can_dashboard: boolean
+    can_distribution?: boolean
+    can_storefront?: boolean
+    can_pos_retail?: boolean
+    can_pos_restaurant?: boolean
+    can_pos_bar?: boolean
+    can_switch_outlet?: boolean
   }
   staff_role?: {
     id: string | number

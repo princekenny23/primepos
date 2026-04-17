@@ -19,7 +19,11 @@ class Role(models.Model):
     can_staff = models.BooleanField(default=False)
     can_settings = models.BooleanField(default=False)
     can_dashboard = models.BooleanField(default=True)
+    can_distribution = models.BooleanField(default=False)
     can_storefront = models.BooleanField(default=False)
+    can_pos_retail = models.BooleanField(default=True)
+    can_pos_restaurant = models.BooleanField(default=True)
+    can_pos_bar = models.BooleanField(default=True)
     can_switch_outlet = models.BooleanField(default=True)
     
     is_active = models.BooleanField(default=True)
