@@ -16,6 +16,7 @@ class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     serializer_class = RoleSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_settings']
+    required_permission_codes = ['roles.manage']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'is_active']
     search_fields = ['name', 'description']
@@ -102,6 +103,7 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     serializer_class = StaffSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_settings']
+    required_permission_codes = ['staff.manage']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'role', 'is_active']
     search_fields = ['user__name', 'user__email']

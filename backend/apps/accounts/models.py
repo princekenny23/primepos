@@ -45,19 +45,61 @@ class User(AbstractUser):
     def staff_role(self):
         """Get the user's Staff Role object (from staff app)"""
         try:
+            if self.tenant_id:
+                tenant_profile = self.staff_profiles.select_related('role').filter(tenant_id=self.tenant_id).first()
+                if tenant_profile and tenant_profile.role:
+                    return tenant_profile.role
+
             first_profile = self.staff_profiles.select_related('role').first()
-            if first_profile:
+            if first_profile and first_profile.role:
                 return first_profile.role
         except Exception:
             pass
+        return None
+
+    def _resolve_permission_role(self):
+        """Resolve the role used for permission checks.
+
+        Priority:
+        1) Tenant staff profile role
+        2) Tenant staff outlet-role assignment
+        3) Tenant Role matching accounts_user.role (case-insensitive)
+        """
+        try:
+            from apps.staff.models import Role
+
+            tenant_profile = None
+            if self.tenant_id:
+                tenant_profile = self.staff_profiles.select_related('role').filter(tenant_id=self.tenant_id).first()
+
+            if tenant_profile and tenant_profile.role and tenant_profile.role.is_active:
+                return tenant_profile.role
+
+            if tenant_profile:
+                outlet_assignment = tenant_profile.outlet_roles.select_related('role').filter(role__isnull=False).first()
+                if outlet_assignment and outlet_assignment.role and outlet_assignment.role.is_active:
+                    return outlet_assignment.role
+
+            role_name = (self.role or '').strip()
+            if self.tenant_id and role_name:
+                fallback_role = Role.objects.filter(
+                    tenant_id=self.tenant_id,
+                    is_active=True,
+                    name__iexact=role_name,
+                ).first()
+                if fallback_role:
+                    return fallback_role
+        except Exception:
+            pass
+
         return None
     
     @property
     def effective_role(self):
         """Get effective role - prefers staff_role, falls back to user.role"""
-        staff_role = self.staff_role
-        if staff_role:
-            return staff_role.name.lower()
+        permission_role = self._resolve_permission_role()
+        if permission_role:
+            return permission_role.name.lower()
         return self.role
     
     def has_permission(self, permission):
@@ -69,17 +111,19 @@ class User(AbstractUser):
         Returns:
             bool: True if user has permission
         """
-        # SaaS admins have all permissions
-        if self.is_saas_admin or self.is_superuser:
-            return True
-        
-        # Check through staff role — single source of truth
-        staff_role = self.staff_role
-        if staff_role:
-            return getattr(staff_role, permission, False)
-        
-        # No staff role assigned — deny all non-admin access
-        return False
+        from .rbac import user_has_legacy_permission, user_has_permission_code
+
+        # Support canonical permission code checks (e.g. users.create).
+        if '.' in str(permission):
+            return user_has_permission_code(self, str(permission))
+
+        # Legacy can_* compatibility path.
+        return user_has_legacy_permission(self, str(permission))
+
+    def get_permission_codes(self):
+        """Get canonical permission codes granted to this user."""
+        from .rbac import user_permission_codes
+        return sorted(user_permission_codes(self))
     
     def get_permissions(self):
         """Get dictionary of all permissions for this user
@@ -104,18 +148,8 @@ class User(AbstractUser):
             'can_switch_outlet': True,
         }
         
-        # SaaS admins have all permissions
-        if self.is_saas_admin or self.is_superuser:
-            return {key: True for key in permissions}
-        
-        # Check through staff role — single source of truth
-        staff_role = self.staff_role
-        if staff_role:
-            for key in permissions:
-                permissions[key] = getattr(staff_role, key, False)
-            return permissions
-        
-        # No staff role assigned — all permissions denied
+        for key in permissions:
+            permissions[key] = self.has_permission(key)
         return permissions
 
 
@@ -277,12 +311,16 @@ def create_default_roles_for_tenant(tenant):
     }
     
     created_roles = {}
+    from apps.accounts.rbac import ensure_permission_catalog, sync_role_permissions_from_legacy_flags
+    ensure_permission_catalog()
     for role_name, role_data in default_roles.items():
         role, _ = Role.objects.get_or_create(
             tenant=tenant,
             name=role_name,
             defaults=role_data
         )
+        # Keep canonical role permissions in sync with legacy defaults.
+        sync_role_permissions_from_legacy_flags(role)
         created_roles[role_name] = role
     
     return created_roles

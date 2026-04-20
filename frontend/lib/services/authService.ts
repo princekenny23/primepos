@@ -8,16 +8,14 @@ const mapBackendTypeToFrontend = (type: string | undefined): string => {
   return type
 }
 
-const normalizeRole = (value?: string, isSaasAdmin?: boolean): string => {
-  if (isSaasAdmin) return "admin"
-  if (!value) return "staff"
-  const lower = value.toLowerCase()
-  if (lower.includes("admin")) return "admin"
-  if (lower.includes("manager")) return "manager"
-  if (lower.includes("cashier")) return "cashier"
-  if (lower.includes("driver")) return "driver"
-  if (lower.includes("staff")) return "staff"
-  return "staff"
+const resolveRoleName = (backendUser: any, isSaasAdmin?: boolean): string => {
+  if (isSaasAdmin) return "saas_admin"
+  return String(
+    backendUser?.staff_role?.name ||
+      backendUser?.effective_role ||
+      backendUser?.role ||
+      "staff"
+  )
 }
 
 const extractUserOutletIds = (backendUser: any): string[] => {
@@ -87,11 +85,7 @@ export const authService = {
       }
       
       const isSaasAdmin = response.user?.is_saas_admin || false
-      const backendRole =
-        response.user?.effective_role ||
-        response.user?.role ||
-        response.user?.staff_role?.name
-      const resolvedRole = normalizeRole(backendRole, isSaasAdmin)
+      const resolvedRole = resolveRoleName(response.user, isSaasAdmin)
       const outletIds = extractUserOutletIds(response.user)
 
       // Transform backend user data to match frontend User type
@@ -100,8 +94,9 @@ export const authService = {
         email: response.user.email,
         name: response.user.name || response.user.username || response.user.email.split('@')[0],
         role: resolvedRole,
-        effective_role: response.user.effective_role || response.user.role || resolvedRole,
+        effective_role: response.user.effective_role || response.user.staff_role?.name || response.user.role || resolvedRole,
         permissions: response.user.permissions || undefined,
+        permission_codes: response.user.permission_codes || undefined,
         staff_role: response.user.staff_role || undefined,
         businessId: response.user.tenant ? String(response.user.tenant.id) : '',
         outletIds,
@@ -189,8 +184,7 @@ export const authService = {
   async getCurrentUser(): Promise<User> {
     const response = await api.get<any>(apiEndpoints.auth.me)
     const isSaasAdmin = response.is_saas_admin || false
-    const backendRole = response.effective_role || response.role || response?.staff_role?.name
-    const resolvedRole = normalizeRole(backendRole, isSaasAdmin)
+    const resolvedRole = resolveRoleName(response, isSaasAdmin)
     const outletIds = extractUserOutletIds(response)
     // Transform backend user data to match frontend User type
     return {
@@ -198,8 +192,9 @@ export const authService = {
       email: response.email,
       name: response.name || response.username || response.email.split('@')[0],
       role: resolvedRole,
-      effective_role: response.effective_role || response.role || resolvedRole,
+      effective_role: response.effective_role || response.staff_role?.name || response.role || resolvedRole,
       permissions: response.permissions || undefined,
+      permission_codes: response.permission_codes || undefined,
       staff_role: response.staff_role || undefined,
       businessId: response.tenant ? String(response.tenant.id) : '',
       outletIds,

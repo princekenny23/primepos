@@ -7,6 +7,7 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.db.models import Q
 from .serializers import CustomTokenObtainPairSerializer, RegisterSerializer, UserSerializer
+from .rbac import user_has_permission_code
 
 User = get_user_model()
 
@@ -158,6 +159,12 @@ def create_user(request):
     
     # Check permissions
     if not request.user.is_saas_admin:
+        if not user_has_permission_code(request.user, 'users.create'):
+            return Response(
+                {"detail": "You do not have permission to create users"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         # Regular users can only create users for their own tenant
         if not request.user.tenant or request.user.tenant.id != tenant.id:
             return Response(
@@ -198,87 +205,9 @@ def create_user(request):
         password=password,
         name=request.data.get('name', ''),
         phone=request.data.get('phone', ''),
-        role=request.data.get('role', 'admin'),
+        role=request.data.get('role', 'staff'),
         tenant=tenant,  # Pass Tenant instance, not ID
     )
-    
-    # Optionally create Staff record if outlet_id is provided
-    outlet_id = request.data.get('outlet')
-    if outlet_id:
-        try:
-            from apps.staff.models import Staff, StaffOutletRole, Role
-            from apps.outlets.models import Outlet
-            from apps.accounts.models import create_default_roles_for_tenant
-            import logging
-            logger = logging.getLogger(__name__)
-            
-            outlet = Outlet.objects.get(pk=outlet_id, tenant=tenant)
-            
-            # Get or create staff profile
-            staff, _ = Staff.objects.get_or_create(
-                user=user,
-                tenant=tenant,
-                defaults={"is_active": True},
-            )
-
-            # CRITICAL: Ensure default roles exist for this tenant
-            # This handles cases where tenant was created before this code existed
-            # or if the signal failed silently
-            existing_roles = Role.objects.filter(tenant=tenant, is_active=True)
-            if not existing_roles.exists():
-                logger.warning(f"No roles found for tenant {tenant.id}, creating defaults...")
-                create_default_roles_for_tenant(tenant)
-
-            # Assign the appropriate role based on user.role string
-            role_keyword_map = {
-                'admin': 'admin',
-                'manager': 'manager',
-                'cashier': 'cashier',
-                'staff': 'staff',
-                'driver': 'driver',
-            }
-            role_keyword = role_keyword_map.get((user.role or '').lower(), 'staff')
-            
-            matched_role = Role.objects.filter(
-                tenant=tenant,
-                is_active=True,
-                name__icontains=role_keyword,
-            ).first()
-            
-            # FALLBACK: If no matching role found, use Admin (safest default) and log
-            if not matched_role:
-                logger.warning(
-                    f"No role found for keyword '{role_keyword}' in tenant {tenant.id}. "
-                    f"Falling back to Admin role."
-                )
-                matched_role = Role.objects.filter(
-                    tenant=tenant,
-                    is_active=True,
-                    name__icontains='admin',
-                ).first()
-            
-            # ALWAYS assign role to staff (critical for permission system)
-            if matched_role:
-                if staff.role_id != matched_role.id:
-                    staff.role = matched_role
-                    staff.save(update_fields=['role', 'updated_at'])
-                    logger.info(f"Assigned role '{matched_role.name}' to staff {staff.id} for user {user.email}")
-            else:
-                logger.error(
-                    f"CRITICAL: Could not assign any role to staff {staff.id} (user {user.email}). "
-                    f"Tenant {tenant.id} has no default roles! User will have NO permissions."
-                )
-
-            StaffOutletRole.objects.update_or_create(
-                staff=staff,
-                outlet=outlet,
-                defaults={'role_id': staff.role_id},
-            )
-        except Exception as e:
-            # Log error but don't fail user creation
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to assign outlet/role for user {user.id}: {str(e)}", exc_info=True)
     
     serializer = UserSerializer(user)
     response_data = {
@@ -308,10 +237,23 @@ def update_user(request, user_id):
     
     # Check permissions
     if not request.user.is_saas_admin:
+        if not user_has_permission_code(request.user, 'users.update'):
+            return Response(
+                {"detail": "You do not have permission to update users"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         # Regular users can only update users in their own tenant
         if not request.user.tenant or user.tenant != request.user.tenant:
             return Response(
                 {"detail": "You can only update users in your own tenant"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+    if 'role' in request.data and not request.user.is_saas_admin:
+        if not user_has_permission_code(request.user, 'roles.assign'):
+            return Response(
+                {"detail": "You do not have permission to assign roles"},
                 status=status.HTTP_403_FORBIDDEN
             )
     
@@ -345,6 +287,12 @@ def delete_user(request, user_id):
     
     # Check permissions
     if not request.user.is_saas_admin:
+        if not user_has_permission_code(request.user, 'users.delete'):
+            return Response(
+                {"detail": "You do not have permission to delete users"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         # Regular users can only delete users in their own tenant
         if not request.user.tenant or user.tenant != request.user.tenant:
             return Response(

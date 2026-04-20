@@ -54,8 +54,6 @@ export default function DashboardPage() {
   const lastLoadKeyRef = useRef<string>("")
   const { user } = useAuthStore()
   const { hasPermission } = useRole()
-  const userRole = String(user?.effective_role || user?.role || "staff").toLowerCase()
-  const isAdminUser = Boolean(user?.is_saas_admin) || userRole.includes("admin")
   const tenantPermissions =
     user && typeof user.tenant === "object" && user.tenant !== null
       ? (user.tenant as any).permissions
@@ -67,19 +65,6 @@ export default function DashboardPage() {
   const canAccessPos = !tenantPermissions || user?.is_saas_admin || tenantPermissions.allow_pos !== false
   const canAccessDashboard = hasPermission("dashboard")
 
-  useEffect(() => {
-    if (canAccessDashboard) return
-    if (hasPermission("pos") && canAccessPos) {
-      router.replace("/dashboard/pos")
-      return
-    }
-    if (hasPermission("sales")) {
-      router.replace("/dashboard/sales")
-      return
-    }
-    router.replace("/onboarding/setup-business")
-  }, [canAccessDashboard, canAccessPos, hasPermission, router])
-  
   // Memoize outlet ID to prevent unnecessary re-renders
   const outletId = useMemo(() => {
     if (currentOutlet?.id) return String(currentOutlet.id)
@@ -117,7 +102,7 @@ export default function DashboardPage() {
     // Only redirect if we're on the main dashboard page, not if already on business-specific dashboard
     const currentPath = window.location.pathname
     if (currentPath === "/dashboard" || currentPath === "/dashboard/") {
-      if (!isAdminUser && canAccessPos) {
+      if (!canAccessDashboard && canAccessPos) {
         router.push("/dashboard/pos")
         return
       }
@@ -127,7 +112,7 @@ export default function DashboardPage() {
         return
       }
     }
-  }, [currentBusiness, outlet, posMode, router, isAdminUser, user, canAccessPos])
+  }, [currentBusiness, outlet, posMode, router, user, canAccessDashboard, canAccessPos])
   
   // Load dashboard data with optimized callback
   useEffect(() => {

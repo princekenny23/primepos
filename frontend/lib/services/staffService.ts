@@ -58,6 +58,8 @@ export interface Role {
   can_pos_restaurant: boolean
   can_pos_bar: boolean
   can_switch_outlet: boolean
+  effective_permission_codes?: string[]
+  permission_codes?: string[]
   is_active: boolean
   created_at: string
   updated_at: string

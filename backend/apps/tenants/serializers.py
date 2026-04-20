@@ -89,6 +89,7 @@ class TenantSerializer(serializers.ModelSerializer):
                 'is_active': user.is_active,
                 'date_joined': user.date_joined.isoformat() if user.date_joined else None,
                 'permissions': user.get_permissions(),
+                'permission_codes': user.get_permission_codes(),
                 'outlet_ids': outlet_ids,
             }
             

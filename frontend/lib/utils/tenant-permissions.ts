@@ -212,6 +212,36 @@ export function isTenantFeatureEnabled(
 function userCan(user: User | null | undefined, flag: string): boolean {
   if (!user) return false
   if ((user as any).is_saas_admin) return true
+
+  const codes = (user as any)?.permission_codes
+  if (Array.isArray(codes) && codes.length > 0) {
+    const flagToCodes: Record<string, string[]> = {
+      can_dashboard: ["dashboard.view"],
+      can_sales: ["sales.view", "sales.create"],
+      can_inventory: ["inventory.view", "inventory.manage"],
+      can_products: ["products.manage"],
+      can_customers: ["customers.manage"],
+      can_reports: ["reports.view"],
+      can_staff: ["staff.manage"],
+      can_settings: ["settings.manage"],
+      can_distribution: ["distribution.manage"],
+      can_storefront: ["storefront.manage"],
+      can_pos_retail: ["pos.retail"],
+      can_pos_restaurant: ["pos.restaurant"],
+      can_pos_bar: ["pos.bar"],
+      can_switch_outlet: ["outlet.switch"],
+    }
+
+    const expected = flagToCodes[flag] || []
+    if (expected.length > 0) {
+      const codeAllowed = expected.some((code) => codes.includes(code))
+      if (codeAllowed) {
+        return true
+      }
+      // Fall through to legacy can_* permissions during migration.
+    }
+  }
+
   const perms = (user as any)?.permissions
   if (!perms) return false
   return Boolean(perms[flag])
@@ -224,21 +254,8 @@ export function canAccessTenantPath(
 ): boolean {
   if (!pathname || pathname.startsWith("/admin") || pathname.startsWith("/auth")) return true
 
-  const role = (user?.effective_role || user?.role || "").toLowerCase()
-
-  if (role === "driver") {
-    if (
-      pathname.startsWith("/dashboard/inventory") ||
-      pathname.startsWith("/dashboard/settings") ||
-      pathname.startsWith("/dashboard/office") ||
-      pathname.startsWith("/dashboard/sales")
-    ) {
-      return false
-    }
-  }
-
-  // Deny access to the whole dashboard if can_dashboard is off
-  if (pathname.startsWith("/dashboard") && !userCan(user, "can_dashboard")) return false
+  // Dashboard access is not a global gate. Only the dashboard landing page requires can_dashboard.
+  if ((pathname === "/dashboard" || pathname === "/dashboard/") && !userCan(user, "can_dashboard")) return false
 
   if (pathname.startsWith("/dashboard/sales")) {
     if (!userCan(user, "can_sales")) return false
@@ -311,7 +328,7 @@ export function canAccessTenantPath(
     if (!userCan(user, "can_staff")) return false
     if (!isTenantFeatureEnabled(user, "allow_office", outlet)) return false
     if (pathname.startsWith("/dashboard/office/users") && !isTenantFeatureEnabled(user, "allow_office_users", outlet)) return false
-    if (pathname.startsWith("/dashboard/office/staff") && !isTenantFeatureEnabled(user, "allow_office_users", outlet)) return false
+    if (pathname.startsWith("/dashboard/office/staff") && !isTenantFeatureEnabled(user, "allow_office_staff", outlet)) return false
     if (pathname.startsWith("/dashboard/office/shift-management") && !isTenantFeatureEnabled(user, "allow_office_shift_management", outlet)) return false
     if (pathname.startsWith("/dashboard/office/reports") && !isTenantFeatureEnabled(user, "allow_office_reports", outlet)) return false
     if ((pathname.startsWith("/dashboard/office/expenses") || pathname.startsWith("/dashboard/office/quotations") || pathname.startsWith("/dashboard/office/payments")) && !isTenantFeatureEnabled(user, "allow_office_accounting", outlet)) return false

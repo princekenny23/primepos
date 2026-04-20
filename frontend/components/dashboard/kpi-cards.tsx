@@ -134,8 +134,8 @@ export function KPICards({ data, business }: KPICardsProps) {
       />
       <KPICard
         title="Employees"
-        value={data.products.value.toLocaleString('en-US')}
-        change={data.products.change}
+        value={(data as any).employees?.value?.toLocaleString('en-US') || data.products.value.toLocaleString('en-US')}
+        change={(data as any).employees?.change || data.products.change}
         changeLabel="total"
         icon={<Users className="h-3.5 w-3.5" />}
         business={business}

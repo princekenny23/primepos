@@ -2082,16 +2082,6 @@ export function BarPOS() {
                       <DollarSign className="h-4 w-4" /> Cash
                     </div>
                   </SelectItem>
-                  <SelectItem value="card">
-                    <div className="flex items-center gap-2">
-                      <CreditCard className="h-4 w-4" /> Card
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="mobile">
-                    <div className="flex items-center gap-2">
-                      <Smartphone className="h-4 w-4" /> Mobile Money
-                    </div>
-                  </SelectItem>
                   <SelectItem value="credit">
                     <div className="flex items-center gap-2">
                       <Clock className="h-4 w-4" /> Credit (Pay Later)

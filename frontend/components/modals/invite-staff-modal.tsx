@@ -11,13 +11,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { useState } from "react"
 import { useToast } from "@/components/ui/use-toast"
 
@@ -51,7 +44,7 @@ export function InviteStaffModal({ open, onOpenChange }: InviteStaffModalProps) 
         <DialogHeader>
           <DialogTitle>Invite Staff Member</DialogTitle>
           <DialogDescription>
-            Send an invitation to a new staff member to join your team
+            Send an invitation to a new staff member to join your team. Role permissions and outlet access are assigned after the account exists.
           </DialogDescription>
         </DialogHeader>
         
@@ -77,34 +70,8 @@ export function InviteStaffModal({ open, onOpenChange }: InviteStaffModalProps) 
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="role">Role *</Label>
-              <Select required>
-                <SelectTrigger id="role">
-                  <SelectValue placeholder="Select role" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="manager">Manager</SelectItem>
-                  <SelectItem value="staff">Staff</SelectItem>
-                  <SelectItem value="cashier">Cashier</SelectItem>
-                  <SelectItem value="driver">Driver</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="outlet">Assign to Outlet</Label>
-              <Select>
-                <SelectTrigger id="outlet">
-                  <SelectValue placeholder="All outlets (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Outlets</SelectItem>
-                  <SelectItem value="outlet-1">Downtown Branch</SelectItem>
-                  <SelectItem value="outlet-2">Mall Location</SelectItem>
-                  <SelectItem value="outlet-3">Airport Kiosk</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              After the invited user accepts, assign their staff role and outlet access from the Staff tab so permissions come from your configured roles.
             </div>
           </div>
 

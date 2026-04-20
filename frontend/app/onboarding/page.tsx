@@ -77,7 +77,7 @@ function OnboardingPageContent() {
     phone: "",
     password: "",
     confirmPassword: "",
-    role: "admin" as "admin" | "manager" | "cashier" | "staff" | "driver",
+    role: "admin" as string,
   })
   
   useEffect(() => {
@@ -284,7 +284,6 @@ function OnboardingPageContent() {
         phone: userFormData.phone || undefined,
         role: userFormData.role,
         tenant: currentBusiness.id,
-        outlet: currentOutlet?.id,
         password: userFormData.password,
       })
 

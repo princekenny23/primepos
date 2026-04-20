@@ -12,6 +12,36 @@ from apps.tenants.models import Tenant
 class Command(BaseCommand):
     help = "Backfill staff roles for users without role assignments"
 
+    @staticmethod
+    def _resolve_role_for_staff(tenant, staff):
+        outlet_assignment = staff.outlet_roles.select_related('role').filter(role__isnull=False).first()
+        if outlet_assignment and outlet_assignment.role:
+            return outlet_assignment.role, 'existing outlet-role assignment'
+
+        user_role_name = ((getattr(staff.user, 'effective_role', None) or getattr(staff.user, 'role', None)) or '').strip()
+        if user_role_name:
+            exact_match = Role.objects.filter(
+                tenant=tenant,
+                is_active=True,
+                name__iexact=user_role_name,
+            ).first()
+            if exact_match:
+                return exact_match, 'exact user role name match'
+
+        default_staff_role = Role.objects.filter(
+            tenant=tenant,
+            is_active=True,
+            name__iexact='Staff',
+        ).first()
+        if default_staff_role:
+            return default_staff_role, 'default staff fallback'
+
+        fallback_role = Role.objects.filter(tenant=tenant, is_active=True).order_by('id').first()
+        if fallback_role:
+            return fallback_role, 'first active role fallback'
+
+        return None, 'no active roles available'
+
     def add_arguments(self, parser):
         parser.add_argument(
             '--dry-run',
@@ -69,45 +99,22 @@ class Command(BaseCommand):
 
                 self.stdout.write(f"  Found {staff_without_role.count()} staff without roles")
 
-                # Assign roles based on user.role
-                role_keyword_map = {
-                    'admin': 'admin',
-                    'manager': 'manager',
-                    'cashier': 'cashier',
-                    'staff': 'staff',
-                }
-
                 for staff in staff_without_role:
                     user = staff.user
-                    role_keyword = role_keyword_map.get((user.role or '').lower(), 'staff')
-
-                    # Find matching role
-                    matched_role = Role.objects.filter(
-                        tenant=tenant,
-                        is_active=True,
-                        name__icontains=role_keyword,
-                    ).first()
-
-                    # Fallback to Admin if not found
-                    if not matched_role:
-                        matched_role = Role.objects.filter(
-                            tenant=tenant,
-                            is_active=True,
-                            name__icontains='admin',
-                        ).first()
+                    matched_role, resolution_source = self._resolve_role_for_staff(tenant, staff)
 
                     if matched_role:
                         if not dry_run:
                             staff.role = matched_role
                             staff.save(update_fields=['role'])
                         self.stdout.write(
-                            f"    ✓ {user.email} → {matched_role.name} role"
+                            f"    ✓ {user.email} → {matched_role.name} role ({resolution_source})"
                         )
                         total_updated += 1
                     else:
                         self.stdout.write(
                             self.style.ERROR(
-                                f"    ✗ {user.email} - NO ROLE FOUND for tenant!"
+                                f"    ✗ {user.email} - NO ROLE FOUND for tenant ({resolution_source})"
                             )
                         )
                         total_roles_missing += 1

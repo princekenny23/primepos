@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react"
 import { useAuthStore } from "@/stores/authStore"
 
-type UserRole = "admin" | "cashier" | "staff" | "manager" | "driver"
+type UserRole = string
 
 interface RoleContextType {
   role: UserRole
@@ -25,24 +25,13 @@ export function RoleProvider({ children }: RoleProviderProps) {
   const [role, setRole] = useState<UserRole>("staff")
   const [isLoading, setIsLoading] = useState(true)
 
-  const normalizeRole = (value?: string): UserRole | null => {
-    if (!value) return null
-    const lower = value.toLowerCase()
-    if (lower.includes("admin")) return "admin"
-    if (lower.includes("manager")) return "manager"
-    if (lower.includes("cashier")) return "cashier"
-    if (lower.includes("driver")) return "driver"
-    if (lower.includes("staff")) return "staff"
-    return null
-  }
-
   const resolveUserRole = (): UserRole => {
-    if (user?.is_saas_admin) return "admin"
+    if (user?.is_saas_admin) return "saas_admin"
     const raw =
+      (user as any)?.staff_role?.name ||
       (user as any)?.effective_role ||
-      (user as any)?.role ||
-      (user as any)?.staff_role?.name
-    return normalizeRole(raw) || "staff"
+      (user as any)?.role
+    return String(raw || "staff")
   }
 
   useEffect(() => {
@@ -53,7 +42,7 @@ export function RoleProvider({ children }: RoleProviderProps) {
     }
 
     if (typeof window !== "undefined") {
-      const savedRole = localStorage.getItem("userRole") as UserRole | null
+      const savedRole = localStorage.getItem("userRole")
       if (savedRole) {
         setRole(savedRole)
       } else {
@@ -73,6 +62,7 @@ export function RoleProvider({ children }: RoleProviderProps) {
     staff: "can_staff",
     office: "can_staff",
     settings: "can_settings",
+    roles_manage: "can_settings",
     outlets: "can_settings",
     pos: "can_sales",
     pos_retail: "can_pos_retail",
@@ -85,8 +75,41 @@ export function RoleProvider({ children }: RoleProviderProps) {
     switch_outlet: "can_switch_outlet",
   }
 
+  const permissionCodeMap: Record<string, string[]> = {
+    dashboard: ["dashboard.view"],
+    sales: ["sales.view"],
+    inventory: ["inventory.view", "inventory.manage"],
+    products: ["products.manage"],
+    customers: ["customers.manage"],
+    reports: ["reports.view"],
+    staff: ["staff.manage"],
+    office: ["staff.manage"],
+    settings: ["settings.manage"],
+    roles_manage: ["roles.manage"],
+    outlets: ["outlet.switch", "settings.manage"],
+    pos: ["pos.retail", "pos.restaurant", "pos.bar"],
+    pos_retail: ["pos.retail"],
+    pos_restaurant: ["pos.restaurant"],
+    pos_bar: ["pos.bar"],
+    distribution: ["distribution.manage"],
+    storefront: ["storefront.manage"],
+    switch_outlet: ["outlet.switch"],
+  }
+
   const hasPermission = (permission: string): boolean => {
     if (user?.is_saas_admin) return true
+
+    const permissionCodes = (user as any)?.permission_codes
+    if (Array.isArray(permissionCodes) && permissionCodes.length > 0) {
+      const expected = permissionCodeMap[permission] || []
+      if (expected.length > 0) {
+        const codeAllowed = expected.some((code) => permissionCodes.includes(code))
+        if (codeAllowed) {
+          return true
+        }
+        // Fall through to legacy permissions during migration.
+      }
+    }
 
     const userPermissions = (user as any)?.permissions
     if (userPermissions) {

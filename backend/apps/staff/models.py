@@ -25,6 +25,14 @@ class Role(models.Model):
     can_pos_restaurant = models.BooleanField(default=True)
     can_pos_bar = models.BooleanField(default=True)
     can_switch_outlet = models.BooleanField(default=True)
+
+    # Canonical permission system (Odoo-style): role grants a set of permission codes.
+    permissions = models.ManyToManyField(
+        'PermissionDefinition',
+        through='RolePermission',
+        related_name='roles',
+        blank=True,
+    )
     
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -135,4 +143,56 @@ class Attendance(models.Model):
 
     def __str__(self):
         return f"{self.staff.user.name} - {self.check_in}"
+
+
+class PermissionDefinition(models.Model):
+    """Canonical permission registry entry (e.g. sales.view, users.manage)."""
+    code = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=150)
+    module = models.CharField(max_length=50)
+    feature = models.CharField(max_length=80, blank=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'staff_permission_definition'
+        verbose_name = 'Permission Definition'
+        verbose_name_plural = 'Permission Definitions'
+        ordering = ['module', 'code']
+        indexes = [
+            models.Index(fields=['module']),
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return self.code
+
+
+class RolePermission(models.Model):
+    """Role-to-permission mapping. Kept explicit for future deny/conditions support."""
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='role_permissions')
+    permission = models.ForeignKey(
+        PermissionDefinition,
+        on_delete=models.CASCADE,
+        related_name='role_permissions',
+    )
+    allowed = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'staff_role_permission'
+        verbose_name = 'Role Permission'
+        verbose_name_plural = 'Role Permissions'
+        unique_together = [('role', 'permission')]
+        indexes = [
+            models.Index(fields=['role']),
+            models.Index(fields=['permission']),
+            models.Index(fields=['allowed']),
+        ]
+
+    def __str__(self):
+        return f"{self.role.name} -> {self.permission.code} ({'allow' if self.allowed else 'deny'})"
 

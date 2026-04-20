@@ -442,9 +442,15 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Round total to 2 decimal places
         sale.total = (total_subtotal + tax - discount).quantize(Decimal('0.01'))
         
+        # MVP Validation: Only cash and credit/tab payments allowed (Phase 2 for card/mobile)
+        if sale.payment_method in ['card', 'mobile']:
+            raise serializers.ValidationError({
+                "payment_method": f"Payment method '{sale.payment_method}' is not available in this release. Use 'cash' or 'credit' instead."
+            })
+        
         # Set status based on payment method and sale type
         paid_amount = Decimal('0')
-        if sale.payment_method in ['cash', 'card', 'mobile']:
+        if sale.payment_method == 'cash':
             sale.status = 'completed'
             sale.payment_status = 'paid'
             paid_amount = sale.total
@@ -470,10 +476,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             sale.amount_paid = paid_amount
             if sale.payment_method == 'cash':
                 sale.cash_amount = paid_amount
-            elif sale.payment_method == 'card':
-                sale.card_amount = paid_amount
-            elif sale.payment_method == 'mobile':
-                sale.mobile_amount = paid_amount
         
         sale.save()
         logger.info(f"Sale saved: ID={sale.id}, Receipt={sale.receipt_number}, Status={sale.status}, Total={sale.total}, Payment={sale.payment_method}")

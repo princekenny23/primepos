@@ -28,7 +28,7 @@ interface AddEditUserModalProps {
 
 export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEditUserModalProps) {
   const { toast } = useToast()
-  const { currentBusiness, currentOutlet } = useBusinessStore()
+  const { currentBusiness } = useBusinessStore()
   const { t } = useI18n()
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -151,7 +151,6 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
           name: fullName,
           phone: formData.phone || undefined,
           tenant: currentBusiness.id,
-          outlet: currentOutlet?.id,
           password: formData.password || undefined,
         })
 
@@ -203,7 +202,9 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
             {user ? "Edit User" : "Create User"}
           </DialogTitle>
           <DialogDescription>
-            {user ? "Update user information" : "Create a new office user account"}
+            {user
+              ? "Update user account details. Staff role and outlet access are managed separately in Staff."
+              : "Create a new office user account. Assign staff role and outlet access later from the Staff tab."}
           </DialogDescription>
         </DialogHeader>
         
@@ -325,6 +326,11 @@ export function AddEditUserModal({ open, onOpenChange, user, onSuccess }: AddEdi
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
+            {!user && (
+              <div className="md:col-span-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                This step creates the login account only. Role permissions and outlet access are assigned after creation from the Staff tab.
               </div>
             )}
           </div>

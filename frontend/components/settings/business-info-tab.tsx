@@ -57,7 +57,7 @@ export function BusinessInfoTab() {
   })
   
   // Check if user is admin
-  const isAdmin = user?.role === "admin" || user?.is_saas_admin
+  const isAdmin = Boolean(user?.is_saas_admin || user?.permissions?.can_settings)
 
   useEffect(() => {
     const loadBusinessInfo = async () => {

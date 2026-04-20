@@ -1,4 +1,5 @@
 from rest_framework import permissions
+from apps.accounts.rbac import user_has_permission_code
 
 
 OUTLET_MODULE_PERMISSION_KEYS = {
@@ -265,10 +266,9 @@ class IsTenantAdmin(permissions.BasePermission):
         if not user or not user.is_authenticated:
             return False
         # Tenant admin has settings permission and is not a SaaS admin
-        # Check through role system first, fall back to role field
         if user.is_saas_admin:
             return False
-        return user.has_permission('can_settings') or user.effective_role == 'admin'
+        return user.has_permission('can_settings')
 
 
 class HasTenantModuleAccess(permissions.BasePermission):
@@ -290,6 +290,16 @@ class HasTenantModuleAccess(permissions.BasePermission):
             return True
 
         required = getattr(view, 'required_tenant_permissions', None)
+
+        required_permission_codes = getattr(view, 'required_permission_codes', None)
+        if required_permission_codes:
+            code_list = required_permission_codes if isinstance(required_permission_codes, (list, tuple, set)) else [required_permission_codes]
+            code_checks = [user_has_permission_code(user, code) for code in code_list]
+            require_any_codes = bool(getattr(view, 'require_any_permission_code', False))
+            code_allowed = any(code_checks) if require_any_codes else all(code_checks)
+            if not code_allowed:
+                return False
+
         if not required:
             return True
 
@@ -326,8 +336,7 @@ def is_tenant_admin(user):
         return False
     if user.is_saas_admin:
         return False
-    # Check through role system first, fall back to role field
-    return user.has_permission('can_settings') or user.effective_role == 'admin'
+    return user.has_permission('can_settings')
 
 
 def is_admin_user(user):

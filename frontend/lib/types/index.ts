@@ -50,7 +50,7 @@ export interface User {
   email: string
   name: string
   phone?: string
-  role: "admin" | "manager" | "cashier" | "staff" | "driver"
+  role: string
   effective_role?: string
   businessId: string
   outletIds: string[]
@@ -97,6 +97,7 @@ export interface User {
     }
   } | string | number
   is_saas_admin?: boolean
+  permission_codes?: string[]
   permissions?: {
     can_sales: boolean
     can_inventory: boolean
@@ -242,7 +243,7 @@ export interface Staff {
   name: string
   email: string
   phone?: string
-  role: "admin" | "manager" | "cashier" | "staff" | "driver"
+  role: string
   outletIds: string[]
   isActive: boolean
   createdAt: string

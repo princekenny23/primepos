@@ -13,6 +13,7 @@ class UserSerializer(serializers.ModelSerializer):
     staff_role = serializers.SerializerMethodField()
     effective_role = serializers.SerializerMethodField()
     outlet_ids = serializers.SerializerMethodField()
+    permission_codes = serializers.SerializerMethodField()
     
     def get_tenant(self, obj):
         """Get tenant info without circular import"""
@@ -52,13 +53,16 @@ class UserSerializer(serializers.ModelSerializer):
 
         outlet_ids = staff_profile.outlet_roles.values_list('outlet_id', flat=True)
         return [str(outlet_id) for outlet_id in outlet_ids if outlet_id is not None]
+
+    def get_permission_codes(self, obj):
+        return obj.get_permission_codes()
     
     class Meta:
         model = User
         fields = ('id', 'email', 'username', 'name', 'phone', 'tenant', 'role', 
-                  'effective_role', 'staff_role', 'permissions', 'outlet_ids', 'is_saas_admin', 
+              'effective_role', 'staff_role', 'permissions', 'permission_codes', 'outlet_ids', 'is_saas_admin', 
                   'is_active', 'date_joined')
-        read_only_fields = ('id', 'date_joined', 'permissions', 'staff_role', 'effective_role', 'outlet_ids')
+        read_only_fields = ('id', 'date_joined', 'permissions', 'permission_codes', 'staff_role', 'effective_role', 'outlet_ids')
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):

@@ -95,8 +95,7 @@ export default function LoginPage() {
       console.log("Login successful, checking user type...")
       // Check if user is SaaS admin from backend response
       const isSaaSAdmin = result.user.is_saas_admin === true
-      const userRole = String(result.user.effective_role || result.user.role || "staff").toLowerCase()
-      const isAdminUser = isSaaSAdmin || userRole.includes("admin")
+      const isAdminUser = isSaaSAdmin || Boolean(result.user.permissions?.can_dashboard || result.user.permissions?.can_settings)
       console.log("Is SaaS Admin:", isSaaSAdmin)
       
       if (isSaaSAdmin) {

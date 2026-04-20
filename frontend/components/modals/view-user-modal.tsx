@@ -120,7 +120,7 @@ export function ViewUserModal({ open, onOpenChange, user }: ViewUserModalProps) 
               >
                 {user.is_saas_admin ? "SaaS Admin" : "Active"}
               </Badge>
-              {(user.role === "admin" || user.effective_role === "admin") && (
+              {Boolean(user.permissions?.can_settings) && (
                 <Badge variant="outline">Administrator</Badge>
               )}
             </div>

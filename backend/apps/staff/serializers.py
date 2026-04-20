@@ -10,6 +10,43 @@ RoleModel = Role
 
 class RoleSerializer(serializers.ModelSerializer):
     """Role serializer"""
+    permission_codes = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True,
+        write_only=True,
+    )
+    effective_permission_codes = serializers.SerializerMethodField(read_only=True)
+
+    def get_effective_permission_codes(self, obj):
+        from apps.accounts.rbac import get_role_permission_codes
+        return sorted(get_role_permission_codes(obj))
+
+    def create(self, validated_data):
+        from apps.accounts.rbac import sync_role_permissions_from_codes, sync_role_permissions_from_legacy_flags
+
+        permission_codes = validated_data.pop('permission_codes', None)
+        role = super().create(validated_data)
+
+        if permission_codes is not None:
+            sync_role_permissions_from_codes(role, permission_codes)
+        else:
+            sync_role_permissions_from_legacy_flags(role)
+
+        return role
+
+    def update(self, instance, validated_data):
+        from apps.accounts.rbac import sync_role_permissions_from_codes, sync_role_permissions_from_legacy_flags
+
+        permission_codes = validated_data.pop('permission_codes', None)
+        role = super().update(instance, validated_data)
+
+        if permission_codes is not None:
+            sync_role_permissions_from_codes(role, permission_codes)
+        else:
+            sync_role_permissions_from_legacy_flags(role)
+
+        return role
     
     class Meta:
         model = Role
@@ -17,6 +54,7 @@ class RoleSerializer(serializers.ModelSerializer):
                   'can_products', 'can_customers', 'can_reports', 'can_staff',
                   'can_settings', 'can_dashboard', 'can_distribution', 'can_storefront',
                   'can_pos_retail', 'can_pos_restaurant', 'can_pos_bar', 'can_switch_outlet',
+                  'effective_permission_codes', 'permission_codes',
                   'is_active', 'created_at', 'updated_at')
         read_only_fields = ('id', 'tenant', 'created_at', 'updated_at')
 
@@ -211,19 +249,6 @@ class StaffSerializer(serializers.ModelSerializer):
             for item in assignments
         ]
 
-    @staticmethod
-    def _map_staff_role_to_user_role(role_obj):
-        if not role_obj:
-            return 'staff'
-        role_name = (getattr(role_obj, 'name', '') or '').strip().lower()
-        if 'admin' in role_name:
-            return 'admin'
-        if 'manager' in role_name:
-            return 'manager'
-        if 'cashier' in role_name:
-            return 'cashier'
-        return 'staff'
-    
     def create(self, validated_data):
         """Create staff member, creating user if needed"""
         from django.db import IntegrityError, transaction
@@ -366,13 +391,6 @@ class StaffSerializer(serializers.ModelSerializer):
                                 defaults={'role_id': existing_staff.role_id},
                             )
 
-                    # Keep accounts_user.role synchronized with assigned staff role.
-                    if not user.is_saas_admin:
-                        mapped_role = self._map_staff_role_to_user_role(existing_staff.role)
-                        if user.role != mapped_role:
-                            user.role = mapped_role
-                            user.save(update_fields=['role'])
-
                     return existing_staff
                 
                 # Create staff - ensure role_id is an integer or None
@@ -399,13 +417,6 @@ class StaffSerializer(serializers.ModelSerializer):
                 
                 staff = Staff.objects.create(**staff_data)
 
-                # Keep accounts_user.role synchronized with assigned staff role
-                if not user.is_saas_admin:
-                    mapped_role = self._map_staff_role_to_user_role(staff.role)
-                    if user.role != mapped_role:
-                        user.role = mapped_role
-                        user.save(update_fields=['role'])
-                
                 # Assign per-outlet roles if provided; otherwise fallback to outlet_ids + profile role.
                 if outlet_roles:
                     for row in outlet_roles:
@@ -460,14 +471,6 @@ class StaffSerializer(serializers.ModelSerializer):
         
         instance.save()
 
-        # Keep accounts_user.role synchronized with assigned staff role
-        user = instance.user
-        if user and not user.is_saas_admin:
-            mapped_role = self._map_staff_role_to_user_role(instance.role)
-            if user.role != mapped_role:
-                user.role = mapped_role
-                user.save(update_fields=['role'])
-        
         # Update outlet-role assignments if provided
         if outlet_roles is not None:
             # Replace assignments atomically at serializer scope

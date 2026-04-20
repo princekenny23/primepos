@@ -13,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Plus, Search, Mail, Phone, Shield, Building2, Edit, Trash2, Eye, Lock, Settings, CheckCircle2, ShoppingCart, Package, Users as UsersIcon, BarChart3, FileText, Menu } from "lucide-react"
+import { Plus, Search, Mail, Phone, Shield, Building2, Edit, Trash2, Eye, Settings, Users as UsersIcon, Menu } from "lucide-react"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { userService } from "@/lib/services/userService"
 import { useBusinessStore } from "@/stores/businessStore"
@@ -27,6 +27,7 @@ import { AddEditRoleModal } from "@/components/modals/add-edit-role-modal"
 import { AddEditStaffModal } from "@/components/modals/add-edit-staff-modal"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
 import { roleService, staffService, type Role, type Staff } from "@/lib/services/staffService"
+import { useRole } from "@/contexts/role-context"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,6 +52,7 @@ import { useI18n } from "@/contexts/i18n-context"
 export default function AccountsPage() {
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const refreshUser = useAuthStore((state) => state.refreshUser)
+  const { hasPermission } = useRole()
   const { toast } = useToast()
   const { t } = useI18n()
   const [users, setUsers] = useState<User[]>([])
@@ -73,9 +75,64 @@ export default function AccountsPage() {
   const [userToDelete, setUserToDelete] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showDeleteStaffDialog, setShowDeleteStaffDialog] = useState(false)
+  const [showPermissionDeniedDialog, setShowPermissionDeniedDialog] = useState(false)
+  const [permissionDeniedMessage, setPermissionDeniedMessage] = useState("You do not have permission to perform this action.")
   const useReal = useRealAPI()
 
   const currentOutletId = currentOutlet?.id ? String(currentOutlet.id) : ""
+  const canManageUsers = hasPermission("staff")
+  const canManageStaff = hasPermission("staff")
+  const canManageRoles = hasPermission("roles_manage")
+
+  const showPermissionDenied = useCallback((message: string) => {
+    setPermissionDeniedMessage(message)
+    setShowPermissionDeniedDialog(true)
+  }, [])
+
+  const openUserModal = useCallback((user?: User | null) => {
+    if (!canManageUsers) {
+      showPermissionDenied("You do not have permission to manage users.")
+      return
+    }
+    setSelectedUser(user || null)
+    setShowAddUser(true)
+  }, [canManageUsers, showPermissionDenied])
+
+  const openStaffModal = useCallback((staff?: Staff | null) => {
+    if (!canManageStaff) {
+      showPermissionDenied("You do not have permission to manage staff assignments.")
+      return
+    }
+    setSelectedStaff(staff || null)
+    setShowAddStaff(true)
+  }, [canManageStaff, showPermissionDenied])
+
+  const openRoleModal = useCallback((role?: Role | null) => {
+    if (!canManageRoles) {
+      showPermissionDenied("You do not have permission to manage roles and permissions.")
+      return
+    }
+    setSelectedRole(role || null)
+    setShowAddRole(true)
+  }, [canManageRoles, showPermissionDenied])
+
+  const requestUserDelete = useCallback((userId: string) => {
+    if (!canManageUsers) {
+      showPermissionDenied("You do not have permission to delete users.")
+      return
+    }
+    setUserToDelete(userId)
+    setShowDeleteDialog(true)
+  }, [canManageUsers, showPermissionDenied])
+
+  const requestRoleDelete = useCallback((role: Role) => {
+    if (!canManageRoles) {
+      showPermissionDenied("You do not have permission to delete roles.")
+      return
+    }
+    setRoleToDelete(role)
+    setShowDeleteRoleDialog(true)
+  }, [canManageRoles, showPermissionDenied])
 
   const extractUserOutletIds = (backendUser: any): string[] => {
     const fromPrimitiveArray = (value: unknown): string[] => {
@@ -132,6 +189,7 @@ export default function AccountsPage() {
           is_saas_admin: backendUser.is_saas_admin || false,
           tenant: currentBusiness,
           permissions: backendUser.permissions || undefined,
+          permission_codes: backendUser.permission_codes || undefined,
           staff_role: backendUser.staff_role || undefined,
         }))
         
@@ -178,7 +236,6 @@ export default function AccountsPage() {
       if (useReal) {
         const response = await staffService.list({
           tenant: currentBusiness.id,
-          ...(currentOutletId ? { outlet: currentOutletId } : {}),
         })
         setStaffMembers(response.results || [])
       } else {
@@ -231,19 +288,6 @@ export default function AccountsPage() {
     }
   }, [roleToDelete, loadRoles, toast])
 
-  const staffUserIdsAtCurrentOutlet = useMemo(() => {
-    if (!currentOutletId) return new Set<string>()
-
-    return new Set(
-      staffMembers
-        .filter((staff) =>
-          (staff.outlets || []).some((outlet) => String(outlet.id) === currentOutletId)
-        )
-        .map((staff) => String(staff.user?.id || ""))
-        .filter(Boolean)
-    )
-  }, [staffMembers, currentOutletId])
-
   const filteredUsers = useMemo(() => {
     const term = searchTerm.trim().toLowerCase()
 
@@ -251,17 +295,9 @@ export default function AccountsPage() {
       const name = (user.name || "").toLowerCase()
       const email = (user.email || "").toLowerCase()
       const matchesSearch = name.includes(term) || email.includes(term)
-      if (!matchesSearch) return false
-
-      if (!currentOutletId) return true
-
-      const userOutletIds = (user.outletIds || []).map(String)
-      const inUserOutletIds = userOutletIds.includes(currentOutletId)
-      const inStaffAssignment = staffUserIdsAtCurrentOutlet.has(String(user.id))
-
-      return inUserOutletIds || inStaffAssignment
+      return matchesSearch
     })
-  }, [users, searchTerm, currentOutletId, staffUserIdsAtCurrentOutlet])
+  }, [users, searchTerm])
 
   const filteredRoles = useMemo(() => {
     return roles.filter(role => {
@@ -273,19 +309,14 @@ export default function AccountsPage() {
   const filteredStaff = useMemo(() => {
     const term = searchTerm.toLowerCase()
     return staffMembers.filter(staff => {
-      if (currentOutletId) {
-        const hasOutlet = (staff.outlets || []).some((outlet) => String(outlet.id) === currentOutletId)
-        if (!hasOutlet) return false
-      }
-
       const name = staff.user?.name?.toLowerCase() || ""
       const email = staff.user?.email?.toLowerCase() || ""
       const role = staff.role?.name?.toLowerCase() || ""
       return name.includes(term) || email.includes(term) || role.includes(term)
     })
-  }, [staffMembers, searchTerm, currentOutletId])
+  }, [staffMembers, searchTerm])
 
-  const tabsConfig: TabConfig[] = [
+  const tabsConfig = [
     {
       value: "users",
       label: "Users",
@@ -307,14 +338,20 @@ export default function AccountsPage() {
       badgeCount: roles.length,
       badgeVariant: "secondary",
     },
-    {
-      value: "permissions",
-      label: "Permissions",
-      icon: Lock,
-      badgeCount: roles.length,
-      badgeVariant: "secondary",
-    },
-  ]
+  ] satisfies TabConfig[]
+
+  const visibleTabsConfig = tabsConfig.filter((tab) => {
+    if (tab.value === "roles") {
+      return canManageRoles
+    }
+    return true
+  })
+
+  useEffect(() => {
+    if (activeTab === "roles" && !canManageRoles) {
+      setActiveTab("users")
+    }
+  }, [activeTab, canManageRoles])
 
   return (
     <DashboardLayout>
@@ -325,7 +362,7 @@ export default function AccountsPage() {
       >
         <div className="px-6 pt-4 border-b border-gray-300">
           <FilterableTabs
-            tabs={tabsConfig}
+            tabs={visibleTabsConfig}
             activeTab={activeTab}
             onTabChange={setActiveTab}
           >
@@ -339,10 +376,7 @@ export default function AccountsPage() {
                     </p>
                   </div>
                   <Button 
-                    onClick={() => {
-                      setSelectedUser(null)
-                      setShowAddUser(true)
-                    }}
+                    onClick={() => openUserModal(null)}
                     className="bg-[#1e3a8a] text-white hover:bg-blue-800"
                   >
                     <Plus className="mr-2 h-4 w-4" />
@@ -391,7 +425,7 @@ export default function AccountsPage() {
                           const userEmail = user.email || "N/A"
                           // Display staff_role name if available, otherwise fall back to role
                           const displayRole = user.staff_role?.name || user.effective_role || user.role || "staff"
-                          const isAdmin = user.is_saas_admin || user.role === "admin"
+                          const isPrivileged = Boolean(user.is_saas_admin || user.permissions?.can_settings)
                           
                           return (
                             <TableRow key={user.id} className="border-gray-300">
@@ -426,7 +460,7 @@ export default function AccountsPage() {
                               </TableCell>
                               <TableCell>
                                 <span className={`px-2 py-1 rounded-full text-xs ${
-                                  isAdmin
+                                  isPrivileged
                                     ? "bg-purple-100 text-purple-800"
                                     : "bg-green-100 text-green-800"
                                 }`}>
@@ -454,8 +488,7 @@ export default function AccountsPage() {
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={() => {
-                                        setSelectedUser(user)
-                                        setShowAddUser(true)
+                                        openUserModal(user)
                                       }}
                                     >
                                       <Edit className="mr-2 h-4 w-4" />
@@ -464,8 +497,7 @@ export default function AccountsPage() {
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
                                       onClick={() => {
-                                        setUserToDelete(user.id)
-                                        setShowDeleteDialog(true)
+                                        requestUserDelete(user.id)
                                       }}
                                       className="text-destructive focus:text-destructive"
                                     >
@@ -495,10 +527,7 @@ export default function AccountsPage() {
                     </p>
                   </div>
                   <Button
-                    onClick={() => {
-                      setSelectedStaff(null)
-                      setShowAddStaff(true)
-                    }}
+                    onClick={() => openStaffModal(null)}
                     className="bg-[#1e3a8a] text-white hover:bg-blue-800"
                   >
                     <Plus className="mr-2 h-4 w-4" />
@@ -561,10 +590,7 @@ export default function AccountsPage() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => {
-                                  setSelectedStaff(staff)
-                                  setShowAddStaff(true)
-                                }}
+                                onClick={() => openStaffModal(staff)}
                                 aria-label={`Edit role for ${staff.user?.name || staff.user?.email || "staff member"}`}
                               >
                                 <Edit className="h-4 w-4" />
@@ -589,10 +615,7 @@ export default function AccountsPage() {
                     </p>
                   </div>
                   <Button 
-                    onClick={() => {
-                      setSelectedRole(null)
-                      setShowAddRole(true)
-                    }}
+                    onClick={() => openRoleModal(null)}
                     className="bg-[#1e3a8a] text-white hover:bg-blue-800"
                   >
                     <Plus className="mr-2 h-4 w-4" />
@@ -618,44 +641,54 @@ export default function AccountsPage() {
                     </div>
                   ) : (
                     filteredRoles.map((role) => {
-                      // Get role icon and color based on role name
-                      const getRoleIcon = (roleName: string) => {
-                        const name = roleName.toLowerCase()
-                        if (name.includes("admin")) {
-                          return { icon: Shield, color: "bg-red-100 text-red-600", iconColor: "text-red-600" }
-                        } else if (name.includes("manager")) {
-                          return { icon: UsersIcon, color: "bg-blue-100 text-blue-600", iconColor: "text-blue-600" }
-                        } else if (name.includes("cashier")) {
-                          return { icon: ShoppingCart, color: "bg-green-100 text-green-600", iconColor: "text-green-600" }
-                        } else {
-                          return { icon: UsersIcon, color: "bg-gray-100 text-gray-600", iconColor: "text-gray-600" }
-                        }
-                      }
-
-                      const { icon: RoleIcon, color, iconColor } = getRoleIcon(role.name)
+                      const codeCount = Array.isArray(role.effective_permission_codes)
+                        ? role.effective_permission_codes.length
+                        : 0
+                      const legacyCount = [
+                        role.can_dashboard,
+                        role.can_sales,
+                        role.can_inventory,
+                        role.can_products,
+                        role.can_customers,
+                        role.can_reports,
+                        role.can_staff,
+                        role.can_settings,
+                        role.can_distribution,
+                        role.can_storefront,
+                        role.can_pos_retail,
+                        role.can_pos_restaurant,
+                        role.can_pos_bar,
+                        role.can_switch_outlet,
+                      ].filter(Boolean).length
+                      const permissionCount = Math.max(codeCount, legacyCount)
+                      const accentClass = permissionCount >= 8
+                        ? "bg-blue-100 text-blue-600"
+                        : permissionCount >= 4
+                          ? "bg-emerald-100 text-emerald-600"
+                          : "bg-gray-100 text-gray-600"
 
                       return (
                         <div
                           key={role.id}
                           className="flex items-center gap-4 p-4 border rounded-lg hover:bg-muted/50 transition-colors"
                         >
-                          <div className={`p-3 rounded-lg ${color}`}>
-                            <RoleIcon className={`h-6 w-6 ${iconColor}`} />
+                          <div className={`p-3 rounded-lg ${accentClass}`}>
+                            <Shield className="h-6 w-6" />
                           </div>
                           <div className="flex-1">
                             <h3 className="font-semibold text-lg">{role.name.toUpperCase()}</h3>
                             <p className="text-sm text-muted-foreground mt-1">
                               {role.description || "No description provided"}
                             </p>
+                            <p className="text-xs text-muted-foreground mt-2">
+                              {permissionCount} permission{permissionCount === 1 ? "" : "s"} enabled
+                            </p>
                           </div>
                           <div className="flex items-center gap-2">
                             <Button
                               variant="ghost"
                               size="icon"
-                              onClick={() => {
-                                setSelectedRole(role)
-                                setShowAddRole(true)
-                              }}
+                              onClick={() => openRoleModal(role)}
                             >
                               <Settings className="h-5 w-5" />
                             </Button>
@@ -663,10 +696,7 @@ export default function AccountsPage() {
                               variant="ghost"
                               size="icon"
                               className="text-destructive"
-                              onClick={() => {
-                                setRoleToDelete(role)
-                                setShowDeleteRoleDialog(true)
-                              }}
+                              onClick={() => requestRoleDelete(role)}
                             >
                               <Trash2 className="h-5 w-5" />
                             </Button>
@@ -679,273 +709,6 @@ export default function AccountsPage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="permissions" className="mt-0">
-              <div className="px-6 py-4">
-                <div className="mb-4 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Permission Settings</h3>
-                    <p className="text-sm text-gray-600">
-                      View and manage permissions for each role
-                    </p>
-                  </div>
-                  <Button 
-                    onClick={() => {
-                      setSelectedRole(null)
-                      setShowAddRole(true)
-                    }}
-                    className="bg-[#1e3a8a] text-white hover:bg-blue-800"
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add Role
-                  </Button>
-                </div>
-                <div className="mb-6 pb-4 border-b border-gray-300">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-                    <Input
-                      placeholder={t("settings.users.search_roles_placeholder")}
-                      className="pl-10 bg-white border-gray-300"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                {filteredRoles.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-gray-600">No roles found</p>
-                  </div>
-                ) : (
-                  <div className="space-y-8">
-                    {filteredRoles.map((role) => (
-                      <div key={role.id} className="space-y-6">
-                        <div className="flex items-center justify-between border-b pb-2">
-                          <h3 className="text-lg font-semibold">{role.name}</h3>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedRole(role)
-                                setShowAddRole(true)
-                              }}
-                            >
-                              <Settings className="h-4 w-4 mr-2" />
-                              Edit
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-destructive"
-                              onClick={() => {
-                                setRoleToDelete(role)
-                                setShowDeleteRoleDialog(true)
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* Sales & Transactions */}
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-base">Sales & Transactions</h4>
-                          <div className="space-y-2 pl-4">
-                            <div className="flex items-center gap-2">
-                              {role.can_sales ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Process Sales</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_sales ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">View Sales History</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_sales ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Handle Returns</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_sales ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Manage Payments</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Inventory Management */}
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-base">Inventory Management</h4>
-                          <div className="space-y-2 pl-4">
-                            <div className="flex items-center gap-2">
-                              {role.can_products || role.can_inventory ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">View Products</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_products ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Add/Edit Products</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_inventory ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Manage Stock</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_reports || role.can_inventory ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">View Inventory Reports</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Customer Management */}
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-base">Customer Management</h4>
-                          <div className="space-y-2 pl-4">
-                            <div className="flex items-center gap-2">
-                              {role.can_customers ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">View Customers</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_customers ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Add/Edit Customers</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_customers || role.can_reports ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">View Customer History</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Storefront */}
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-base">Storefront</h4>
-                          <div className="space-y-2 pl-4">
-                            <div className="flex items-center gap-2">
-                              {role.can_storefront ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">View Storefront</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_storefront ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Manage Storefront</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Distribution */}
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-base">Distribution</h4>
-                          <div className="space-y-2 pl-4">
-                            <div className="flex items-center gap-2">
-                              {role.can_distribution ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Access Distribution Workspace</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Business-Specific POS */}
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-base">Business-Specific POS</h4>
-                          <div className="space-y-2 pl-4">
-                            <div className="flex items-center gap-2">
-                              {role.can_pos_retail ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Retail POS</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_pos_restaurant ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Restaurant POS</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {role.can_pos_bar ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Bar POS</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Switch Outlet */}
-                        <div className="space-y-3">
-                          <h4 className="font-semibold text-base">Switch Outlet</h4>
-                          <div className="space-y-2 pl-4">
-                            <div className="flex items-center gap-2">
-                              {role.can_switch_outlet ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-600" />
-                              ) : (
-                                <div className="h-5 w-5 rounded-full border-2 border-gray-300" />
-                              )}
-                              <span className="text-sm">Switch Active Outlet</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </TabsContent>
           </FilterableTabs>
         </div>
       </PageLayout>
@@ -1041,6 +804,22 @@ export default function AccountsPage() {
               className="bg-destructive text-destructive-foreground"
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showPermissionDeniedDialog} onOpenChange={setShowPermissionDeniedDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Permission Denied</AlertDialogTitle>
+            <AlertDialogDescription>
+              {permissionDeniedMessage}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setShowPermissionDeniedDialog(false)}>
+              OK
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

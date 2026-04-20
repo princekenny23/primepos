@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { Shield, FileText, Truck } from "lucide-react"
+import { Shield, FileText } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { roleService, type Role } from "@/lib/services/staffService"
@@ -26,6 +26,91 @@ interface AddEditRoleModalProps {
   onSuccess?: () => void
 }
 
+const LEGACY_FLAG_BY_CODE: Record<string, keyof Role> = {
+  "dashboard.view": "can_dashboard",
+  "sales.view": "can_sales",
+  "sales.create": "can_sales",
+  "inventory.view": "can_inventory",
+  "inventory.manage": "can_inventory",
+  "products.manage": "can_products",
+  "customers.manage": "can_customers",
+  "reports.view": "can_reports",
+  "staff.manage": "can_staff",
+  "settings.manage": "can_settings",
+  "distribution.manage": "can_distribution",
+  "storefront.manage": "can_storefront",
+  "pos.retail": "can_pos_retail",
+  "pos.restaurant": "can_pos_restaurant",
+  "pos.bar": "can_pos_bar",
+  "outlet.switch": "can_switch_outlet",
+  "users.create": "can_staff",
+  "users.update": "can_staff",
+  "users.delete": "can_staff",
+  "roles.assign": "can_staff",
+  "roles.manage": "can_settings",
+}
+
+const PERMISSION_GROUPS = [
+  {
+    title: "Core",
+    items: [
+      { code: "dashboard.view", label: "Dashboard", description: "View dashboard and high-level metrics" },
+      { code: "reports.view", label: "Reports", description: "View business and operational reports" },
+    ],
+  },
+  {
+    title: "Sales & POS",
+    items: [
+      { code: "sales.view", label: "Sales View", description: "View sales records and transactions" },
+      { code: "sales.create", label: "Sales Create", description: "Create and process sales" },
+      { code: "customers.manage", label: "Customers", description: "Manage customer profiles and balances" },
+      { code: "pos.retail", label: "Retail POS", description: "Access retail POS interface" },
+      { code: "pos.restaurant", label: "Restaurant POS", description: "Access restaurant POS interface" },
+      { code: "pos.bar", label: "Bar POS", description: "Access bar POS interface" },
+    ],
+  },
+  {
+    title: "Inventory",
+    items: [
+      { code: "inventory.view", label: "Inventory View", description: "View stock and movements" },
+      { code: "inventory.manage", label: "Inventory Manage", description: "Adjust and transfer inventory" },
+      { code: "products.manage", label: "Products", description: "Manage product catalog" },
+    ],
+  },
+  {
+    title: "Office & Admin",
+    items: [
+      { code: "staff.manage", label: "Staff", description: "Manage staff assignments" },
+      { code: "users.create", label: "Users Create", description: "Create office user accounts" },
+      { code: "users.update", label: "Users Update", description: "Edit office user accounts" },
+      { code: "users.delete", label: "Users Delete", description: "Delete office user accounts" },
+      { code: "roles.assign", label: "Role Assign", description: "Assign roles to users and staff" },
+      { code: "roles.manage", label: "Role Manage", description: "Create and edit role definitions" },
+      { code: "settings.manage", label: "Settings", description: "Access system settings" },
+      { code: "outlet.switch", label: "Switch Outlet", description: "Switch between outlets" },
+    ],
+  },
+  {
+    title: "Extensions",
+    items: [
+      { code: "distribution.manage", label: "Distribution", description: "Manage delivery routes and dispatch" },
+      { code: "storefront.manage", label: "Storefront", description: "Manage storefront features" },
+    ],
+  },
+]
+
+const derivePermissionCodesFromLegacyRole = (role?: Role | null): string[] => {
+  if (!role) return []
+
+  const codes = new Set<string>()
+  Object.entries(LEGACY_FLAG_BY_CODE).forEach(([code, legacyFlag]) => {
+    if ((role as any)[legacyFlag]) {
+      codes.add(code)
+    }
+  })
+  return Array.from(codes)
+}
+
 export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEditRoleModalProps) {
   const { toast } = useToast()
   const { currentBusiness } = useBusinessStore()
@@ -33,20 +118,7 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
   const [formData, setFormData] = useState({
     name: "",
     description: "",
-    can_sales: false,
-    can_inventory: false,
-    can_products: false,
-    can_customers: false,
-    can_reports: false,
-    can_staff: false,
-    can_settings: false,
-    can_dashboard: true,
-    can_distribution: false,
-    can_storefront: false,
-    can_pos_retail: true,
-    can_pos_restaurant: true,
-    can_pos_bar: true,
-    can_switch_outlet: true,
+    permission_codes: [] as string[],
     is_active: true,
   })
 
@@ -57,20 +129,9 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
         setFormData({
           name: role.name || "",
           description: role.description || "",
-          can_sales: role.can_sales || false,
-          can_inventory: role.can_inventory || false,
-          can_products: role.can_products || false,
-          can_customers: role.can_customers || false,
-          can_reports: role.can_reports || false,
-          can_staff: role.can_staff || false,
-          can_settings: role.can_settings || false,
-          can_dashboard: role.can_dashboard !== undefined ? role.can_dashboard : true,
-          can_distribution: role.can_distribution || false,
-          can_storefront: role.can_storefront || false,
-          can_pos_retail: role.can_pos_retail !== undefined ? role.can_pos_retail : true,
-          can_pos_restaurant: role.can_pos_restaurant !== undefined ? role.can_pos_restaurant : true,
-          can_pos_bar: role.can_pos_bar !== undefined ? role.can_pos_bar : true,
-          can_switch_outlet: role.can_switch_outlet !== undefined ? role.can_switch_outlet : true,
+          permission_codes: role.effective_permission_codes && role.effective_permission_codes.length
+            ? [...role.effective_permission_codes]
+            : derivePermissionCodesFromLegacyRole(role),
           is_active: role.is_active !== undefined ? role.is_active : true,
         })
       } else {
@@ -78,20 +139,7 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
         setFormData({
           name: "",
           description: "",
-          can_sales: false,
-          can_inventory: false,
-          can_products: false,
-          can_customers: false,
-          can_reports: false,
-          can_staff: false,
-          can_settings: false,
-          can_dashboard: true,
-          can_distribution: false,
-          can_storefront: false,
-          can_pos_retail: true,
-          can_pos_restaurant: true,
-          can_pos_bar: true,
-          can_switch_outlet: true,
+          permission_codes: ["dashboard.view"],
           is_active: true,
         })
       }
@@ -123,23 +171,35 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
     setIsLoading(true)
 
     try {
+      const selectedCodes = new Set(formData.permission_codes)
+      const legacyBooleans = {
+        can_sales: false,
+        can_inventory: false,
+        can_products: false,
+        can_customers: false,
+        can_reports: false,
+        can_staff: false,
+        can_settings: false,
+        can_dashboard: false,
+        can_distribution: false,
+        can_storefront: false,
+        can_pos_retail: false,
+        can_pos_restaurant: false,
+        can_pos_bar: false,
+        can_switch_outlet: false,
+      }
+
+      Object.entries(LEGACY_FLAG_BY_CODE).forEach(([code, legacyFlag]) => {
+        if (selectedCodes.has(code) && legacyFlag in legacyBooleans) {
+          ;(legacyBooleans as any)[legacyFlag] = true
+        }
+      })
+
       const roleData: Partial<Role> = {
         name: formData.name.trim(),
         description: formData.description.trim() || undefined,
-        can_sales: formData.can_sales,
-        can_inventory: formData.can_inventory,
-        can_products: formData.can_products,
-        can_customers: formData.can_customers,
-        can_reports: formData.can_reports,
-        can_staff: formData.can_staff,
-        can_settings: formData.can_settings,
-        can_dashboard: formData.can_dashboard,
-        can_distribution: formData.can_distribution,
-        can_storefront: formData.can_storefront,
-        can_pos_retail: formData.can_pos_retail,
-        can_pos_restaurant: formData.can_pos_restaurant,
-        can_pos_bar: formData.can_pos_bar,
-        can_switch_outlet: formData.can_switch_outlet,
+        permission_codes: Array.from(selectedCodes),
+        ...legacyBooleans,
         is_active: formData.is_active,
       }
 
@@ -221,174 +281,43 @@ export function AddEditRoleModal({ open, onOpenChange, role, onSuccess }: AddEdi
 
             <div className="border-t pt-4">
               <Label className="text-base font-semibold mb-4 block">Permissions</Label>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_dashboard" className="flex flex-col space-y-1">
-                    <span>Dashboard Access</span>
-                    <span className="font-normal text-xs text-muted-foreground">View dashboard and analytics</span>
-                  </Label>
-                  <Switch
-                    id="can_dashboard"
-                    checked={formData.can_dashboard}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_dashboard: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_sales" className="flex flex-col space-y-1">
-                    <span>Sales</span>
-                    <span className="font-normal text-xs text-muted-foreground">Process sales and transactions</span>
-                  </Label>
-                  <Switch
-                    id="can_sales"
-                    checked={formData.can_sales}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_sales: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_products" className="flex flex-col space-y-1">
-                    <span>Products</span>
-                    <span className="font-normal text-xs text-muted-foreground">Manage products and categories</span>
-                  </Label>
-                  <Switch
-                    id="can_products"
-                    checked={formData.can_products}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_products: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_inventory" className="flex flex-col space-y-1">
-                    <span>Inventory</span>
-                    <span className="font-normal text-xs text-muted-foreground">Manage stock and inventory</span>
-                  </Label>
-                  <Switch
-                    id="can_inventory"
-                    checked={formData.can_inventory}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_inventory: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_customers" className="flex flex-col space-y-1">
-                    <span>Customers</span>
-                    <span className="font-normal text-xs text-muted-foreground">Manage customer relationships</span>
-                  </Label>
-                  <Switch
-                    id="can_customers"
-                    checked={formData.can_customers}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_customers: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_reports" className="flex flex-col space-y-1">
-                    <span>Reports</span>
-                    <span className="font-normal text-xs text-muted-foreground">View and generate reports</span>
-                  </Label>
-                  <Switch
-                    id="can_reports"
-                    checked={formData.can_reports}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_reports: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_staff" className="flex flex-col space-y-1">
-                    <span>Staff Management</span>
-                    <span className="font-normal text-xs text-muted-foreground">Manage staff and roles</span>
-                  </Label>
-                  <Switch
-                    id="can_staff"
-                    checked={formData.can_staff}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_staff: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_settings" className="flex flex-col space-y-1">
-                    <span>Settings</span>
-                    <span className="font-normal text-xs text-muted-foreground">Access system settings</span>
-                  </Label>
-                  <Switch
-                    id="can_settings"
-                    checked={formData.can_settings}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_settings: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_distribution" className="flex flex-col space-y-1">
-                    <span>Distribution</span>
-                    <span className="font-normal text-xs text-muted-foreground">Manage deliveries, routes and fleet</span>
-                  </Label>
-                  <Switch
-                    id="can_distribution"
-                    checked={formData.can_distribution}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_distribution: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_pos_retail" className="flex flex-col space-y-1">
-                    <span>Retail POS</span>
-                    <span className="font-normal text-xs text-muted-foreground">Access retail-specific POS screens</span>
-                  </Label>
-                  <Switch
-                    id="can_pos_retail"
-                    checked={formData.can_pos_retail}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_pos_retail: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_pos_restaurant" className="flex flex-col space-y-1">
-                    <span>Restaurant POS</span>
-                    <span className="font-normal text-xs text-muted-foreground">Access restaurant-specific POS screens</span>
-                  </Label>
-                  <Switch
-                    id="can_pos_restaurant"
-                    checked={formData.can_pos_restaurant}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_pos_restaurant: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_pos_bar" className="flex flex-col space-y-1">
-                    <span>Bar POS</span>
-                    <span className="font-normal text-xs text-muted-foreground">Access bar-specific POS screens</span>
-                  </Label>
-                  <Switch
-                    id="can_pos_bar"
-                    checked={formData.can_pos_bar}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_pos_bar: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_storefront" className="flex flex-col space-y-1">
-                    <span>Storefront</span>
-                    <span className="font-normal text-xs text-muted-foreground">View and manage storefront features</span>
-                  </Label>
-                  <Switch
-                    id="can_storefront"
-                    checked={formData.can_storefront}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_storefront: checked })}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between space-x-2">
-                  <Label htmlFor="can_switch_outlet" className="flex flex-col space-y-1">
-                    <span>Switch Outlet</span>
-                    <span className="font-normal text-xs text-muted-foreground">Allow switching active outlet</span>
-                  </Label>
-                  <Switch
-                    id="can_switch_outlet"
-                    checked={formData.can_switch_outlet}
-                    onCheckedChange={(checked) => setFormData({ ...formData, can_switch_outlet: checked })}
-                  />
-                </div>
+              <div className="space-y-6">
+                {PERMISSION_GROUPS.map((group) => (
+                  <div key={group.title} className="space-y-3">
+                    <p className="text-sm font-semibold text-foreground">{group.title}</p>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {group.items.map((permission) => {
+                        const checked = formData.permission_codes.includes(permission.code)
+                        return (
+                          <div key={permission.code} className="flex items-center justify-between space-x-2 rounded-md border p-3">
+                            <Label htmlFor={`perm-${permission.code}`} className="flex flex-col space-y-1">
+                              <span>{permission.label}</span>
+                              <span className="font-normal text-xs text-muted-foreground">{permission.description}</span>
+                            </Label>
+                            <Switch
+                              id={`perm-${permission.code}`}
+                              checked={checked}
+                              onCheckedChange={(isChecked) => {
+                                setFormData((prev) => {
+                                  const nextCodes = new Set(prev.permission_codes)
+                                  if (isChecked) {
+                                    nextCodes.add(permission.code)
+                                  } else {
+                                    nextCodes.delete(permission.code)
+                                  }
+                                  return {
+                                    ...prev,
+                                    permission_codes: Array.from(nextCodes),
+                                  }
+                                })
+                              }}
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 

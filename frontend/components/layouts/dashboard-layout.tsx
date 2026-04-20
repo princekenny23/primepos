@@ -91,6 +91,8 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const [showSwitchPassword, setShowSwitchPassword] = useState(false)
   const [isVerifyingSwitch, setIsVerifyingSwitch] = useState(false)
   const [showOutletPermDenied, setShowOutletPermDenied] = useState(false)
+  const [showRoutePermDenied, setShowRoutePermDenied] = useState(false)
+  const [routePermDeniedMessage, setRoutePermDeniedMessage] = useState("You do not have permission to access this area.")
   const pathname = usePathname()
   const router = useRouter()
   const { currentTenant, currentOutlet, outlets, switchOutlet, isLoading } = useTenant()
@@ -102,7 +104,7 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const { toast } = useToast()
   const restoringBusinessRef = useRef(false)
   const redirectedRef = useRef(false)
-  const permissionRedirectRef = useRef(false)
+  const lastDeniedPathRef = useRef<string | null>(null)
 
   const isLocalhostBrowser = () => {
     if (typeof window === "undefined") return false
@@ -248,6 +250,22 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
     return true
   }
 
+  const getRoutePermissionMessage = (path?: string | null) => {
+    if (!path) return "You do not have permission to access this area."
+    if (path.startsWith("/dashboard/settings")) return "You do not have permission to access Settings. Please contact your administrator."
+    if (path.startsWith("/dashboard/office")) return "You do not have permission to access Office tools. Please contact your administrator."
+    if (path.startsWith("/dashboard/inventory")) return "You do not have permission to access Inventory. Please contact your administrator."
+    if (path.startsWith("/dashboard/storefront")) return "You do not have permission to access Storefront. Please contact your administrator."
+    if (path.startsWith("/dashboard/distribution")) return "You do not have permission to access Distribution. Please contact your administrator."
+    if (path.startsWith("/dashboard/reports")) return "You do not have permission to access Reports. Please contact your administrator."
+    if (path.startsWith("/dashboard/pos") || path.startsWith("/pos/") || path.startsWith("/dashboard/restaurant") || path.startsWith("/dashboard/bar")) {
+      return "You do not have permission to access POS. Please contact your administrator."
+    }
+    if (path.startsWith("/dashboard/sales")) return "You do not have permission to access Sales. Please contact your administrator."
+    if (path.startsWith("/dashboard")) return "You do not have permission to access this dashboard area. Please contact your administrator."
+    return "You do not have permission to access this area."
+  }
+
   // For SaaS admin routes, use only base navigation (no industry-specific items)
   // For business routes, use industry-specific navigation
   const allNavigation: NavigationItem[] = useMemo(() => {
@@ -279,6 +297,18 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
     if (hasPermission("sales")) return "/dashboard/sales"
     return "/onboarding/setup-business"
   }, [navigation, hasPermission])
+
+  const isRouteBlocked = useMemo(() => {
+    if (!pathname || isAdminRoute || (!pathname.startsWith("/dashboard") && !pathname.startsWith("/pos/"))) {
+      return false
+    }
+
+    if ((pathname === "/dashboard" || pathname === "/dashboard/") && !hasPermission("dashboard")) {
+      return true
+    }
+
+    return !canAccessTenantPath(user, pathname, displayOutlet as any)
+  }, [displayOutlet, hasPermission, isAdminRoute, pathname, user])
   
   // For admin routes, don't require business selection
   // For regular dashboard routes, redirect if no business (unless SaaS admin)
@@ -323,28 +353,34 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   }, [isAdminRoute, isSaaSAdmin, currentBusiness, pathname, router, user])
 
   useEffect(() => {
-    if (!pathname || isAdminRoute || !pathname.startsWith("/dashboard") && !pathname.startsWith("/pos/")) return
+    if (!pathname || isAdminRoute || (!pathname.startsWith("/dashboard") && !pathname.startsWith("/pos/"))) return
 
+    if (!isRouteBlocked) {
+      lastDeniedPathRef.current = null
+      setShowRoutePermDenied(false)
+      // Reset redirect flag when we successfully access an allowed route
+      if (pathname !== "/dashboard" && pathname !== "/dashboard/") {
+        redirectedRef.current = false
+      }
+      return
+    }
+
+    // For dashboard landing page (/dashboard or /dashboard/), redirect to first allowed module
     if ((pathname === "/dashboard" || pathname === "/dashboard/") && !hasPermission("dashboard")) {
-      if (pathname !== firstAllowedDashboardRoute) {
-        router.replace(firstAllowedDashboardRoute)
+      if (!redirectedRef.current) {
+        redirectedRef.current = true
+        router.push(firstAllowedDashboardRoute)
       }
       return
     }
 
-    if (canAccessTenantPath(user, pathname, displayOutlet as any)) {
-      permissionRedirectRef.current = false
-      return
+    // For other blocked routes, show permission denied dialog
+    if (lastDeniedPathRef.current !== pathname) {
+      lastDeniedPathRef.current = pathname
+      setRoutePermDeniedMessage(getRoutePermissionMessage(pathname))
+      setShowRoutePermDenied(true)
     }
-
-    if (!permissionRedirectRef.current) {
-      permissionRedirectRef.current = true
-      const fallbackRoute = firstAllowedDashboardRoute || "/onboarding/setup-business"
-      if (pathname !== fallbackRoute) {
-        router.replace(fallbackRoute)
-      }
-    }
-  }, [displayOutlet, firstAllowedDashboardRoute, hasPermission, isAdminRoute, pathname, router, user])
+  }, [isAdminRoute, isRouteBlocked, pathname, hasPermission, firstAllowedDashboardRoute, router])
 
   return (
     <div className={cn("flex bg-background", isPosRoute ? "h-screen overflow-hidden" : "min-h-screen")}>
@@ -583,7 +619,16 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
         {/* Page Content */}
         <main className={cn("flex-1", isPosRoute ? "overflow-hidden" : "overflow-y-auto")}>
           <div className={cn(isPosRoute ? "h-full min-h-0" : "p-4 lg:p-6 space-y-6")}>
-            {children}
+            {isRouteBlocked ? (
+              <div className="flex min-h-[40vh] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center">
+                <div className="max-w-md space-y-2">
+                  <h2 className="text-lg font-semibold text-slate-900">Access blocked</h2>
+                  <p className="text-sm text-slate-600">You do not have permission to use this feature. Contact your administrator if this access should be enabled.</p>
+                </div>
+              </div>
+            ) : (
+              children
+            )}
           </div>
         </main>
       </div>
@@ -658,6 +703,22 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
           </DialogHeader>
           <DialogFooter>
             <Button type="button" onClick={() => setShowOutletPermDenied(false)}>
+              OK
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showRoutePermDenied} onOpenChange={setShowRoutePermDenied}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Permission Denied</DialogTitle>
+            <DialogDescription>
+              {routePermDeniedMessage}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" onClick={() => setShowRoutePermDenied(false)}>
               OK
             </Button>
           </DialogFooter>

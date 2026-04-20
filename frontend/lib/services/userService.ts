@@ -6,9 +6,8 @@ export interface CreateUserData {
   name: string
   username?: string
   phone?: string
-  role?: "admin" | "manager" | "cashier" | "staff" | "driver"
+  role?: string
   tenant: string  // Tenant ID
-  outlet?: string  // Optional Outlet ID for Staff assignment
   password?: string  // Optional, will generate if not provided
 }
 
@@ -20,7 +19,7 @@ export interface CreateUserResponse {
 export interface UpdateUserData {
   name?: string
   phone?: string
-  role?: "admin" | "manager" | "cashier" | "staff" | "driver"
+  role?: string
   password?: string
 }
 
@@ -32,13 +31,11 @@ export const userService = {
       username: data.username || data.email.split('@')[0],
       name: data.name,
       phone: data.phone || "",
-      role: data.role || "staff",
       tenant: data.tenant,
     }
-    
-    // Include outlet if provided (for Staff assignment)
-    if (data.outlet) {
-      backendData.outlet = data.outlet
+
+    if (data.role) {
+      backendData.role = data.role
     }
     
     // Only include password if provided (for manual creation)
@@ -54,7 +51,7 @@ export const userService = {
       id: String(response.user.id),
       email: response.user.email,
       name: response.user.name || response.user.username || response.user.email.split('@')[0],
-      role: response.user.role || 'admin',
+      role: response.user.staff_role?.name || response.user.effective_role || response.user.role || 'staff',
       businessId: response.user.tenant ? String(response.user.tenant.id) : '',
       outletIds: [],
       createdAt: response.user.date_joined || new Date().toISOString(),
@@ -76,7 +73,7 @@ export const userService = {
       id: String(response.id),
       email: response.email,
       name: response.name || response.username || response.email.split('@')[0],
-      role: response.role || 'admin',
+      role: response.staff_role?.name || response.effective_role || response.role || 'staff',
       businessId: response.tenant ? String(response.tenant.id) : '',
       outletIds: [],
       createdAt: response.date_joined || new Date().toISOString(),
