@@ -262,6 +262,16 @@ class SyncPullChangesView(SyncBaseView):
 
         tenant_id = self._resolve_tenant(request)
         if not tenant_id:
+            if getattr(request.user, "is_saas_admin", False):
+                return Response(
+                    {
+                        "phase": getattr(settings, "OFFLINE_MODE_PHASE", 0),
+                        "cursor_in": 0,
+                        "cursor_out": 0,
+                        "changes": [],
+                        "detail": "No tenant context provided for SaaS admin; returning empty delta feed.",
+                    }
+                )
             return Response({"detail": "User must have a tenant."}, status=status.HTTP_400_BAD_REQUEST)
 
         cursor_raw = request.query_params.get("cursor")

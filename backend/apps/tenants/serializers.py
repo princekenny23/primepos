@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from decimal import Decimal
 from django.db.utils import ProgrammingError, OperationalError
+from django.core.exceptions import ObjectDoesNotExist
 from .models import Tenant, TenantPermissions
 from apps.outlets.serializers import OutletSerializer
 
@@ -110,7 +111,10 @@ class TenantSerializer(serializers.ModelSerializer):
 
     def get_permissions(self, obj):
         """Get tenant app/feature permissions"""
-        permissions_obj = getattr(obj, 'permissions', None)
+        try:
+            permissions_obj = obj.permissions
+        except ObjectDoesNotExist:
+            permissions_obj = None
         if not permissions_obj:
             permissions_obj, _ = TenantPermissions.objects.get_or_create(tenant=obj)
         return TenantPermissionsSerializer(permissions_obj).data
