@@ -148,32 +148,40 @@ def sync_role_permissions_from_codes(role, permission_codes: Iterable[str]) -> S
 
     requested_codes = {str(code).strip() for code in (permission_codes or []) if str(code).strip()}
 
-    available_permissions = PermissionDefinition.objects.filter(code__in=requested_codes, is_active=True)
-    available_by_code = {p.code: p for p in available_permissions}
+    try:
+        available_permissions = PermissionDefinition.objects.filter(code__in=requested_codes, is_active=True)
+        available_by_code = {p.code: p for p in available_permissions}
 
-    # Replace role permissions atomically (upsert + prune).
-    existing_by_code = {
-        rp.permission.code: rp
-        for rp in role.role_permissions.select_related('permission').all()
-    }
+        # Replace role permissions atomically (upsert + prune).
+        existing_by_code = {
+            rp.permission.code: rp
+            for rp in role.role_permissions.select_related('permission').all()
+        }
 
-    keep_codes = set(available_by_code.keys())
-    for code, permission in available_by_code.items():
-        rp = existing_by_code.get(code)
-        if rp:
-            if not rp.allowed:
-                rp.allowed = True
-                rp.save(update_fields=['allowed', 'updated_at'])
-        else:
-            RolePermission.objects.create(role=role, permission=permission, allowed=True)
+        keep_codes = set(available_by_code.keys())
+        for code, permission in available_by_code.items():
+            rp = existing_by_code.get(code)
+            if rp:
+                if not rp.allowed:
+                    rp.allowed = True
+                    rp.save(update_fields=['allowed', 'updated_at'])
+            else:
+                RolePermission.objects.create(role=role, permission=permission, allowed=True)
 
-    stale_ids = [
-        rp.id for code, rp in existing_by_code.items() if code not in keep_codes
-    ]
-    if stale_ids:
-        role.role_permissions.filter(id__in=stale_ids).delete()
+        stale_ids = [
+            rp.id for code, rp in existing_by_code.items() if code not in keep_codes
+        ]
+        if stale_ids:
+            role.role_permissions.filter(id__in=stale_ids).delete()
 
-    sync_legacy_role_flags_from_codes(role, keep_codes)
+        sync_legacy_role_flags_from_codes(role, keep_codes)
+        return keep_codes
+
+    except (ProgrammingError, OperationalError):
+        # Permission tables not migrated yet (rolling deploy scenario).
+        # Fall back to legacy boolean flags only.
+        sync_legacy_role_flags_from_codes(role, [])
+        return set()
     return keep_codes
 
 
