@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Set
+from django.db.utils import ProgrammingError, OperationalError
 
 
 # Canonical permission registry used by roles and access checks.
@@ -78,18 +79,22 @@ def _get_staff_models():
 
 def ensure_permission_catalog() -> None:
     """Ensure canonical permissions exist. Safe to call repeatedly."""
-    PermissionDefinition, _ = _get_staff_models()
-    for row in PERMISSION_DEFINITIONS:
-        PermissionDefinition.objects.get_or_create(
-            code=row['code'],
-            defaults={
-                'name': row['name'],
-                'module': row['module'],
-                'feature': row.get('feature', ''),
-                'description': row.get('description', ''),
-                'is_active': True,
-            },
-        )
+    try:
+        PermissionDefinition, _ = _get_staff_models()
+        for row in PERMISSION_DEFINITIONS:
+            PermissionDefinition.objects.get_or_create(
+                code=row['code'],
+                defaults={
+                    'name': row['name'],
+                    'module': row['module'],
+                    'feature': row.get('feature', ''),
+                    'description': row.get('description', ''),
+                    'is_active': True,
+                },
+            )
+    except (ProgrammingError, OperationalError):
+        # Keep auth and user listing paths operational during deploy windows.
+        return
 
 
 def _codes_from_legacy_flags(legacy_flags: Dict[str, bool]) -> Set[str]:
@@ -112,12 +117,16 @@ def get_role_permission_codes(role) -> Set[str]:
 
     ensure_permission_catalog()
 
-    canonical_codes = set(
-        role.role_permissions.filter(
-            allowed=True,
-            permission__is_active=True,
-        ).values_list('permission__code', flat=True)
-    )
+    canonical_codes: Set[str] = set()
+    try:
+        canonical_codes = set(
+            role.role_permissions.filter(
+                allowed=True,
+                permission__is_active=True,
+            ).values_list('permission__code', flat=True)
+        )
+    except (ProgrammingError, OperationalError):
+        canonical_codes = set()
 
     legacy_flags = {
         flag: bool(getattr(role, flag, False))
@@ -227,7 +236,10 @@ def user_has_permission_code(user, code: str) -> bool:
     if not normalized_code:
         return False
 
-    return normalized_code in user_permission_codes(user)
+    try:
+        return normalized_code in user_permission_codes(user)
+    except (ProgrammingError, OperationalError):
+        return False
 
 
 def user_has_legacy_permission(user, legacy_flag: str) -> bool:

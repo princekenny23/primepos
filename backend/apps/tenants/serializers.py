@@ -78,6 +78,16 @@ class TenantSerializer(serializers.ModelSerializer):
                     if outlet_id is not None
                 ]
 
+            try:
+                user_permissions = user.get_permissions()
+            except (ProgrammingError, OperationalError):
+                user_permissions = {}
+
+            try:
+                user_permission_codes = user.get_permission_codes()
+            except (ProgrammingError, OperationalError):
+                user_permission_codes = []
+
             user_data = {
                 'id': user.id,
                 'email': user.email,
@@ -89,8 +99,8 @@ class TenantSerializer(serializers.ModelSerializer):
                 'is_saas_admin': user.is_saas_admin,
                 'is_active': user.is_active,
                 'date_joined': user.date_joined.isoformat() if user.date_joined else None,
-                'permissions': user.get_permissions(),
-                'permission_codes': user.get_permission_codes(),
+                'permissions': user_permissions,
+                'permission_codes': user_permission_codes,
                 'outlet_ids': outlet_ids,
             }
             
