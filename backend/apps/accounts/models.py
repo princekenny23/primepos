@@ -30,6 +30,9 @@ class User(AbstractUser):
     def save(self, *args, **kwargs):
         if not self.name and self.username:
             self.name = self.username
+        if self.is_saas_admin:
+            self.tenant = None
+            self.role = 'saas_admin'
         super().save(*args, **kwargs)
 
     class Meta:
