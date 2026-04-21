@@ -221,23 +221,43 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
             else:
                 price = product.price
         
-        # Create tab item
-        item = TabItem.objects.create(
+        # Merge into an existing active line item when product details match,
+        # so repeated clicks increase quantity instead of creating duplicates.
+        notes = data.get('notes', '')
+        discount = data.get('discount', Decimal('0'))
+        existing_item = TabItem.objects.filter(
             tab=tab,
             product=product,
             unit=unit,
-            quantity=data['quantity'],
             price=price,
-            discount=data.get('discount', Decimal('0')),
-            added_by=request.user,
-            notes=data.get('notes', ''),
-        )
+            discount=discount,
+            notes=notes,
+            is_voided=False,
+        ).order_by('-added_at').first()
+
+        created = False
+        if existing_item:
+            existing_item.quantity += data['quantity']
+            existing_item.save()
+            item = existing_item
+        else:
+            item = TabItem.objects.create(
+                tab=tab,
+                product=product,
+                unit=unit,
+                quantity=data['quantity'],
+                price=price,
+                discount=discount,
+                added_by=request.user,
+                notes=notes,
+            )
+            created = True
         
         return Response({
             'item': TabItemSerializer(item).data,
             'tab_total': float(tab.total),
             'warning': None,
-        }, status=status.HTTP_201_CREATED)
+        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
     
     @action(detail=True, methods=['post'])
     def add_items(self, request, pk=None):

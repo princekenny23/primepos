@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Search, ChevronUp, ChevronDown } from "lucide-react"
+import { Search } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/utils"
 
@@ -53,9 +53,7 @@ export function TabFinderModal({
 }: TabFinderModalProps) {
   const [searchTerm, setSearchTerm] = useState("")
   const [sortBy, setSortBy] = useState<SortOption>("recent")
-  const [highlightedIndex, setHighlightedIndex] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
 
   // Filter tabs based on search
   const filteredTabs = useMemo(() => {
@@ -87,68 +85,6 @@ export function TabFinderModal({
     }
   }, [filteredTabs, sortBy])
 
-  // Reset highlight when search changes
-  useEffect(() => {
-    setHighlightedIndex(0)
-  }, [searchTerm, sortBy])
-
-  // Keyboard navigation
-  useEffect(() => {
-    if (!open) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault()
-          setHighlightedIndex((prev) =>
-            Math.min(prev + 1, sortedTabs.length - 1)
-          )
-          break
-        case "ArrowUp":
-          e.preventDefault()
-          setHighlightedIndex((prev) => Math.max(prev - 1, 0))
-          break
-        case "Enter":
-          e.preventDefault()
-          if (sortedTabs[highlightedIndex]) {
-            onSelectTab(sortedTabs[highlightedIndex].id)
-            onOpenChange(false)
-            setSearchTerm("")
-          }
-          break
-        case "Escape":
-          e.preventDefault()
-          onOpenChange(false)
-          setSearchTerm("")
-          break
-        default:
-          break
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [open, sortedTabs, highlightedIndex, onSelectTab, onOpenChange])
-
-  // Scroll wheel navigation
-  useEffect(() => {
-    if (!open || !listRef.current) return
-
-    const handleWheel = (e: WheelEvent) => {
-      if (!sortedTabs.length) return
-      e.preventDefault()
-      const direction = e.deltaY > 0 ? 1 : -1
-      setHighlightedIndex((prev) => {
-        const next = prev + direction
-        return Math.min(Math.max(next, 0), sortedTabs.length - 1)
-      })
-    }
-
-    const el = listRef.current
-    el.addEventListener("wheel", handleWheel, { passive: false })
-    return () => el.removeEventListener("wheel", handleWheel)
-  }, [open, sortedTabs.length])
-
   // Auto-focus search input when modal opens
   useEffect(() => {
     if (open && searchInputRef.current) {
@@ -156,21 +92,9 @@ export function TabFinderModal({
     }
   }, [open])
 
-  // Scroll highlighted item into view
-  useEffect(() => {
-    if (listRef.current) {
-      const highlightedElement = listRef.current.querySelector(
-        `[data-index="${highlightedIndex}"]`
-      )
-      if (highlightedElement) {
-        highlightedElement.scrollIntoView({ block: "nearest" })
-      }
-    }
-  }, [highlightedIndex])
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col p-0 gap-0">
+      <DialogContent className="max-w-2xl h-[80vh] flex flex-col p-0 gap-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle>Find Tab</DialogTitle>
           <DialogDescription>
@@ -217,15 +141,13 @@ export function TabFinderModal({
         ) : (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <ScrollArea className="flex-1">
-              <div ref={listRef} className="space-y-1 py-4 px-6">
-              {sortedTabs.map((tab, index) => {
+              <div className="space-y-1 py-4 px-6">
+              {sortedTabs.map((tab) => {
                 const isActive = currentTabId === tab.id
-                const isHighlighted = index === highlightedIndex
 
                 return (
                   <button
                     key={tab.id}
-                    data-index={index}
                     onClick={() => {
                       onSelectTab(tab.id)
                       onOpenChange(false)
@@ -235,9 +157,7 @@ export function TabFinderModal({
                       "w-full text-left p-3 rounded-lg border transition-colors flex items-start justify-between",
                       isActive
                         ? "bg-primary/10 border-primary"
-                        : isHighlighted
-                        ? "bg-accent border-accent"
-                        : "border-border hover:bg-muted",
+                        : "border-border hover:bg-accent",
                       "group"
                     )}
                   >
@@ -283,16 +203,11 @@ export function TabFinderModal({
         )}
 
         {/* Footer Help Text */}
-        <div className="px-6 py-3 border-t bg-muted/30 text-xs text-muted-foreground flex items-center justify-between">
-          <div className="flex gap-4">
-            <span>↑↓ or scroll to navigate</span>
-            <span>Enter to select</span>
-            <span>Esc to close</span>
-          </div>
-          {filteredTabs.length > 0 && (
+        {filteredTabs.length > 0 && (
+          <div className="px-6 py-3 border-t bg-muted/30 text-xs text-muted-foreground flex justify-end">
             <span>{filteredTabs.length} result(s)</span>
-          )}
-        </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )

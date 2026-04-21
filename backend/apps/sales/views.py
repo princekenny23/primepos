@@ -79,11 +79,20 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     serializer_class = SaleSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_sales']
+    required_permission_codes = ['sales.view']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'outlet', 'user', 'status', 'payment_method']
     search_fields = ['receipt_number', 'notes']
     ordering_fields = ['created_at', 'total']
     ordering = ['-created_at']
+
+    def get_permissions(self):
+        """Align read/write sale operations with canonical sales permission codes."""
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            self.required_permission_codes = ['sales.view']
+        else:
+            self.required_permission_codes = ['sales.create']
+        return [IsAuthenticated(), HasTenantModuleAccess()]
 
     def _snapshot_cost(self, product, unit=None):
         """Capture the product cost at sale time for historical COGS."""

@@ -65,18 +65,37 @@ class TenantSerializer(serializers.ModelSerializer):
     def get_users(self, obj):
         """Get users for this tenant with their role and permission information"""
         # Use a simplified serializer to avoid circular dependency
-        users = obj.users.select_related('tenant').prefetch_related('staff_profiles__role').all()
+        users = obj.users.select_related('tenant').prefetch_related(
+            'staff_profiles__role',
+            'staff_profiles__outlet_roles',
+        ).all()
         result = []
         
         for user in users:
-            staff_profile = user.staff_profiles.filter(tenant_id=obj.id).first()
+            prefetched_profiles = getattr(user, '_prefetched_objects_cache', {}).get('staff_profiles')
+            if prefetched_profiles is not None:
+                staff_profile = next(
+                    (profile for profile in prefetched_profiles if profile.tenant_id == obj.id),
+                    None,
+                )
+            else:
+                staff_profile = user.staff_profiles.filter(tenant_id=obj.id).first()
+
             outlet_ids = []
             if staff_profile:
-                outlet_ids = [
-                    str(outlet_id)
-                    for outlet_id in staff_profile.outlet_roles.values_list('outlet_id', flat=True)
-                    if outlet_id is not None
-                ]
+                prefetched_outlet_roles = getattr(staff_profile, '_prefetched_objects_cache', {}).get('outlet_roles')
+                if prefetched_outlet_roles is not None:
+                    outlet_ids = [
+                        str(outlet_role.outlet_id)
+                        for outlet_role in prefetched_outlet_roles
+                        if outlet_role.outlet_id is not None
+                    ]
+                else:
+                    outlet_ids = [
+                        str(outlet_id)
+                        for outlet_id in staff_profile.outlet_roles.values_list('outlet_id', flat=True)
+                        if outlet_id is not None
+                    ]
 
             try:
                 user_permissions = user.get_permissions()

@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 from .models import Shift
 from .serializers import ShiftSerializer
 from apps.outlets.models import Till, Outlet
-from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess, resolve_tenant_from_request
 from apps.tenants.permissions import is_admin_user
 
 
@@ -21,6 +21,8 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     serializer_class = ShiftSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_pos']
+    required_permission_codes = ['sales.create', 'pos.retail', 'pos.restaurant', 'pos.bar']
+    require_any_permission_code = True
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'till', 'status', 'operating_date']
     ordering_fields = ['start_time', 'operating_date']
@@ -41,9 +43,7 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 pass
         
         is_saas_admin = getattr(user, 'is_saas_admin', False)
-        request_tenant = getattr(self.request, 'tenant', None)
-        user_tenant = getattr(user, 'tenant', None)
-        tenant = request_tenant or user_tenant
+        tenant = resolve_tenant_from_request(self.request) or getattr(user, 'tenant', None)
         
         # Get base queryset
         queryset = Shift.objects.select_related('outlet', 'outlet__tenant', 'till', 'user').all()
@@ -75,7 +75,7 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     @action(detail=False, methods=['post'])
     def start(self, request):
         """Start a new shift"""
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         if not tenant:
             return Response(
                 {"detail": "User must have a tenant"},
@@ -153,7 +153,7 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def close(self, request, pk=None):
         """Close a shift and calculate system totals"""
         shift = self.get_object()
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         
         # CRITICAL: Verify tenant matches through outlet (unless SaaS admin or tenant admin)
         from apps.tenants.permissions import is_admin_user
@@ -221,22 +221,27 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     
     @action(detail=False, methods=['get'])
     def active(self, request):
-        """Get active shift for current user"""
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        """Get active open shift for an outlet within the tenant."""
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         if not tenant:
             return Response({"detail": "User must have a tenant"}, status=status.HTTP_400_BAD_REQUEST)
         
         outlet_id = request.query_params.get('outlet_id')
+        till_id = request.query_params.get('till_id')
         if not outlet_id:
             return Response({"detail": "outlet_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-        
-        # CRITICAL: Filter by tenant through outlet
-        shift = Shift.objects.filter(
-            outlet_id=outlet_id,
-            outlet__tenant=tenant,  # CRITICAL: Ensure tenant matches
-            user=request.user,
-            status='OPEN'
-        ).first()
+
+        query = {
+            'outlet_id': outlet_id,
+            'outlet__tenant': tenant,  # CRITICAL: Ensure tenant matches
+            'status': 'OPEN',
+        }
+        if till_id:
+            query['till_id'] = till_id
+
+        # Ownership is intentionally not required: managers/admins can start
+        # shifts and cashiers can attach to the same open shift.
+        shift = Shift.objects.filter(**query).order_by('-start_time').first()
         
         if not shift:
             return Response({"detail": "No active shift found"}, status=status.HTTP_404_NOT_FOUND)
@@ -246,8 +251,8 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     
     @action(detail=False, methods=['get'], url_path='current')
     def current(self, request):
-        """Get current open shift (more flexible than active - can filter by outlet/till)"""
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        """Get current open shift (can filter by outlet/till) within tenant scope."""
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         if not tenant:
             return Response({"detail": "User must have a tenant"}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -264,12 +269,9 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             query['outlet_id'] = outlet_id
         if till_id:
             query['till_id'] = till_id
-        if not request.user.is_saas_admin:
-            # For non-SaaS admins, also filter by user
-            query['user'] = request.user
-        
+
         # CRITICAL: Filter by tenant through outlet
-        shift = Shift.objects.filter(**query).first()
+        shift = Shift.objects.filter(**query).order_by('-start_time').first()
         
         if not shift:
             return Response({"detail": "No open shift found"}, status=status.HTTP_404_NOT_FOUND)
@@ -300,7 +302,7 @@ class ShiftViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     @action(detail=False, methods=['get'])
     def check(self, request):
         """Check if shift exists"""
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         if not tenant:
             return Response({"exists": False})
         

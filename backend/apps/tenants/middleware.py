@@ -39,6 +39,15 @@ class TenantMiddleware(MiddlewareMixin):
             if tenant:
                 request.tenant = tenant
 
+        # Allow explicit tenant targeting for business-scoped API requests.
+        if request.tenant is None:
+            tenant_header = request.META.get('HTTP_X_TENANT_ID')
+            if tenant_header not in (None, '', 'null'):
+                try:
+                    request.tenant = Tenant.objects.filter(is_active=True).get(id=int(tenant_header))
+                except (ValueError, TypeError, Tenant.DoesNotExist):
+                    pass
+
         # Get token from Authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
         if not auth_header.startswith('Bearer '):
@@ -55,9 +64,11 @@ class TenantMiddleware(MiddlewareMixin):
                 # Load user with tenant relationship
                 user = User.objects.select_related('tenant').get(id=user_id)
                 
-                # SaaS admins don't have tenant restrictions
+                # SaaS admins: keep any tenant already resolved from the host/X-Tenant-ID header;
+                # only fall back to None if no tenant was resolved earlier.
                 if user.is_saas_admin:
-                    request.tenant = None
+                    if not getattr(request, 'tenant', None):
+                        request.tenant = None
                 elif user.tenant:
                     # Set tenant on request for TenantFilterMixin to use
                     request.tenant = user.tenant

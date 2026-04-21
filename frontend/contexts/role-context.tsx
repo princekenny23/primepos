@@ -41,15 +41,10 @@ export function RoleProvider({ children }: RoleProviderProps) {
       return
     }
 
-    if (typeof window !== "undefined") {
-      const savedRole = localStorage.getItem("userRole")
-      if (savedRole) {
-        setRole(savedRole)
-      } else {
-        setRole("staff")
-      }
-    }
-    setIsLoading(false)
+    // user is null — auth store hasn't hydrated yet. Keep isLoading=true so
+    // hasPermission() returns false rather than reading stale localStorage.
+    // isLoading will be set to false once user arrives via the effect above.
+    setIsLoading(true)
   }, [user])
 
   const permissionKeyMap: Record<string, string> = {
@@ -97,6 +92,7 @@ export function RoleProvider({ children }: RoleProviderProps) {
   }
 
   const hasPermission = (permission: string): boolean => {
+    if (isLoading) return false
     if (user?.is_saas_admin) return true
 
     const permissionCodes = (user as any)?.permission_codes

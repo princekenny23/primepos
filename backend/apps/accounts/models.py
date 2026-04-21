@@ -1,7 +1,10 @@
+import logging
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+
+logger = logging.getLogger(__name__)
 
 
 class User(AbstractUser):
@@ -56,8 +59,8 @@ class User(AbstractUser):
             first_profile = self.staff_profiles.select_related('role').first()
             if first_profile and first_profile.role:
                 return first_profile.role
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("staff_role resolution failed for user %s: %s", self.pk, exc)
         return None
 
     def _resolve_permission_role(self):
@@ -65,8 +68,12 @@ class User(AbstractUser):
 
         Priority:
         1) Tenant staff profile role
-        2) Tenant staff outlet-role assignment
+        2) Any active staff profile role for this user
         3) Tenant Role matching accounts_user.role (case-insensitive)
+
+        Note: Outlet role assignments are intentionally not used for global
+        permission resolution because staff updates can recreate outlet-role rows
+        and cause non-deterministic permission changes.
         """
         try:
             from apps.staff.models import Role
@@ -78,10 +85,11 @@ class User(AbstractUser):
             if tenant_profile and tenant_profile.role and tenant_profile.role.is_active:
                 return tenant_profile.role
 
-            if tenant_profile:
-                outlet_assignment = tenant_profile.outlet_roles.select_related('role').filter(role__isnull=False).first()
-                if outlet_assignment and outlet_assignment.role and outlet_assignment.role.is_active:
-                    return outlet_assignment.role
+            # Fallback to any active profile-level role if tenant_id is not set
+            # or the tenant-specific profile has no active role.
+            first_active_profile = self.staff_profiles.select_related('role').filter(role__isnull=False).first()
+            if first_active_profile and first_active_profile.role and first_active_profile.role.is_active:
+                return first_active_profile.role
 
             role_name = (self.role or '').strip()
             if self.tenant_id and role_name:
@@ -92,8 +100,8 @@ class User(AbstractUser):
                 ).first()
                 if fallback_role:
                     return fallback_role
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error("_resolve_permission_role failed for user %s: %s", self.pk, exc)
 
         return None
     
@@ -150,9 +158,21 @@ class User(AbstractUser):
             'can_pos_bar': False,
             'can_switch_outlet': True,
         }
-        
-        for key in permissions:
-            permissions[key] = self.has_permission(key)
+
+        from .rbac import LEGACY_FLAG_TO_CODE, user_permission_codes
+
+        # Resolve canonical permission codes once, then map to legacy booleans.
+        # This avoids repeated role/code lookups for each can_* key.
+        code_set = set(user_permission_codes(self))
+        for legacy_flag, code in LEGACY_FLAG_TO_CODE.items():
+            if legacy_flag in permissions:
+                permissions[legacy_flag] = code in code_set
+
+        # SaaS admins keep full access for legacy compatibility consumers.
+        if self.is_saas_admin:
+            for key in permissions:
+                permissions[key] = True
+
         return permissions
 
 

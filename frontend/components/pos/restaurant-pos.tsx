@@ -583,7 +583,6 @@ export function RestaurantPOS() {
     setCart([])
     setSaleDiscount(null)
     setSelectedCustomer(null)
-    toast({ title: "Hold Sale", description: `Sale held: ${holdId}` })
     loadHeldSales()
   }
 
@@ -600,7 +599,6 @@ export function RestaurantPOS() {
       localStorage.removeItem(`pos_hold_${holdId}`)
     }
     setShowHoldSales(false)
-    toast({ title: "Hold Sale", description: "Hold sale retrieved." })
   }
 
   const handleConfirmReplaceCart = () => {
@@ -641,11 +639,6 @@ export function RestaurantPOS() {
         customer_id: openTabForm.customer_id || undefined, // Link to CRM customer
         table_id: barTableId,
         notes: combinedNotes || undefined,
-      })
-      
-      toast({
-        title: "Tab Opened",
-        description: `Tab ${newTab.tab_number} opened successfully`,
       })
       
       // Reset form and close modal
@@ -782,11 +775,6 @@ export function RestaurantPOS() {
     try {
       await tabService.voidItem(currentTab.id, itemId, "Removed by staff")
       await loadTabDetails(currentTab.id)
-      
-      toast({
-        title: "Item Removed",
-        description: "Item has been voided from the tab",
-      })
     } catch (error: any) {
       console.error("Failed to void item:", error)
       toast({
@@ -822,16 +810,7 @@ export function RestaurantPOS() {
     setIsSubmittingVoid(true)
 
     try {
-      const voidSale = await saleService.voidTransaction(initiatedSaleId, reason)
-
-      const receiptNumber =
-        voidSale._raw?.receipt_number ||
-        ("receipt_number" in voidSale ? (voidSale as any).receipt_number : undefined) ||
-        voidSale.id
-      toast({
-        title: "Void Sale",
-        description: `Sale voided. Receipt #${receiptNumber}`,
-      })
+      await saleService.voidTransaction(initiatedSaleId, reason)
 
       setShowVoidReasonDialog(false)
       setVoidReason("")
@@ -1092,11 +1071,6 @@ export function RestaurantPOS() {
         notes: "",
       })
       
-      toast({
-        title: "Tab Closed",
-        description: `Receipt #${result.sale.receipt_number}${change && change > 0 ? ` - Change: ${formatCurrency(change, currentBusiness)}` : ''}`,
-      })
-      
       // Try to print receipt
       try {
         await printReceipt({
@@ -1169,11 +1143,6 @@ export function RestaurantPOS() {
         notes: closeTabForm.notes,
       })
       
-      toast({
-        title: "Tab Closed",
-        description: `Receipt #${result.sale.receipt_number} - Change: ${formatCurrency(result.sale.change_given, currentBusiness)}`,
-      })
-      
       // Try to print receipt
       try {
         await printReceipt({
@@ -1233,11 +1202,6 @@ export function RestaurantPOS() {
         to_table_id: resolvedTableId || null,
       })
       
-      toast({
-        title: "Tab Transferred",
-        description: transferTableId ? "Tab moved to new table" : "Tab is now walk-up",
-      })
-      
       setShowTransferTab(false)
       setTransferTableId("")
       
@@ -1264,11 +1228,6 @@ export function RestaurantPOS() {
       const result = await tabService.merge({
         target_tab_id: mergeTargetId,
         source_tab_ids: selectedTabsToMerge,
-      })
-      
-      toast({
-        title: "Tabs Merged",
-        description: `${result.merged_count} tab(s) merged into Tab ${result.target_tab.tab_number}`,
       })
       
       setShowMergeTabs(false)
@@ -1354,13 +1313,7 @@ export function RestaurantPOS() {
 
       await kitchenService.create({
         sale_id: parseInt(String(sale.id), 10),
-        table_id: salePayload.table_id ? parseInt(salePayload.table_id, 10) : undefined,
         priority: "normal",
-      })
-
-      toast({
-        title: "Sent to kitchen",
-        description: `Created kitchen ticket for ${items.length} item${items.length === 1 ? "" : "s"}.`,
       })
       setIsDeliveryRequired(false)
     } catch (error: any) {
@@ -1441,11 +1394,6 @@ export function RestaurantPOS() {
       setSaleDiscount(null)
       setSelectedCustomer(null)
       setIsDeliveryRequired(false)
-
-      toast({
-        title: "Sent to deliveries",
-        description: `Delivery order created for ${items.length} item${items.length === 1 ? "" : "s"}.`,
-      })
     } catch (error: any) {
       console.error("Failed to send to deliveries:", error)
       toast({
@@ -2457,16 +2405,10 @@ export function RestaurantPOS() {
                   onClick={async () => {
                     if (!currentTab) return
                     try {
-                      const result = await tabService.split(currentTab.id, {
+                      await tabService.split(currentTab.id, {
                         split_type: "equal",
                         number_of_splits: num,
                       })
-                      if ('splits' in result) {
-                        toast({
-                          title: `Split ${num} Ways`,
-                          description: `Each person pays ${formatCurrency(result.splits[0].amount, currentBusiness)}`,
-                        })
-                      }
                       setShowSplitTab(false)
                     } catch (error: any) {
                       toast({

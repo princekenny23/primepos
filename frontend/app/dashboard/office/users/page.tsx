@@ -50,7 +50,7 @@ import type { User } from "@/lib/types"
 import { useI18n } from "@/contexts/i18n-context"
 
 export default function AccountsPage() {
-  const { currentBusiness, currentOutlet } = useBusinessStore()
+  const { currentBusiness } = useBusinessStore()
   const refreshUser = useAuthStore((state) => state.refreshUser)
   const { hasPermission } = useRole()
   const { toast } = useToast()
@@ -77,9 +77,11 @@ export default function AccountsPage() {
   const [showDeleteStaffDialog, setShowDeleteStaffDialog] = useState(false)
   const [showPermissionDeniedDialog, setShowPermissionDeniedDialog] = useState(false)
   const [permissionDeniedMessage, setPermissionDeniedMessage] = useState("You do not have permission to perform this action.")
+  const [hasLoadedUsers, setHasLoadedUsers] = useState(false)
+  const [hasLoadedStaff, setHasLoadedStaff] = useState(false)
+  const [hasLoadedRoles, setHasLoadedRoles] = useState(false)
   const useReal = useRealAPI()
 
-  const currentOutletId = currentOutlet?.id ? String(currentOutlet.id) : ""
   const canManageUsers = hasPermission("staff")
   const canManageStaff = hasPermission("staff")
   const canManageRoles = hasPermission("roles_manage")
@@ -194,8 +196,10 @@ export default function AccountsPage() {
         }))
         
         setUsers(transformedUsers)
+        setHasLoadedUsers(true)
       } else {
         setUsers([])
+        setHasLoadedUsers(true)
       }
     } catch (error: any) {
       console.error("Failed to load users:", error)
@@ -215,8 +219,10 @@ export default function AccountsPage() {
       if (useReal) {
         const response = await roleService.list({ tenant: currentBusiness.id })
         setRoles(response.results || [])
+        setHasLoadedRoles(true)
       } else {
         setRoles([])
+        setHasLoadedRoles(true)
       }
     } catch (error) {
       console.error("Failed to load roles:", error)
@@ -238,8 +244,10 @@ export default function AccountsPage() {
           tenant: currentBusiness.id,
         })
         setStaffMembers(response.results || [])
+        setHasLoadedStaff(true)
       } else {
         setStaffMembers([])
+        setHasLoadedStaff(true)
       }
     } catch (error) {
       console.error("Failed to load staff:", error)
@@ -247,13 +255,45 @@ export default function AccountsPage() {
     } finally {
       setIsStaffLoading(false)
     }
-  }, [currentBusiness, currentOutletId, useReal])
+  }, [currentBusiness, useReal])
 
   useEffect(() => {
-    loadUsers()
-    loadStaff()
-    loadRoles()
-  }, [loadUsers, loadStaff, loadRoles])
+    setHasLoadedUsers(false)
+    setHasLoadedStaff(false)
+    setHasLoadedRoles(false)
+    setUsers([])
+    setStaffMembers([])
+    setRoles([])
+    setIsLoading(Boolean(currentBusiness))
+    setIsStaffLoading(Boolean(currentBusiness))
+  }, [currentBusiness?.id, useReal])
+
+  useEffect(() => {
+    if (!currentBusiness) return
+
+    if (activeTab === "users" && !hasLoadedUsers) {
+      loadUsers()
+      return
+    }
+
+    if (activeTab === "staff" && !hasLoadedStaff) {
+      loadStaff()
+      return
+    }
+
+    if (activeTab === "roles" && !hasLoadedRoles) {
+      loadRoles()
+    }
+  }, [
+    activeTab,
+    currentBusiness,
+    hasLoadedUsers,
+    hasLoadedStaff,
+    hasLoadedRoles,
+    loadUsers,
+    loadStaff,
+    loadRoles,
+  ])
 
   const handleAccessStateRefresh = useCallback(async () => {
     await Promise.allSettled([
@@ -749,6 +789,7 @@ export default function AccountsPage() {
           if (!open) setSelectedStaff(null)
         }}
         staff={selectedStaff}
+        assignedStaffMembers={staffMembers}
         onSuccess={handleAccessStateRefresh}
       />
 

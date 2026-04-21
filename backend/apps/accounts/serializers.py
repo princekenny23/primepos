@@ -19,9 +19,17 @@ class UserSerializer(serializers.ModelSerializer):
         """Get tenant info without circular import"""
         if not obj.tenant:
             return None
-        # Import here to avoid circular dependency
-        from apps.tenants.serializers import TenantSerializer
-        return TenantSerializer(obj.tenant).data
+        # Keep tenant payload lightweight to avoid recursive users/outlets serialization.
+        tenant = obj.tenant
+        return {
+            'id': tenant.id,
+            'name': tenant.name,
+            'type': tenant.type,
+            'pos_type': tenant.pos_type,
+            'currency': tenant.currency,
+            'currency_symbol': tenant.currency_symbol,
+            'is_active': tenant.is_active,
+        }
     
     def get_permissions(self, obj):
         """Get user permissions from their role"""
@@ -47,9 +55,24 @@ class UserSerializer(serializers.ModelSerializer):
         if not obj.tenant_id:
             return []
 
-        staff_profile = obj.staff_profiles.filter(tenant_id=obj.tenant_id).first()
+        prefetched_profiles = getattr(obj, '_prefetched_objects_cache', {}).get('staff_profiles')
+        if prefetched_profiles is not None:
+            staff_profile = next(
+                (profile for profile in prefetched_profiles if profile.tenant_id == obj.tenant_id),
+                None,
+            )
+        else:
+            staff_profile = obj.staff_profiles.filter(tenant_id=obj.tenant_id).first()
         if not staff_profile:
             return []
+
+        prefetched_outlet_roles = getattr(staff_profile, '_prefetched_objects_cache', {}).get('outlet_roles')
+        if prefetched_outlet_roles is not None:
+            return [
+                str(outlet_role.outlet_id)
+                for outlet_role in prefetched_outlet_roles
+                if outlet_role.outlet_id is not None
+            ]
 
         outlet_ids = staff_profile.outlet_roles.values_list('outlet_id', flat=True)
         return [str(outlet_id) for outlet_id in outlet_ids if outlet_id is not None]

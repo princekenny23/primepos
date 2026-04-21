@@ -533,7 +533,6 @@ export function BarPOS() {
     setCart([])
     setSaleDiscount(null)
     setSelectedCustomer(null)
-    toast({ title: "Hold Sale", description: `Sale held: ${holdId}` })
     loadHeldSales()
   }
 
@@ -550,7 +549,6 @@ export function BarPOS() {
       localStorage.removeItem(`pos_hold_${holdId}`)
     }
     setShowHoldSales(false)
-    toast({ title: "Hold Sale", description: "Hold sale retrieved." })
   }
 
   const handleConfirmReplaceCart = () => {
@@ -583,11 +581,6 @@ export function BarPOS() {
         customer_id: openTabForm.customer_id || undefined, // Link to CRM customer
         table_id: openTabForm.table_id || undefined,
         notes: openTabForm.notes || undefined,
-      })
-      
-      toast({
-        title: "Tab Opened",
-        description: `Tab ${newTab.tab_number} opened successfully`,
       })
       
       // Reset form and close modal
@@ -724,11 +717,6 @@ export function BarPOS() {
     try {
       await tabService.voidItem(currentTab.id, itemId, "Removed by bartender")
       await loadTabDetails(currentTab.id)
-      
-      toast({
-        title: "Item Removed",
-        description: "Item has been voided from the tab",
-      })
     } catch (error: any) {
       console.error("Failed to void item:", error)
       toast({
@@ -764,16 +752,7 @@ export function BarPOS() {
     setIsSubmittingVoid(true)
 
     try {
-      const voidSale = await saleService.voidTransaction(initiatedSaleId, reason)
-
-      const receiptNumber =
-        voidSale._raw?.receipt_number ||
-        ("receipt_number" in voidSale ? (voidSale as any).receipt_number : undefined) ||
-        voidSale.id
-      toast({
-        title: "Void Sale",
-        description: `Sale voided. Receipt #${receiptNumber}`,
-      })
+      await saleService.voidTransaction(initiatedSaleId, reason)
 
       setShowVoidReasonDialog(false)
       setVoidReason("")
@@ -974,11 +953,6 @@ export function BarPOS() {
       setSelectedCustomer(null)
       setShowPaymentModal(false)
       setIsDeliveryRequired(false)
-
-      toast({
-        title: "Sent to deliveries",
-        description: "Sale created and delivery order generated.",
-      })
     } catch (error: any) {
       console.error("Delivery send error:", error)
       toast({
@@ -1107,11 +1081,6 @@ export function BarPOS() {
         discount_reason: saleDiscount?.reason,
         notes: "",
       })
-      
-      toast({
-        title: "Tab Closed",
-        description: `Receipt #${result.sale.receipt_number}${change && change > 0 ? ` - Change: ${formatCurrency(change, currentBusiness)}` : ''}`,
-      })
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("sale-completed"))
@@ -1188,11 +1157,6 @@ export function BarPOS() {
         discount_reason: saleDiscount?.reason,
         notes: closeTabForm.notes,
       })
-      
-      toast({
-        title: "Tab Closed",
-        description: `Receipt #${result.sale.receipt_number} - Change: ${formatCurrency(result.sale.change_given, currentBusiness)}`,
-      })
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("sale-completed"))
@@ -1248,11 +1212,6 @@ export function BarPOS() {
         to_table_id: transferTableId || null,
       })
       
-      toast({
-        title: "Tab Transferred",
-        description: transferTableId ? "Tab moved to new table" : "Tab is now walk-up",
-      })
-      
       setShowTransferTab(false)
       setTransferTableId("")
       
@@ -1279,11 +1238,6 @@ export function BarPOS() {
       const result = await tabService.merge({
         target_tab_id: mergeTargetId,
         source_tab_ids: selectedTabsToMerge,
-      })
-      
-      toast({
-        title: "Tabs Merged",
-        description: `${result.merged_count} tab(s) merged into Tab ${result.target_tab.tab_number}`,
       })
       
       setShowMergeTabs(false)
@@ -2267,16 +2221,10 @@ export function BarPOS() {
                   onClick={async () => {
                     if (!currentTab) return
                     try {
-                      const result = await tabService.split(currentTab.id, {
+                      await tabService.split(currentTab.id, {
                         split_type: "equal",
                         number_of_splits: num,
                       })
-                      if ('splits' in result) {
-                        toast({
-                          title: `Split ${num} Ways`,
-                          description: `Each person pays ${formatCurrency(result.splits[0].amount, currentBusiness)}`,
-                        })
-                      }
                       setShowSplitTab(false)
                     } catch (error: any) {
                       toast({

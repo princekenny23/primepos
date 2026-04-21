@@ -174,8 +174,17 @@ class KitchenOrderTicketViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if not tenant:
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Tenant is required.")
-        
-        sale_id = serializer.validated_data.get('sale_id')
+
+        # Remove write-only ids from validated_data so serializer.save does not
+        # persist raw FK ids that bypass tenant-safe object resolution below.
+        sale_id = serializer.validated_data.pop('sale_id', None)
+        requested_table_id = serializer.validated_data.pop('table_id', None)
+        serializer.validated_data.pop('till_id', None)
+
+        if not sale_id:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("sale_id is required.")
+
         from apps.sales.models import Sale
         try:
             sale = Sale.objects.get(id=sale_id, tenant=tenant)
@@ -189,16 +198,16 @@ class KitchenOrderTicketViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         # Get outlet from sale
         outlet = sale.outlet
-        
+
         # Get table from sale or from serializer
-        table_id = serializer.validated_data.get('table_id') or (sale.table.id if sale.table else None)
+        table_id = requested_table_id or (sale.table.id if sale.table else None)
         table = None
         if table_id:
             from .models import Table
             try:
                 table = Table.objects.get(id=table_id, tenant=tenant)
             except Table.DoesNotExist:
-                pass
+                table = None
         
         # Get till from sale (inherit from sale if not provided)
         till = sale.till if hasattr(sale, 'till') else None

@@ -303,6 +303,12 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
       return false
     }
 
+    // During logout/auth transitions, avoid showing permission-denied for
+    // dashboard routes while user context is being cleared.
+    if (!user) {
+      return false
+    }
+
     if ((pathname === "/dashboard" || pathname === "/dashboard/") && !hasPermission("dashboard")) {
       return true
     }

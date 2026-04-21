@@ -7,7 +7,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.utils import timezone
 from .models import Role, Staff, Attendance
 from .serializers import RoleSerializer, StaffSerializer, AttendanceSerializer
-from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess, resolve_tenant_from_request
 
 
 class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
@@ -16,12 +16,19 @@ class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     serializer_class = RoleSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_settings']
+    ignore_outlet_module_permissions = True
     required_permission_codes = ['roles.manage']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'is_active']
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
+
+    def get_permissions(self):
+        """Safe methods (list/retrieve) only require authentication; write methods require roles.manage."""
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasTenantModuleAccess()]
     
     def get_queryset(self):
         """Ensure tenant filtering is applied correctly"""
@@ -38,9 +45,7 @@ class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 pass
         
         is_saas_admin = getattr(user, 'is_saas_admin', False)
-        request_tenant = getattr(self.request, 'tenant', None)
-        user_tenant = getattr(user, 'tenant', None)
-        tenant = request_tenant or user_tenant
+        tenant = resolve_tenant_from_request(self.request) or getattr(user, 'tenant', None)
         
         # Get base queryset
         queryset = Role.objects.all()
@@ -67,7 +72,7 @@ class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def update(self, request, *args, **kwargs):
         """Override update to ensure tenant matches"""
         instance = self.get_object()
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         
         # Verify tenant matches (unless SaaS admin or tenant admin)
         from apps.tenants.permissions import is_admin_user
@@ -82,7 +87,7 @@ class RoleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def destroy(self, request, *args, **kwargs):
         """Override destroy to ensure tenant matches"""
         instance = self.get_object()
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         
         # Verify tenant matches (unless SaaS admin or tenant admin)
         from apps.tenants.permissions import is_admin_user
@@ -102,13 +107,21 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     )
     serializer_class = StaffSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
-    required_tenant_permissions = ['allow_settings']
+    required_tenant_permissions = ['allow_office', 'allow_settings']
+    ignore_outlet_module_permissions = True
+    require_any_tenant_permission = True
     required_permission_codes = ['staff.manage']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['tenant', 'role', 'is_active']
     search_fields = ['user__name', 'user__email']
     ordering_fields = ['created_at']
     ordering = ['-created_at']
+
+    def get_permissions(self):
+        """Safe methods only require authentication; write methods require staff.manage."""
+        if self.request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasTenantModuleAccess()]
     
     def get_queryset(self):
         """Ensure tenant filtering is applied correctly"""
@@ -125,9 +138,7 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 pass
         
         is_saas_admin = getattr(user, 'is_saas_admin', False)
-        request_tenant = getattr(self.request, 'tenant', None)
-        user_tenant = getattr(user, 'tenant', None)
-        tenant = request_tenant or user_tenant
+        tenant = resolve_tenant_from_request(self.request) or getattr(user, 'tenant', None)
         
         # Get base queryset
         queryset = Staff.objects.select_related('user', 'tenant', 'role').prefetch_related(
@@ -236,7 +247,7 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def update(self, request, *args, **kwargs):
         """Override update to ensure tenant matches"""
         instance = self.get_object()
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         
         # Verify tenant matches (unless SaaS admin or tenant admin)
         from apps.tenants.permissions import is_admin_user
@@ -251,7 +262,7 @@ class StaffViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def destroy(self, request, *args, **kwargs):
         """Override destroy to ensure tenant matches"""
         instance = self.get_object()
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
+        tenant = resolve_tenant_from_request(request) or request.user.tenant
         
         # Verify tenant matches (unless SaaS admin or tenant admin)
         from apps.tenants.permissions import is_admin_user

@@ -52,7 +52,7 @@ LEGACY_FLAG_TO_CODE: Dict[str, str] = {
 # Additional access codes implied by legacy can_* flags.
 IMPLIED_CODES_BY_FLAG: Dict[str, Set[str]] = {
     'can_sales': {'sales.create'},
-    'can_staff': {'users.create', 'users.update', 'users.delete', 'roles.assign'},
+    'can_staff': {'users.create', 'users.update', 'users.delete', 'roles.assign', 'roles.manage'},
     'can_settings': {'roles.manage'},
 }
 
@@ -179,9 +179,9 @@ def sync_role_permissions_from_codes(role, permission_codes: Iterable[str]) -> S
 
     except (ProgrammingError, OperationalError):
         # Permission tables not migrated yet (rolling deploy scenario).
-        # Fall back to legacy boolean flags only.
-        sync_legacy_role_flags_from_codes(role, [])
-        return set()
+        # Fall back to legacy boolean flags only, syncing requested codes.
+        sync_legacy_role_flags_from_codes(role, requested_codes)
+        return requested_codes
     return keep_codes
 
 

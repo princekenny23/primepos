@@ -217,12 +217,13 @@ export default function ShiftManagementPage() {
   }, [currentBusiness, selectedOutlet, outlets, currentOutlet?.id])
 
   useEffect(() => {
-    if (currentOutlet?.id) {
-      setSelectedOutlet(String(currentOutlet.id))
+    // Only initialize/repair selection. Do not override manual dropdown changes.
+    if (selectedOutlet && outlets.some((outlet) => String(outlet.id) === selectedOutlet)) {
       return
     }
 
-    if (selectedOutlet && outlets.some((outlet) => String(outlet.id) === selectedOutlet)) {
+    if (currentOutlet?.id) {
+      setSelectedOutlet(String(currentOutlet.id))
       return
     }
 
@@ -290,7 +291,7 @@ export default function ShiftManagementPage() {
   }
 
   const getOutletName = (outletId: string): string => {
-    const outlet = outlets.find(o => o.id === outletId)
+    const outlet = outlets.find((o) => String(o.id) === String(outletId))
     return outlet?.name || "Unknown Outlet"
   }
 
@@ -500,7 +501,7 @@ export default function ShiftManagementPage() {
                     </SelectTrigger>
                     <SelectContent>
                       {outlets.map((outlet) => (
-                        <SelectItem key={outlet.id} value={outlet.id}>
+                        <SelectItem key={outlet.id} value={String(outlet.id)}>
                           {outlet.name}
                         </SelectItem>
                       ))}

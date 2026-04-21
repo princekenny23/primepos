@@ -30,9 +30,10 @@ interface AddEditStaffModalProps {
   onOpenChange: (open: boolean) => void
   staff?: Staff | null
   onSuccess?: () => void
+  assignedStaffMembers?: Staff[]
 }
 
-export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddEditStaffModalProps) {
+export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess, assignedStaffMembers = [] }: AddEditStaffModalProps) {
   const { toast } = useToast()
   const { currentBusiness } = useBusinessStore()
   const { outlets } = useTenant()
@@ -64,17 +65,23 @@ export function AddEditStaffModal({ open, onOpenChange, staff, onSuccess }: AddE
     try {
       const tenantResponse = await api.get<any>(`/tenants/${currentBusiness.id}/`)
       const tenantUsers = tenantResponse?.users || []
-      const users = tenantUsers.map((tenantUser: any) => ({
-        id: String(tenantUser.id),
-        name: tenantUser.name || tenantUser.username || tenantUser.email?.split("@")[0] || "Unnamed User",
-        email: tenantUser.email || "",
-      }))
+      
+      // Get IDs of already-assigned staff to filter them out
+      const assignedUserIds = new Set(assignedStaffMembers.map((s) => String(s.user?.id)))
+      
+      const users = tenantUsers
+        .filter((tenantUser: any) => !assignedUserIds.has(String(tenantUser.id)))
+        .map((tenantUser: any) => ({
+          id: String(tenantUser.id),
+          name: tenantUser.name || tenantUser.username || tenantUser.email?.split("@")[0] || "Unnamed User",
+          email: tenantUser.email || "",
+        }))
       setAvailableUsers(users)
     } catch (error) {
       console.error("Failed to load available users:", error)
       setAvailableUsers([])
     }
-  }, [currentBusiness])
+  }, [currentBusiness, assignedStaffMembers])
 
   useEffect(() => {
     if (open) {

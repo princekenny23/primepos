@@ -100,6 +100,12 @@ export class ApiClient {
   ): Promise<T> {
     const url = `${this.baseURL}${endpoint}`
     const isAuthEndpoint = endpoint.startsWith('/auth/')
+    const endpointNoQuery = endpoint.split('?')[0]
+    const isManagementEndpoint =
+      endpointNoQuery.startsWith('/staff/') ||
+      endpointNoQuery.startsWith('/roles/') ||
+      endpointNoQuery.startsWith('/tenants/') ||
+      endpointNoQuery.startsWith('/users/')
     const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData
     
     const config: RequestInit = {
@@ -136,7 +142,7 @@ export class ApiClient {
       try {
         // Try to get current outlet from localStorage (set by tenant context)
         const outletId = localStorage.getItem("currentOutletId")
-        if (outletId) {
+        if (outletId && !isManagementEndpoint) {
           config.headers = {
             ...config.headers,
             "X-Outlet-ID": outletId,

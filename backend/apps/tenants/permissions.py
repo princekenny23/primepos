@@ -278,6 +278,7 @@ class HasTenantModuleAccess(permissions.BasePermission):
     View attributes:
     - required_tenant_permissions: str | list[str] | tuple[str, ...]
     - require_any_tenant_permission: bool (default False)
+    - ignore_outlet_module_permissions: bool (default False)
     """
 
     def has_permission(self, request, view):
@@ -311,7 +312,8 @@ class HasTenantModuleAccess(permissions.BasePermission):
         if not permissions_obj:
             return True
 
-        outlet = resolve_outlet_from_request(request, tenant)
+        ignore_outlet_scope = bool(getattr(view, 'ignore_outlet_module_permissions', False))
+        outlet = None if ignore_outlet_scope else resolve_outlet_from_request(request, tenant)
 
         keys = required if isinstance(required, (list, tuple, set)) else [required]
 

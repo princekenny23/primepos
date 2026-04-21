@@ -275,7 +275,12 @@ export function canAccessTenantPath(
   }
 
   if (pathname.startsWith("/dashboard/pos") || pathname.startsWith("/pos/") || pathname.startsWith("/dashboard/restaurant") || pathname.startsWith("/dashboard/bar")) {
-    if (!userCan(user, "can_sales")) return false
+    const hasPosAccess =
+      userCan(user, "can_sales") ||
+      userCan(user, "can_pos_retail") ||
+      userCan(user, "can_pos_restaurant") ||
+      userCan(user, "can_pos_bar")
+    if (!hasPosAccess) return false
     if (!isTenantFeatureEnabled(user, "allow_pos", outlet)) return false
     const hasAnyPosMode =
       isTenantFeatureEnabled(user, "allow_pos_retail", outlet) ||

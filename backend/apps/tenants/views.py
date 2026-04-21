@@ -9,7 +9,7 @@ from django.core.files.uploadedfile import UploadedFile
 import logging
 from .models import Tenant
 from .serializers import TenantSerializer
-from .permissions import IsSaaSAdmin, TenantFilterMixin, HasTenantModuleAccess
+from .permissions import IsSaaSAdmin, TenantFilterMixin, HasTenantModuleAccess, resolve_tenant_from_request
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ class TenantViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     serializer_class = TenantSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_settings']
+    ignore_outlet_module_permissions = True
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['type', 'is_active']
     search_fields = ['name', 'email', 'phone']
@@ -39,12 +40,23 @@ class TenantViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def get_queryset(self):
         """Override to filter tenants - users can only see their own tenant"""
         queryset = super().get_queryset()
+
+        user = self.request.user
+        if not hasattr(user, '_tenant_loaded'):
+            try:
+                user = User.objects.select_related('tenant').get(pk=user.pk)
+                self.request.user = user
+                user._tenant_loaded = True
+            except User.DoesNotExist:
+                pass
+
         # SaaS admins can see all tenants
-        if self.request.user.is_saas_admin:
+        if user.is_saas_admin:
             return queryset
-        # Regular users only see their own tenant
-        if self.request.user.tenant:
-            return queryset.filter(id=self.request.user.tenant.id)
+
+        tenant = resolve_tenant_from_request(self.request) or getattr(user, 'tenant', None)
+        if tenant:
+            return queryset.filter(id=tenant.id)
         return queryset.none()
     
     def update(self, request, *args, **kwargs):
@@ -53,7 +65,8 @@ class TenantViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         # Regular users can only update their own tenant
         if not request.user.is_saas_admin:
-            if not request.user.tenant or instance.id != request.user.tenant.id:
+            tenant = resolve_tenant_from_request(request) or request.user.tenant
+            if not tenant or instance.id != tenant.id:
                 return Response(
                     {"detail": "You can only update your own tenant."},
                     status=status.HTTP_403_FORBIDDEN
@@ -67,7 +80,8 @@ class TenantViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         # Regular users can only update their own tenant
         if not request.user.is_saas_admin:
-            if not request.user.tenant or instance.id != request.user.tenant.id:
+            tenant = resolve_tenant_from_request(request) or request.user.tenant
+            if not tenant or instance.id != tenant.id:
                 return Response(
                     {"detail": "You can only update your own tenant."},
                     status=status.HTTP_403_FORBIDDEN
