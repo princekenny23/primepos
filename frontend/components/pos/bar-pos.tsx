@@ -104,6 +104,8 @@ type HeldSale = {
 
 type PosRowAction = "discount" | "refund" | "hold" | "retrieve" | "drawer" | "close" | "void" | "delivery"
 
+const TAB_PENDING_SALE_PREFIX = "tab:"
+
 const POS_ROW_ACTION_LABELS: Record<PosRowAction, string> = {
   discount: "Discount",
   refund: "Refund",
@@ -479,6 +481,14 @@ export function BarPOS() {
     return matchesSearch && matchesCategory && product.isActive
   })
 
+  const getProductStockQty = (product: Product) => Number(product.stock ?? 0)
+
+  const isLowStockProduct = (product: Product) => {
+    const stockQty = getProductStockQty(product)
+    const threshold = Number((product as any).low_stock_threshold ?? (product as any).lowStockThreshold ?? 10)
+    return Boolean((product as any).is_low_stock || (stockQty > 0 && stockQty <= threshold))
+  }
+
   // ==================== Cart Calculations ====================
 
   const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0)
@@ -605,6 +615,15 @@ export function BarPOS() {
   }
 
   const handleAddItemToTab = async (product: Product) => {
+    if (product.stock !== undefined && getProductStockQty(product) <= 0) {
+      toast({
+        title: "Out of stock",
+        description: `${product.name} has no stock available.`,
+        variant: "destructive",
+      })
+      return
+    }
+
     if (!currentTab) {
       // No tab selected - add to local cart for quick sale
       const existingItem = cart.find(item => item.productId === product.id)
@@ -727,6 +746,23 @@ export function BarPOS() {
     }
   }
 
+  const voidAllTabItems = useCallback(async (tabId: string, reason: string) => {
+    const tabToVoid = currentTab?.id === tabId ? currentTab : await tabService.get(tabId)
+    const nonVoidedItems = tabToVoid.items.filter((item) => !item.is_voided)
+
+    if (nonVoidedItems.length > 0) {
+      await Promise.all(
+        nonVoidedItems.map((item) => tabService.voidItem(tabId, item.id, reason))
+      )
+    }
+
+    await Promise.all([
+      loadTabDetails(tabId),
+      loadTabs(),
+      loadTables(),
+    ])
+  }, [currentTab, loadTabDetails, loadTabs, loadTables])
+
   const openVoidReasonDialog = () => {
     setVoidReason("")
     setShowVoidReasonDialog(true)
@@ -752,7 +788,27 @@ export function BarPOS() {
     setIsSubmittingVoid(true)
 
     try {
-      await saleService.voidTransaction(initiatedSaleId, reason)
+      if (initiatedSaleId.startsWith(TAB_PENDING_SALE_PREFIX)) {
+        const tabId = initiatedSaleId.slice(TAB_PENDING_SALE_PREFIX.length)
+        await voidAllTabItems(tabId, reason)
+        setCart([])
+        setSaleDiscount(null)
+        setSelectedCustomer(null)
+        toast({
+          title: "Void Sale",
+          description: `Tab #${tabId} voided successfully.`,
+        })
+      } else {
+        const voidSale = await saleService.voidTransaction(initiatedSaleId, reason)
+        const receiptNumber =
+          (voidSale as any)._raw?.receipt_number ||
+          ("receipt_number" in (voidSale as any) ? (voidSale as any).receipt_number : undefined) ||
+          voidSale.id
+        toast({
+          title: "Void Sale",
+          description: `Sale voided. Receipt #${receiptNumber}`,
+        })
+      }
 
       setShowVoidReasonDialog(false)
       setVoidReason("")
@@ -780,6 +836,10 @@ export function BarPOS() {
     }
 
     if (currentTab) {
+      if (!transactionLocked) {
+        setInitiatedSaleId(`${TAB_PENDING_SALE_PREFIX}${currentTab.id}`)
+        setTransactionLocked(true)
+      }
       setShowPaymentModal(true)
       return
     }
@@ -851,10 +911,6 @@ export function BarPOS() {
   const handlePaymentCancel = async () => {
     setShowPaymentModal(false)
 
-    if (currentTab) {
-      return
-    }
-
     if (!transactionLocked || !initiatedSaleId) {
       setCart([])
       setSaleDiscount(null)
@@ -877,7 +933,17 @@ export function BarPOS() {
 
     setIsSubmittingVoid(true)
     try {
-      await saleService.voidTransaction(initiatedSaleId, reason)
+      if (initiatedSaleId.startsWith(TAB_PENDING_SALE_PREFIX)) {
+        const tabId = initiatedSaleId.slice(TAB_PENDING_SALE_PREFIX.length)
+        await voidAllTabItems(tabId, reason)
+        toast({
+          title: "Payment canceled",
+          description: `Tab #${tabId} items were voided and total reset.`,
+        })
+      } else {
+        await saleService.voidTransaction(initiatedSaleId, reason)
+      }
+
       setCart([])
       setSaleDiscount(null)
       setSelectedCustomer(null)
@@ -1113,6 +1179,8 @@ export function BarPOS() {
       setCurrentTab(null)
       setCart([])
       setSaleDiscount(null)
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
       
       await loadTabs()
       await loadTables()
@@ -1188,6 +1256,8 @@ export function BarPOS() {
       setCurrentTab(null)
       setCart([])
       setSaleDiscount(null)
+      setTransactionLocked(false)
+      setInitiatedSaleId("")
       
       await loadTabs()
       await loadTables()
@@ -1430,8 +1500,17 @@ export function BarPOS() {
                                 {product.sku && <span>SKU: {product.sku}</span>}
                                 {product.barcode && <span>Barcode: {product.barcode}</span>}
                                 {product.stock !== undefined && (
-                                  <span className={product.stock <= 10 ? "text-destructive font-medium" : ""}>
-                                    Stock: {product.stock}
+                                  <span
+                                    className={
+                                      getProductStockQty(product) <= 0
+                                        ? "text-destructive font-semibold"
+                                        : isLowStockProduct(product)
+                                          ? "text-destructive font-medium"
+                                          : ""
+                                    }
+                                  >
+                                    Stock: {getProductStockQty(product)}
+                                    {getProductStockQty(product) <= 0 ? " OUT" : isLowStockProduct(product) ? " LOW" : ""}
                                   </span>
                                 )}
                               </div>
@@ -1511,12 +1590,31 @@ export function BarPOS() {
                         {filteredProducts.map(product => (
                           <Card
                             key={product.id}
-                            className="w-20 h-20 overflow-hidden cursor-pointer hover:shadow-md transition-shadow border border-muted"
+                            className={cn(
+                              "w-20 h-20 overflow-hidden cursor-pointer hover:shadow-md transition-shadow border",
+                              getProductStockQty(product) <= 0
+                                ? "border-muted opacity-60"
+                                : isLowStockProduct(product)
+                                  ? "border-destructive/50"
+                                  : "border-muted"
+                            )}
                             onClick={() => handleAddItemToTab(product)}
                           >
                             <CardContent className="h-full p-1 flex flex-col justify-between">
                               <h3 className="text-xs font-medium leading-tight line-clamp-2 overflow-hidden break-words">{product.name}</h3>
-                              <p className="text-[10px] text-muted-foreground">Stock: {product.stock ?? 0}</p>
+                              <p
+                                className={cn(
+                                  "text-[10px]",
+                                  getProductStockQty(product) <= 0
+                                    ? "text-destructive font-semibold"
+                                    : isLowStockProduct(product)
+                                      ? "text-destructive font-medium"
+                                      : "text-muted-foreground"
+                                )}
+                              >
+                                Stock: {getProductStockQty(product)}
+                                {getProductStockQty(product) <= 0 ? " OUT" : isLowStockProduct(product) ? " LOW" : ""}
+                              </p>
                             </CardContent>
                           </Card>
                         ))}

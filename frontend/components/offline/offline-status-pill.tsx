@@ -11,7 +11,17 @@ export function OfflineStatusPill() {
   const deadLetterCount = useOfflineStore((state) => state.deadLetterCount)
   const lastSyncError = useOfflineStore((state) => state.lastSyncError)
 
-  if (!offlineConfig.enabled) return null
+  if (!offlineConfig.enabled) {
+    if (!isOnline) {
+      return (
+        <Badge variant="secondary" className="bg-amber-100 text-amber-900 border-amber-300">
+          Offline
+        </Badge>
+      )
+    }
+
+    return <Badge className="bg-emerald-100 text-emerald-900 border-emerald-300">Online</Badge>
+  }
 
   if (deadLetterCount > 0) {
     return (

@@ -56,7 +56,6 @@ import { canAccessTenantPath, hasDistributionAccess, isTenantFeatureEnabled } fr
 import { useToast } from "@/components/ui/use-toast"
 import { authService } from "@/lib/services/authService"
 import { api } from "@/lib/api"
-import { OfflineStatusPill } from "@/components/offline/offline-status-pill"
 
 // Navigation translation keys mapping
 const navTranslationKeys: Record<string, string> = {
@@ -578,7 +577,6 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                 triggerClassName="text-white hover:bg-blue-800 hover:text-white"
                 unreadRingClassName="border-white/90"
               />
-              <OfflineStatusPill />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button

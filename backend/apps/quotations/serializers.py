@@ -40,6 +40,19 @@ class QuotationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'quotation_number', 'tenant', 'user', 'created_at', 'updated_at']
 
+    def validate_outlet(self, value):
+        """Validate outlet exists for the user's tenant"""
+        from apps.outlets.models import Outlet
+        request = self.context.get('request')
+        if request and hasattr(request, 'user'):
+            tenant = request.user.tenant
+            try:
+                outlet = Outlet.objects.get(id=value, tenant=tenant)
+                return value
+            except Outlet.DoesNotExist:
+                raise serializers.ValidationError(f'Outlet with id {value} does not exist for your tenant.')
+        return value
+
     def create(self, validated_data):
         """Create quotation with items"""
         items_data = validated_data.pop('items', [])
@@ -54,7 +67,11 @@ class QuotationSerializer(serializers.ModelSerializer):
         # Handle outlet - convert to object if needed
         outlet_id = validated_data.pop('outlet')
         from apps.outlets.models import Outlet
-        validated_data['outlet'] = Outlet.objects.get(id=outlet_id, tenant=validated_data['tenant'])
+        try:
+            validated_data['outlet'] = Outlet.objects.get(id=outlet_id, tenant=validated_data['tenant'])
+        except Outlet.DoesNotExist:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({'outlet': f'Outlet with id {outlet_id} does not exist for your tenant.'})
         
         # Set customer if provided
         if customer_id:

@@ -25,7 +25,10 @@ function formatDate(date?: Date) {
   if (!date) return undefined
   const d = new Date(date)
   d.setHours(0, 0, 0, 0)
-  return d.toISOString().split("T")[0]
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 export default function DashboardPage() {
@@ -43,7 +46,6 @@ export default function DashboardPage() {
   const [selectedRange, setSelectedRange] = useState<{ start?: Date; end?: Date }>(() => {
     const end = new Date()
     const start = new Date(end)
-    start.setDate(start.getDate() - 6)
     return { start, end }
   })
   const [isLoadingData, setIsLoadingData] = useState(true)
@@ -143,7 +145,7 @@ export default function DashboardPage() {
           const [kpi, chart, recentSales, lowStockData, productsData] = await Promise.all([
             generateKPIData(currentBusiness.id, currentBusiness, outletId, selectedRange),
             generateChartData(currentBusiness.id, outletId, selectedRange),
-            saleService.list({ outlet: outletId, status: "completed", start_date: startDateStr, end_date: endDateStr, limit: 10 }).catch(() => ({ results: [] })),
+            saleService.list({ outlet: outletId, start_date: startDateStr, end_date: endDateStr, limit: 20 }).catch(() => ({ results: [] })),
             productService.getLowStock(outletId).catch(() => []),
             productService.list({ outlet: outletId, limit: 1000 }).catch(() => ({ results: [] })),
           ])
@@ -151,13 +153,20 @@ export default function DashboardPage() {
           setKpiData(kpi)
           setChartData(chart)
 
-          const sales = Array.isArray(recentSales) ? recentSales : (recentSales.results || [])
+          const sales = (Array.isArray(recentSales) ? recentSales : (recentSales.results || []))
+            .filter((sale: any) => {
+              const status = String(sale.status || "").toLowerCase()
+              const paymentMethod = String(sale.payment_method || sale.paymentMethod || "").toLowerCase()
+              return status === "completed" || paymentMethod === "tab"
+            })
+            .slice(0, 10)
+
           const activities = sales.map((sale: any) => ({
             id: sale.id || `sale-${Math.random()}`,
             type: "sale" as const,
             title: `Sale #${sale.id?.toString().slice(-6)}`,
             description: `${sale.items?.length || 1} item(s) - Amount: ${sale.total || sale.amount || 0}`,
-            timestamp: new Date(sale.created_at || new Date()),
+            timestamp: new Date(sale.created_at || sale.createdAt || new Date()),
             amount: sale.total || sale.amount || 0,
           }))
           setRecentActivities(activities)

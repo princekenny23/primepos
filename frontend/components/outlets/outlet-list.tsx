@@ -22,7 +22,6 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { MapPin, Phone, Mail, Edit, Trash2, Store, Menu, 
   Power, PowerOff, Eye, CheckCircle2, XCircle, RefreshCw } from "lucide-react"
-import Link from "next/link"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { outletService } from "@/lib/services/outletService"
@@ -71,6 +70,7 @@ export function OutletList(props: OutletListProps = {}) {
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [isSwitching, setIsSwitching] = useState<string | null>(null)
   const [outletToDelete, setOutletToDelete] = useState<any>(null)
+  const [selectedOutlet, setSelectedOutlet] = useState<any | null>(null)
   const [switchAuthOpen, setSwitchAuthOpen] = useState(false)
   const [pendingOutlet, setPendingOutlet] = useState<any>(null)
   const [switchUsername, setSwitchUsername] = useState("")
@@ -414,11 +414,11 @@ export function OutletList(props: OutletListProps = {}) {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem asChild>
-                              <Link href={`/dashboard/office/outlets/${outlet.id}/analytics`} className="flex items-center">
+                            <DropdownMenuItem onClick={() => setSelectedOutlet(outlet)}>
+                              <div className="flex items-center">
                                 <Eye className="mr-2 h-4 w-4" />
                                 View Details
-                              </Link>
+                              </div>
                             </DropdownMenuItem>
                             
                             <DropdownMenuItem onClick={() => handleEdit(outlet)}>
@@ -488,6 +488,75 @@ export function OutletList(props: OutletListProps = {}) {
           onOutletCreated={handleOutletUpdated}
         />
       )}
+
+      <Dialog open={!!selectedOutlet} onOpenChange={(open) => !open && setSelectedOutlet(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{selectedOutlet?.name || "Outlet Details"}</DialogTitle>
+            <DialogDescription>
+              View outlet information and current status.
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedOutlet && (
+            <div className="space-y-4 py-2">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-sm text-muted-foreground">Business Type</p>
+                  <div className="mt-1">
+                    <Badge
+                      variant="secondary"
+                      className={getBusinessTypeBadgeClass(selectedOutlet.businessType)}
+                    >
+                      {selectedOutlet.businessTypeDisplay || getOutletBusinessTypeDisplay(selectedOutlet.businessType)}
+                    </Badge>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Status</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Badge
+                      variant={selectedOutlet.isActive ? "default" : "secondary"}
+                      className={
+                        selectedOutlet.isActive
+                          ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200"
+                          : "bg-gray-100 text-gray-800 dark:bg-gray-950 dark:text-gray-350"
+                      }
+                    >
+                      {selectedOutlet.isActive ? "Active" : "Inactive"}
+                    </Badge>
+                    {currentOutlet?.id === selectedOutlet.id && (
+                      <Badge variant="outline">Current Outlet</Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm text-muted-foreground">Address</p>
+                <p className="mt-1 text-sm font-medium">{selectedOutlet.address || "No address provided"}</p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-sm text-muted-foreground">Phone</p>
+                  <p className="mt-1 text-sm font-medium">{selectedOutlet.phone || "No phone provided"}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Email</p>
+                  <p className="mt-1 text-sm font-medium break-all">{selectedOutlet.email || "No email provided"}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setSelectedOutlet(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!outletToDelete} onOpenChange={(open) => !open && setOutletToDelete(null)}>
         <AlertDialogContent>

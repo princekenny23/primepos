@@ -1,7 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, type ReactNode } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, useCallback } from "react"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
@@ -20,19 +19,8 @@ import {
   Package, 
   RotateCcw,
   Plus,
-  Eye,
   Calendar,
-  MoreVertical,
-  Edit,
-  Trash2
 } from "lucide-react"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { returnService, type Return } from "@/lib/services/returnService"
@@ -42,42 +30,17 @@ import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { useI18n } from "@/contexts/i18n-context"
-import { StockAdjustmentModal } from "@/components/modals/stock-adjustment-modal"
-import { TransferStockModal } from "@/components/modals/transfer-stock-modal"
-import { ReceiveStockModal } from "@/components/modals/receive-stock-modal"
-import { NewReturnModal } from "@/components/modals/new-return-modal"
-import { useToast } from "@/components/ui/use-toast"
 import { productService } from "@/lib/services/productService"
 import type { Product } from "@/lib/types"
-import { purchaseReturnService } from "@/lib/services/purchaseReturnService"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import Link from "next/link"
 
 export default function StockControlPage() {
-  const router = useRouter()
   const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
   const currentOutletId = currentOutlet?.id ? String(currentOutlet.id) : undefined
   const [activeTab, setActiveTab] = useState<string>("adjusts")
   const pageSize = 10
   const useReal = useRealAPI()
   const { t } = useI18n()
-  const { toast } = useToast()
 
   // Data states
   const [adjustments, setAdjustments] = useState<any[]>([])
@@ -413,13 +376,13 @@ export default function StockControlPage() {
   const getAddButtonRoute = (tab: string) => {
     switch (tab) {
       case "adjusts":
-        return "/dashboard/inventory/stock-control/stock-adjustments"
+        return "/dashboard/inventory/stock-control/adjust-stock"
       case "transferred":
-        return "/dashboard/inventory/stock-control/transfers"
+        return "/dashboard/inventory/stock-control/transfer-stock"
       case "received":
-        return "/dashboard/inventory/stock-control/receiving"
+        return "/dashboard/inventory/stock-control/receive-stock"
       case "returned":
-        return "/dashboard/inventory/stock-control/returns"
+        return "/dashboard/inventory/stock-control/return-stock"
       default:
         return "#"
     }
@@ -541,597 +504,6 @@ export default function StockControlPage() {
   // Date range picker state
   const [showDatePicker, setShowDatePicker] = useState(false)
 
-  // Modal states
-  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false)
-  const [showTransferModal, setShowTransferModal] = useState(false)
-  const [showReceiveModal, setShowReceiveModal] = useState(false)
-  const [showReturnModal, setShowReturnModal] = useState(false)
-
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
-  const [detailsPayload, setDetailsPayload] = useState<{
-    item: any
-    type: string
-    mode: "view" | "edit"
-  } | null>(null)
-
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [pendingDelete, setPendingDelete] = useState<{
-    item: any
-    type: string
-  } | null>(null)
-
-  const [editForm, setEditForm] = useState<{
-    reason: string
-    quantity: string
-    product_id: string
-    outlet_id: string
-    to_outlet_id: string
-    supplier: string
-    return_number: string
-    status: string
-    notes: string
-    items: Array<{ id?: string; movement_id?: string; product_id: string; quantity: string; unit_price?: string }>
-  }>({
-    reason: "",
-    quantity: "",
-    product_id: "",
-    outlet_id: "",
-    to_outlet_id: "",
-    supplier: "",
-    return_number: "",
-    status: "",
-    notes: "",
-    items: [],
-  })
-  const [isSavingEdit, setIsSavingEdit] = useState(false)
-
-  const isEditableType = (type?: string) =>
-    type === "adjustment" || type === "transfer" || type === "receiving" || type === "return"
-
-  const openDetails = (item: any, type: string, mode: "view" | "edit") => {
-    setDetailsPayload({ item, type, mode })
-    if (mode === "edit") {
-      loadProducts()
-      setEditForm({
-        reason: item.reason || "",
-        quantity: typeof item.quantity !== "undefined" ? String(item.quantity) : "",
-        product_id: String(item.product_id || ""),
-        outlet_id: String(item.from_outlet_id || item.outlet_id || item.outlet?.id || ""),
-        to_outlet_id: String(item.to_outlet_id || ""),
-        supplier: String(item.supplier || ""),
-        return_number: String(item.return_number || ""),
-        status: String(item.status || ""),
-        notes: String(item.notes || ""),
-        items: Array.isArray(item.items)
-          ? item.items.map((i: any) => ({
-              id: i.id,
-              movement_id: i.movement_id || i.id,
-              product_id: String(i.product_id || ""),
-              quantity: String(i.quantity ?? ""),
-              unit_price: i.unit_price,
-            }))
-          : [],
-      })
-    }
-    setDetailsDialogOpen(true)
-  }
-
-  const handleView = (item: any, type: string) => {
-    openDetails(item, type, "view")
-  }
-
-  const handleEdit = (item: any, type: string) => {
-    openDetails(item, type, "edit")
-  }
-
-  const handleDelete = (item: any, type: string) => {
-    setPendingDelete({ item, type })
-    setDeleteDialogOpen(true)
-  }
-
-  const confirmDelete = () => {
-    if (!pendingDelete) return
-    const { item, type } = pendingDelete
-    const id = String(item.id)
-
-    if (type === "adjustment") {
-      setAdjustments((prev) => prev.filter((a) => String(a.id) !== id))
-    } else if (type === "transfer") {
-      setTransfers((prev) => prev.filter((t) => String(t.id) !== id))
-    } else if (type === "receiving") {
-      setReceiving((prev) => prev.filter((r) => String(r.id) !== id))
-    } else if (type === "return") {
-      setReturns((prev) => prev.filter((r) => String(r.id) !== id))
-    }
-
-    setDeleteDialogOpen(false)
-    setPendingDelete(null)
-  }
-
-  const getSupplierReturnId = (id: string) => {
-    const parts = id.split("_")
-    return parts.length > 1 ? parts[1] : id
-  }
-
-  const handleSupplierApprove = async (returnItem: Return) => {
-    try {
-      const supplierId = getSupplierReturnId(String(returnItem.id))
-      await purchaseReturnService.approve(supplierId)
-      setReturns((prev) =>
-        prev.map((r) =>
-          String(r.id) === String(returnItem.id) ? { ...r, status: "approved" } : r
-        )
-      )
-      toast({ title: "Approved", description: "Supplier return approved." })
-    } catch (error: any) {
-      toast({
-        title: "Approve failed",
-        description: error?.message || "Could not approve supplier return.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleSupplierComplete = async (returnItem: Return) => {
-    try {
-      const supplierId = getSupplierReturnId(String(returnItem.id))
-      await purchaseReturnService.complete(supplierId)
-      setReturns((prev) =>
-        prev.map((r) =>
-          String(r.id) === String(returnItem.id) ? { ...r, status: "returned" } : r
-        )
-      )
-    } catch (error: any) {
-      toast({
-        title: "Complete failed",
-        description: error?.message || "Could not complete supplier return.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleSaveEdit = async () => {
-    if (!detailsPayload) return
-    const { item, type } = detailsPayload
-
-    if (!isEditableType(type)) {
-      toast({
-        title: "Not editable",
-        description: "Editing is only available for adjustments and transfers.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if ((type === "adjustment" || type === "transfer") && !editForm.quantity) {
-      toast({
-        title: "Validation Error",
-        description: "Quantity is required.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsSavingEdit(true)
-    try {
-      const allowedReturnStatuses = [
-        "draft",
-        "pending",
-        "approved",
-        "returned",
-        "cancelled",
-      ] as const
-      type ReturnStatus = (typeof allowedReturnStatuses)[number]
-      const sanitizedStatus = allowedReturnStatuses.includes(editForm.status as ReturnStatus)
-        ? (editForm.status as ReturnStatus)
-        : undefined
-
-      if (type === "adjustment") {
-        const updatePayload: Record<string, any> = {
-          reason: editForm.reason,
-          quantity: Number(editForm.quantity),
-        }
-        if (editForm.product_id) updatePayload.product_id = editForm.product_id
-        if (editForm.outlet_id) updatePayload.outlet = editForm.outlet_id
-
-        await inventoryService.updateMovement(String(item.id), updatePayload)
-
-        setAdjustments((prev) =>
-          prev.map((a) =>
-            String(a.id) === String(item.id)
-              ? {
-                  ...a,
-                  reason: editForm.reason,
-                  quantity: Number(editForm.quantity),
-                  product_id: editForm.product_id,
-                  outlet_id: editForm.outlet_id,
-                }
-              : a
-          )
-        )
-      } else if (type === "transfer") {
-        const updatePayload: Record<string, any> = {
-          reason: editForm.reason,
-          quantity: Number(editForm.quantity),
-        }
-        if (editForm.product_id) updatePayload.product_id = editForm.product_id
-        if (editForm.outlet_id) updatePayload.outlet = editForm.outlet_id
-        if (editForm.to_outlet_id) updatePayload.reference_id = editForm.to_outlet_id
-
-        await inventoryService.updateMovement(String(item.id), updatePayload)
-
-        setTransfers((prev) =>
-          prev.map((t) =>
-            String(t.id) === String(item.id)
-              ? {
-                  ...t,
-                  reason: editForm.reason,
-                  quantity: Number(editForm.quantity),
-                  product_id: editForm.product_id,
-                  from_outlet_id: editForm.outlet_id,
-                  to_outlet_id: editForm.to_outlet_id,
-                }
-              : t
-          )
-        )
-      } else if (type === "receiving") {
-        const items = editForm.items || []
-        await Promise.all(
-          items.map((entry) =>
-            entry.movement_id
-              ? inventoryService.updateMovement(String(entry.movement_id), {
-                  product_id: entry.product_id,
-                  quantity: Number(entry.quantity),
-                  reason: editForm.reason,
-                  outlet: editForm.outlet_id || item.outlet_id,
-                  reference_id: editForm.supplier || item.supplier,
-                })
-              : Promise.resolve()
-          )
-        )
-
-        const totalQuantity = items.reduce(
-          (sum, entry) => sum + Number(entry.quantity || 0),
-          0
-        )
-        setReceiving((prev) =>
-          prev.map((r) =>
-            String(r.id) === String(item.id)
-              ? {
-                  ...r,
-                  supplier: editForm.supplier,
-                  outlet_id: editForm.outlet_id,
-                  reason: editForm.reason,
-                  items: items.map((i) => ({
-                    movement_id: i.movement_id,
-                    product_id: i.product_id,
-                    quantity: i.quantity,
-                  })),
-                  total_items: items.length,
-                  total_quantity: totalQuantity,
-                }
-              : r
-          )
-        )
-      } else if (type === "return") {
-        const rawId = String(item.id || "")
-        const [returnType, returnId] = rawId.split("_")
-
-        if (returnType === "supplier") {
-          await purchaseReturnService.update(returnId, {
-            reason: editForm.reason,
-            notes: editForm.notes,
-            status: sanitizedStatus,
-            return_number: editForm.return_number,
-            items_data: editForm.items.map((i) => ({
-              product_id: Number(i.product_id),
-              quantity: Number(i.quantity),
-              unit_price: i.unit_price || "0",
-              reason: editForm.reason,
-            })),
-          })
-        } else {
-          await Promise.all(
-            editForm.items.map((entry) =>
-              entry.id
-                ? inventoryService.updateMovement(String(entry.id), {
-                    product_id: entry.product_id,
-                    quantity: Number(entry.quantity),
-                    reason: editForm.reason,
-                    reference_id: editForm.return_number || item.return_number,
-                  })
-                : Promise.resolve()
-            )
-          )
-        }
-
-        setReturns((prev) =>
-          prev.map((r) =>
-            String(r.id) === String(item.id)
-              ? {
-                  ...r,
-                  reason: editForm.reason,
-                  notes: editForm.notes,
-                  status: sanitizedStatus ?? r.status,
-                  return_number: editForm.return_number,
-                  items: editForm.items.map((i) => ({
-                    id: i.id,
-                    product_id: i.product_id,
-                    quantity: Number(i.quantity),
-                  })),
-                }
-              : r
-          )
-        )
-      }
-
-      setDetailsDialogOpen(false)
-    } catch (error: any) {
-      toast({
-        title: "Update failed",
-        description: error?.message || "Could not save changes.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSavingEdit(false)
-    }
-  }
-
-  const renderDetailsContent = () => {
-    if (!detailsPayload) return null
-
-    const { item, type } = detailsPayload
-    const formattedDate = item?.date || item?.created_at
-      ? format(new Date(item.date || item.created_at), "MMM dd, yyyy")
-      : "N/A"
-
-    const rows: Array<{ label: string; value: ReactNode }> = []
-
-    if (type === "adjustment") {
-      rows.push(
-        { label: "Product", value: item.product_name || "N/A" },
-        { label: "Outlet", value: item.outlet_name || "N/A" },
-        { label: "Quantity", value: item.quantity ?? 0 },
-        { label: "Reason", value: item.reason || "-" },
-        { label: "User", value: item.user_name || "System" },
-        { label: "Date", value: formattedDate }
-      )
-    } else if (type === "transfer") {
-      rows.push(
-        { label: "Product", value: item.product_name || "N/A" },
-        { label: "From Outlet", value: item.from_outlet_name || "N/A" },
-        { label: "To Outlet", value: item.to_outlet_name || "N/A" },
-        { label: "Quantity", value: item.quantity ?? 0 },
-        { label: "Reason", value: item.reason || "-" },
-        { label: "Date", value: formattedDate }
-      )
-    } else if (type === "receiving") {
-      rows.push(
-        { label: "Supplier", value: item.supplier || "Unknown Supplier" },
-        { label: "Outlet", value: item.outlet_name || "N/A" },
-        { label: "Items", value: item.total_items ?? 0 },
-        { label: "Total Quantity", value: item.total_quantity ?? 0 },
-        { label: "Reason", value: item.reason || "-" },
-        { label: "Date", value: formattedDate }
-      )
-      if (Array.isArray(item.item_names) && item.item_names.length > 0) {
-        rows.push({ label: "Item Names", value: item.item_names.join(", ") })
-      }
-    } else if (type === "return") {
-      rows.push(
-        { label: "Return #", value: item.return_number || "-" },
-        { label: "Outlet", value: item.outlet?.name || "N/A" },
-        { label: "Items", value: item.items?.length ?? 0 },
-        { label: "Status", value: item.status || "Pending" },
-        { label: "Reason", value: item.reason || "-" },
-        { label: "Date", value: formattedDate }
-      )
-    }
-
-    return (
-      <div className="space-y-3">
-        {rows.map((row) => (
-          <div key={row.label} className="grid grid-cols-3 gap-3 text-sm">
-            <div className="text-muted-foreground">{row.label}</div>
-            <div className="col-span-2 font-medium text-gray-900">
-              {row.value}
-            </div>
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  const renderEditContent = () => {
-    if (!detailsPayload) return null
-    const { type } = detailsPayload
-
-    return (
-      <div className="space-y-4">
-        {(type === "adjustment" || type === "transfer") && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Quantity</label>
-            <Input
-              type="number"
-              value={editForm.quantity}
-              onChange={(e) =>
-                setEditForm((prev) => ({ ...prev, quantity: e.target.value }))
-              }
-            />
-          </div>
-        )}
-        {(type === "adjustment" || type === "transfer") && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Product</label>
-            <select
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              value={editForm.product_id}
-              onChange={(e) =>
-                setEditForm((prev) => ({ ...prev, product_id: e.target.value }))
-              }
-              aria-label="Product"
-              title="Product"
-            >
-              <option value="">Select product</option>
-              {products.map((p) => (
-                <option key={p.id} value={String(p.id)}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        {(type === "adjustment" || type === "transfer" || type === "receiving") && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Outlet</label>
-            <select
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              value={editForm.outlet_id}
-              onChange={(e) =>
-                setEditForm((prev) => ({ ...prev, outlet_id: e.target.value }))
-              }
-              aria-label="Outlet"
-              title="Outlet"
-            >
-              <option value="">Select outlet</option>
-              {outlets.map((o) => (
-                <option key={o.id} value={String(o.id)}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        {type === "transfer" && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">To Outlet</label>
-            <select
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              value={editForm.to_outlet_id}
-              onChange={(e) =>
-                setEditForm((prev) => ({ ...prev, to_outlet_id: e.target.value }))
-              }
-              aria-label="To outlet"
-              title="To outlet"
-            >
-              <option value="">Select outlet</option>
-              {outlets.map((o) => (
-                <option key={o.id} value={String(o.id)}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        {type === "receiving" && (
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Supplier</label>
-            <Input
-              value={editForm.supplier}
-              onChange={(e) =>
-                setEditForm((prev) => ({ ...prev, supplier: e.target.value }))
-              }
-            />
-          </div>
-        )}
-        {type === "return" && (
-          <>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Return #</label>
-              <Input
-                value={editForm.return_number}
-                onChange={(e) =>
-                  setEditForm((prev) => ({ ...prev, return_number: e.target.value }))
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Status</label>
-              <Input
-                value={editForm.status}
-                onChange={(e) =>
-                  setEditForm((prev) => ({ ...prev, status: e.target.value }))
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Notes</label>
-              <Input
-                value={editForm.notes}
-                onChange={(e) =>
-                  setEditForm((prev) => ({ ...prev, notes: e.target.value }))
-                }
-              />
-            </div>
-          </>
-        )}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">Reason</label>
-          <Input
-            value={editForm.reason}
-            onChange={(e) =>
-              setEditForm((prev) => ({ ...prev, reason: e.target.value }))
-            }
-          />
-        </div>
-        {(type === "receiving" || type === "return") && editForm.items.length > 0 && (
-          <div className="space-y-3">
-            <div className="text-sm font-medium text-gray-700">Items</div>
-            {editForm.items.map((itemEntry, index) => (
-              <div key={itemEntry.id || itemEntry.movement_id || index} className="grid grid-cols-3 gap-3">
-                <select
-                  className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-                  value={itemEntry.product_id}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({
-                      ...prev,
-                      items: prev.items.map((it, idx) =>
-                        idx === index ? { ...it, product_id: e.target.value } : it
-                      ),
-                    }))
-                  }
-                  aria-label="Item product"
-                  title="Item product"
-                >
-                  <option value="">Select product</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-                <Input
-                  type="number"
-                  value={itemEntry.quantity}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({
-                      ...prev,
-                      items: prev.items.map((it, idx) =>
-                        idx === index ? { ...it, quantity: e.target.value } : it
-                      ),
-                    }))
-                  }
-                />
-                <Input
-                  placeholder="Unit price"
-                  value={itemEntry.unit_price || ""}
-                  onChange={(e) =>
-                    setEditForm((prev) => ({
-                      ...prev,
-                      items: prev.items.map((it, idx) =>
-                        idx === index ? { ...it, unit_price: e.target.value } : it
-                      ),
-                    }))
-                  }
-                />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
     <DashboardLayout>
       <PageLayout
@@ -1146,18 +518,8 @@ export default function StockControlPage() {
           actionButtonPlacement="below"
           actionButton={
             <div className="flex flex-wrap items-center gap-2">
+              <Link href={getAddButtonRoute(activeTab)}>
               <Button
-                onClick={() => {
-                  if (activeTab === "adjusts") {
-                    setShowAdjustmentModal(true)
-                  } else if (activeTab === "transferred") {
-                    setShowTransferModal(true)
-                  } else if (activeTab === "received") {
-                    setShowReceiveModal(true)
-                  } else if (activeTab === "returned") {
-                    setShowReturnModal(true)
-                  }
-                }}
                 className="bg-blue-900 hover:bg-blue-800 text-white"
               >
                 <Plus className="mr-2 h-4 w-4" />
@@ -1169,6 +531,7 @@ export default function StockControlPage() {
                   ? "Receive Stock"
                   : "Return Stock"}
               </Button>
+              </Link>
               <div className="relative">
                 <Button
                   size="sm"
@@ -1248,19 +611,18 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Quantity</TableHead>
                       <TableHead className="text-gray-900 font-semibold">User</TableHead>
-                      <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isLoadingAdjustments ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={6} className="text-center py-8 text-gray-600">
                           Loading adjustments...
                         </TableCell>
                       </TableRow>
                     ) : filteredAdjustments.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={6} className="text-center py-8 text-gray-600">
                           {adjustments.length === 0 ? "No adjustments found" : "No adjustments in selected date range"}
                         </TableCell>
                       </TableRow>
@@ -1281,33 +643,6 @@ export default function StockControlPage() {
                             </span>
                           </TableCell>
                           <TableCell>{adjustment.user_name}</TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="border-gray-300">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleView(adjustment, "adjustment")}> 
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  View
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleEdit(adjustment, "adjustment")}>
-                                  <Edit className="h-4 w-4 mr-2" />
-                                  Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => handleDelete(adjustment, "adjustment")}
-                                  className="text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
                         </TableRow>
                       ))
                     )}
@@ -1343,7 +678,6 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Quantity</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
                       <TableHead className="text-gray-900 font-semibold">User</TableHead>
-                      <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1373,33 +707,6 @@ export default function StockControlPage() {
                           <TableCell>{transfer.quantity}</TableCell>
                           <TableCell>{transfer.reason || "-"}</TableCell>
                           <TableCell>{transfer.user_name || "System"}</TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="border-gray-300">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleView(transfer, "transfer")}>
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  View
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleEdit(transfer, "transfer")}>
-                                  <Edit className="h-4 w-4 mr-2" />
-                                  Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => handleDelete(transfer, "transfer")}
-                                  className="text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
                         </TableRow>
                       ))
                     )}
@@ -1436,19 +743,18 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Total Quantity</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
                       <TableHead className="text-gray-900 font-semibold">User</TableHead>
-                      <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isLoadingReceiving ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={8} className="text-center py-8 text-gray-600">
                           Loading receiving records...
                         </TableCell>
                       </TableRow>
                     ) : filteredReceiving.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={8} className="text-center py-8 text-gray-600">
                           {receiving.length === 0 ? "No receiving records found" : "No receiving records in selected date range"}
                         </TableCell>
                       </TableRow>
@@ -1472,33 +778,6 @@ export default function StockControlPage() {
                           <TableCell>{rec.total_quantity}</TableCell>
                           <TableCell>{rec.reason || "-"}</TableCell>
                           <TableCell>{rec.user_name || "System"}</TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="border-gray-300">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleView(rec, "receiving")}>
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  View
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleEdit(rec, "receiving")}>
-                                  <Edit className="h-4 w-4 mr-2" />
-                                  Edit
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => handleDelete(rec, "receiving")}
-                                  className="text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
                         </TableRow>
                       ))
                     )}
@@ -1534,7 +813,6 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Items</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
                       <TableHead className="text-gray-900 font-semibold">User</TableHead>
-                      <TableHead className="text-right text-gray-900 font-semibold">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1576,50 +854,6 @@ export default function StockControlPage() {
                           <TableCell>{returnItem.items?.length || 0}</TableCell>
                           <TableCell>{returnItem.reason || "-"}</TableCell>
                           <TableCell>{returnItem.user_name || "System"}</TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="sm" className="border-gray-300">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem onClick={() => handleView(returnItem, "return")}>
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  View
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleEdit(returnItem, "return")}>
-                                  <Edit className="h-4 w-4 mr-2" />
-                                  Edit
-                                </DropdownMenuItem>
-                                {returnItem.return_type === "supplier" && (
-                                  <>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem
-                                      onClick={() => handleSupplierApprove(returnItem)}
-                                      disabled={returnItem.status !== "pending"}
-                                    >
-                                      Approve
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() => handleSupplierComplete(returnItem)}
-                                      disabled={returnItem.status !== "approved"}
-                                    >
-                                      Mark Returned
-                                    </DropdownMenuItem>
-                                  </>
-                                )}
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => handleDelete(returnItem, "return")}
-                                  className="text-destructive"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Delete
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
                         </TableRow>
                       ))
                     )}
@@ -1637,97 +871,6 @@ export default function StockControlPage() {
         </FilterableTabs>
       </PageLayout>
 
-      <StockAdjustmentModal
-        open={showAdjustmentModal}
-        onOpenChange={setShowAdjustmentModal}
-        onSuccess={() => {
-          loadProducts()
-          loadAdjustments()
-          setShowAdjustmentModal(false)
-        }}
-      />
-
-      <TransferStockModal
-        open={showTransferModal}
-        onOpenChange={setShowTransferModal}
-        onSuccess={() => {
-          loadTransfers()
-          setShowTransferModal(false)
-        }}
-      />
-
-      <ReceiveStockModal
-        open={showReceiveModal}
-        onOpenChange={setShowReceiveModal}
-        onSuccess={() => {
-          loadReceiving()
-          setShowReceiveModal(false)
-        }}
-      />
-
-      <NewReturnModal
-        open={showReturnModal}
-        onOpenChange={setShowReturnModal}
-        onReturnCreated={() => {
-          loadReturns()
-          setShowReturnModal(false)
-        }}
-      />
-
-      <Dialog
-        open={detailsDialogOpen}
-        onOpenChange={(open) => {
-          setDetailsDialogOpen(open)
-          if (!open) setDetailsPayload(null)
-        }}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {detailsPayload?.mode === "edit" ? "Edit" : "View"}{" "}
-              {detailsPayload?.type ?? "Item"}
-            </DialogTitle>
-            <DialogDescription>
-              {detailsPayload?.mode === "edit"
-                ? "Editing is not available yet. Review the item details below."
-                : "Item details"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="rounded-md border bg-muted/30 p-4">
-            {detailsPayload?.mode === "edit" ? renderEditContent() : renderDetailsContent()}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>
-              Close
-            </Button>
-            {detailsPayload?.mode === "edit" && isEditableType(detailsPayload?.type) && (
-              <Button onClick={handleSaveEdit} disabled={isSavingEdit}>
-                {isSavingEdit ? "Saving..." : "Save"}
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete item?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will remove the selected {pendingDelete?.type ?? "item"} from the
-              list.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingDelete(null)}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </DashboardLayout>
   )
 }

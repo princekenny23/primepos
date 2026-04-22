@@ -10,7 +10,7 @@ from django.core.files.base import ContentFile
 import json
 from django.utils import timezone
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 import re
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
@@ -56,6 +56,31 @@ if _needs_md5_compat:
 
 class ReceiptService:
     """Service for generating and managing digital receipts"""
+
+    _PDF_CONTENT_PREFIX = 'pdf_base64:'
+
+    @staticmethod
+    def _is_storage_config_error(error: Exception) -> bool:
+        message = str(error).lower()
+        return (
+            'must supply api_key' in message
+            or 'cloudinary' in message
+            or 'api_key' in message
+        )
+
+    @staticmethod
+    def _encode_pdf_content(pdf_bytes: bytes) -> str:
+        return f"{ReceiptService._PDF_CONTENT_PREFIX}{base64.b64encode(pdf_bytes).decode('ascii')}"
+
+    @staticmethod
+    def decode_pdf_content(content: str) -> Optional[bytes]:
+        if not content or not content.startswith(ReceiptService._PDF_CONTENT_PREFIX):
+            return None
+        encoded = content[len(ReceiptService._PDF_CONTENT_PREFIX):]
+        try:
+            return base64.b64decode(encoded)
+        except Exception:
+            return None
     
     @staticmethod
     def generate_receipt(sale: Sale, format: str = 'pdf', user: User = None) -> Receipt:
@@ -83,12 +108,14 @@ class ReceiptService:
 
             content = None
             pdf_file = None
+            pdf_bytes = None
 
             # Generate receipt content based on format
             if format == 'pdf':
                 # Generate PDF and store as file
                 pdf_buffer = ReceiptService._generate_pdf_receipt(sale)
-                pdf_file = ContentFile(pdf_buffer.read(), name=f"receipt_{sale.receipt_number}.pdf")
+                pdf_bytes = pdf_buffer.read()
+                pdf_file = ContentFile(pdf_bytes, name=f"receipt_{sale.receipt_number}.pdf")
                 pdf_buffer.close()
             elif format == 'escpos':
                 # Return base64-encoded ESC/POS bytes as text payload
@@ -96,7 +123,8 @@ class ReceiptService:
             else:
                 # Default to PDF
                 pdf_buffer = ReceiptService._generate_pdf_receipt(sale)
-                pdf_file = ContentFile(pdf_buffer.read(), name=f"receipt_{sale.receipt_number}.pdf")
+                pdf_bytes = pdf_buffer.read()
+                pdf_file = ContentFile(pdf_bytes, name=f"receipt_{sale.receipt_number}.pdf")
                 pdf_buffer.close()
                 format = 'pdf'
             
@@ -106,7 +134,7 @@ class ReceiptService:
             if previous.exists():
                 previous.update(is_current=False, voided=True)
 
-            receipt = Receipt.objects.create(
+            create_kwargs = dict(
                 tenant=sale.tenant,
                 sale=sale,
                 receipt_number=sale.receipt_number,
@@ -115,6 +143,20 @@ class ReceiptService:
                 pdf_file=pdf_file,
                 generated_by=user,
             )
+
+            try:
+                receipt = Receipt.objects.create(**create_kwargs)
+            except Exception as storage_error:
+                if format == 'pdf' and pdf_bytes and ReceiptService._is_storage_config_error(storage_error):
+                    logger.warning(
+                        "Receipt PDF upload failed for sale %s due to storage config. Falling back to inline PDF content.",
+                        sale.id,
+                    )
+                    create_kwargs['pdf_file'] = None
+                    create_kwargs['content'] = ReceiptService._encode_pdf_content(pdf_bytes)
+                    receipt = Receipt.objects.create(**create_kwargs)
+                else:
+                    raise
 
             logger.info(f"Receipt generated for sale {sale.id}: {receipt.id} format={format} by user={getattr(user, 'id', None)}")
             return receipt
@@ -599,28 +641,25 @@ class ReceiptService:
 
             content = None
             pdf_file = None
+            pdf_bytes = None
 
             # Generate new content according to requested format
             if format == 'pdf':
                 pdf_buffer = ReceiptService._generate_pdf_receipt(sale)
-                pdf_file = ContentFile(pdf_buffer.read(), name=f"receipt_{sale.receipt_number}.pdf")
+                pdf_bytes = pdf_buffer.read()
+                pdf_file = ContentFile(pdf_bytes, name=f"receipt_{sale.receipt_number}.pdf")
                 pdf_buffer.close()
             elif format == 'escpos':
                 content = ReceiptService._generate_escpos_receipt(sale)
             else:
                 # Default to PDF
                 pdf_buffer = ReceiptService._generate_pdf_receipt(sale)
-                pdf_file = ContentFile(pdf_buffer.read(), name=f"receipt_{sale.receipt_number}.pdf")
+                pdf_bytes = pdf_buffer.read()
+                pdf_file = ContentFile(pdf_bytes, name=f"receipt_{sale.receipt_number}.pdf")
                 pdf_buffer.close()
                 format = 'pdf'
 
-            # Mark old as voided and not current
-            old.voided = True
-            old.is_current = False
-            old.save(update_fields=['voided', 'is_current'])
-
-            # Create new receipt (new immutable record)
-            new_receipt = Receipt.objects.create(
+            create_kwargs = dict(
                 tenant=old.tenant,
                 sale=sale,
                 receipt_number=sale.receipt_number,
@@ -628,8 +667,27 @@ class ReceiptService:
                 content=content or '',
                 pdf_file=pdf_file,
                 generated_by=user,
-                superseded_by=None
+                superseded_by=None,
             )
+
+            try:
+                new_receipt = Receipt.objects.create(**create_kwargs)
+            except Exception as storage_error:
+                if format == 'pdf' and pdf_bytes and ReceiptService._is_storage_config_error(storage_error):
+                    logger.warning(
+                        "Receipt PDF upload failed during regeneration for sale %s. Falling back to inline PDF content.",
+                        sale.id,
+                    )
+                    create_kwargs['pdf_file'] = None
+                    create_kwargs['content'] = ReceiptService._encode_pdf_content(pdf_bytes)
+                    new_receipt = Receipt.objects.create(**create_kwargs)
+                else:
+                    raise
+
+            # Mark old as voided and not current only after new receipt exists
+            old.voided = True
+            old.is_current = False
+            old.save(update_fields=['voided', 'is_current'])
 
             # Link predecessor
             old.superseded_by = new_receipt

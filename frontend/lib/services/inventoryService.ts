@@ -30,6 +30,15 @@ export interface StockReceivingData {
   reason?: string
 }
 
+export interface CreateMovementData {
+  product_id: string
+  outlet_id: string
+  movement_type: string
+  quantity: number
+  reason?: string
+  reference_id?: string
+}
+
 export interface StockTakeData {
   outlet: string
   operating_date: string
@@ -53,6 +62,10 @@ export const inventoryService = {
 
   async receive(data: StockReceivingData): Promise<any> {
     return api.post(apiEndpoints.inventory.receive, data)
+  },
+
+  async createMovement(data: CreateMovementData): Promise<any> {
+    return api.post(apiEndpoints.inventory.movements, data)
   },
 
   async getMovements(filters?: {

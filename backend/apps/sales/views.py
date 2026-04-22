@@ -9,6 +9,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction, models, IntegrityError, connection
 from django.db.models import Max
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.template import engines
 import json
 import logging
@@ -172,10 +173,20 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Filter by date range if provided
         start_date = self.request.query_params.get('start_date') or self.request.query_params.get('date_from')
         end_date = self.request.query_params.get('end_date') or self.request.query_params.get('date_to')
+
         if start_date:
-            queryset = queryset.filter(created_at__gte=start_date)
+            parsed_start = parse_date(start_date)
+            if parsed_start:
+                queryset = queryset.filter(created_at__date__gte=parsed_start)
+            else:
+                queryset = queryset.filter(created_at__gte=start_date)
+
         if end_date:
-            queryset = queryset.filter(created_at__lte=end_date)
+            parsed_end = parse_date(end_date)
+            if parsed_end:
+                queryset = queryset.filter(created_at__date__lte=parsed_end)
+            else:
+                queryset = queryset.filter(created_at__lte=end_date)
         
         # Order by most recent first (default ordering)
         return queryset.order_by('-created_at')
@@ -1892,6 +1903,7 @@ class ReceiptViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
         receipt = self.get_object()
 
         from django.http import HttpResponse, FileResponse
+        from apps.sales.services import ReceiptService
 
         # If PDF file exists, serve it
         if receipt.pdf_file:
@@ -1902,6 +1914,16 @@ class ReceiptViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
                 filename=f"receipt_{receipt.receipt_number}.pdf",
                 content_type='application/pdf'
             )
+
+        # Fallback for environments without configured file storage:
+        # serve PDF bytes embedded in receipt.content.
+        if receipt.format == 'pdf' and receipt.content:
+            pdf_bytes = ReceiptService.decode_pdf_content(receipt.content)
+            if pdf_bytes:
+                receipt.increment_access()
+                response = HttpResponse(pdf_bytes, content_type='application/pdf')
+                response['Content-Disposition'] = f'attachment; filename="receipt_{receipt.receipt_number}.pdf"'
+                return response
 
         # Otherwise, if ESC/POS content, return as text file
         if receipt.format == 'escpos' and receipt.content:

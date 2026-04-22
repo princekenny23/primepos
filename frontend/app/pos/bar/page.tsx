@@ -25,7 +25,12 @@ export default function BarPOSPage() {
       router.push(posRoute)
       return
     }
-  }, [currentBusiness, posMode, posRoute, router])
+
+    if (!isLoading && !activeShift) {
+      router.push("/dashboard/pos")
+      return
+    }
+  }, [activeShift, currentBusiness, isLoading, posMode, posRoute, router])
 
   if (!currentBusiness || posMode !== "bar") {
     return null
@@ -38,6 +43,17 @@ export default function BarPOSPage() {
         <div className="text-center">
           <p className="text-muted-foreground mb-2">Loading POS...</p>
           <p className="text-xs text-muted-foreground">Checking for active shift</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!activeShift) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-background">
+        <div className="text-center">
+          <p className="text-muted-foreground mb-2">Redirecting to shift selection...</p>
+          <p className="text-xs text-muted-foreground">No active shift found</p>
         </div>
       </div>
     )

@@ -15,6 +15,7 @@ import { formatDistanceToNow } from "date-fns"
 import { notificationService, type Notification } from "@/lib/services/notificationService"
 import { getThrottleRemainingSeconds } from "@/lib/api"
 import { useBusinessStore } from "@/stores/businessStore"
+import { useOfflineStore } from "@/stores/offlineStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { NotificationDetailModal } from "@/components/modals/notification-detail-modal"
 
@@ -26,11 +27,30 @@ interface NotificationBellProps {
 export function NotificationBell({ triggerClassName, unreadRingClassName }: NotificationBellProps = {}) {
   const { currentBusiness } = useBusinessStore()
   const { currentOutlet } = useTenant()
+  const isOnline = useOfflineStore((state) => state.isOnline)
+  const [isBrowserOnline, setIsBrowserOnline] = useState(true)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null)
   const [showDetail, setShowDetail] = useState(false)
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const syncBrowserOnline = () => setIsBrowserOnline(window.navigator.onLine)
+    syncBrowserOnline()
+
+    window.addEventListener("online", syncBrowserOnline)
+    window.addEventListener("offline", syncBrowserOnline)
+
+    return () => {
+      window.removeEventListener("online", syncBrowserOnline)
+      window.removeEventListener("offline", syncBrowserOnline)
+    }
+  }, [])
+
+  const isStatusOnline = isBrowserOnline || isOnline
 
   useEffect(() => {
     if (!currentBusiness) return
@@ -165,6 +185,11 @@ export function NotificationBell({ triggerClassName, unreadRingClassName }: Noti
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className={`relative ${triggerClassName || ""}`}>
           <div className="relative flex items-center justify-center">
+            <span
+              className={`absolute -top-1 right-0 h-2.5 w-2.5 rounded-full border border-white ${isStatusOnline ? "bg-emerald-500" : "bg-red-500"}`}
+              title={isStatusOnline ? "Online" : "Offline"}
+              aria-label={isStatusOnline ? "Online" : "Offline"}
+            />
             <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
               <>
