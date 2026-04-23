@@ -36,6 +36,7 @@ interface ShiftContextType {
   startShift: (shiftData: Omit<Shift, "id" | "status" | "startTime" | "endTime">) => Promise<Shift>
   closeShift: (closingCashBalance: number) => Promise<void>
   isLoading: boolean
+  shiftLoadError: boolean
   getTillsForOutlet: (outletId: string) => Promise<Till[]>
   checkShiftExists: (outletId: string, tillId: string, date: string) => Promise<boolean>
 }
@@ -47,6 +48,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
   const [activeShift, setActiveShiftState] = useState<Shift | null>(null)
   const [shiftHistory, setShiftHistory] = useState<Shift[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [shiftLoadError, setShiftLoadError] = useState(false)
 
   // Track which outlet we've loaded shifts for to prevent duplicate loads
   const loadedOutletRef = React.useRef<string | null>(null)
@@ -68,6 +70,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
 
     const loadShifts = async () => {
       setIsLoading(true)
+      setShiftLoadError(false)
       loadedOutletRef.current = currentOutlet.id
       try {
         if (useRealAPI()) {
@@ -95,8 +98,12 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
             }
           } catch (error: any) {
             // No active shift found is OK
-            if (!error.message?.includes("404") && !error.message?.includes("No active shift")) {
+            const isNotFound = error.message?.includes("404") || error.message?.includes("No active shift")
+            if (!isNotFound) {
               console.error("Error loading active shift:", error)
+              setShiftLoadError(true)
+              // Reset deduplication so a retry can reload
+              loadedOutletRef.current = null
             }
             setActiveShiftState(null)
           }
@@ -153,6 +160,9 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
         console.error("Error loading shifts:", error)
         setActiveShiftState(null)
         setShiftHistory([])
+        setShiftLoadError(true)
+        // Reset deduplication so a retry can reload
+        loadedOutletRef.current = null
       } finally {
         setIsLoading(false)
       }
@@ -320,6 +330,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
     startShift,
     closeShift,
     isLoading,
+    shiftLoadError,
     getTillsForOutlet,
     checkShiftExists,
   }
