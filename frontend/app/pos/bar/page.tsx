@@ -72,7 +72,7 @@ export default function BarPOSPage() {
           <p className="text-muted-foreground font-medium">No active shift found</p>
           <p className="text-xs text-muted-foreground">Open a shift before using the Bar POS.</p>
           <button
-            onClick={() => router.push("/dashboard/pos")}
+            onClick={() => router.push("/dashboard/pos/start-shift")}
             className="mt-2 px-4 py-2 rounded bg-blue-900 text-white text-sm hover:bg-blue-800"
           >
             Open Shift

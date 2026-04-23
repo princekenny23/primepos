@@ -1,6 +1,8 @@
 """
 Bar Management Views - Tabs, Tables, and all bar operations
 """
+import logging
+
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -24,6 +26,9 @@ from .serializers import (
     MergeTabsSerializer, SplitTabSerializer, VoidItemSerializer,
     TabTransferSerializer, TabMergeSerializer
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class BarTableViewSet(TenantFilterMixin, viewsets.ModelViewSet):
@@ -508,13 +513,17 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                     notes=tab_item.notes,
                 )
 
-            try:
-                from apps.sales.services import ReceiptService
-                ReceiptService.generate_receipt(sale, format='pdf', user=request.user)
-            except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.error(f"Failed to auto-generate receipt for tab sale {sale.id}: {str(e)}")
+            sale_id = sale.id
+
+            def _generate_receipt_after_commit():
+                try:
+                    from apps.sales.services import ReceiptService
+                    committed_sale = Sale.objects.get(id=sale_id)
+                    ReceiptService.generate_receipt(committed_sale, format='pdf', user=request.user)
+                except Exception as e:
+                    logger.error(f"Failed to auto-generate receipt for tab sale {sale_id}: {str(e)}")
+
+            transaction.on_commit(_generate_receipt_after_commit)
             
             # Close the tab
             tab.status = 'closed'

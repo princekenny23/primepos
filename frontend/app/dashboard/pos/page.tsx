@@ -75,17 +75,8 @@ export default function POSLandingPage() {
       return
     }
 
-    // For standard POS, check business type
-    const posMode = getOutletPosMode(currentOutlet, currentBusiness)
-    if (posMode === "standard") {
-      // loadRegisterStatuses will be called in useEffect
-    } else {
-      // Only redirect to the specific POS if there is already an active shift.
-      // Without a shift, stay on the landing page so the user can open one.
-      if (activeShift) {
-        router.push(getOutletPOSRoute(currentOutlet, currentBusiness))
-      }
-    }
+    // Keep users on landing to explicitly select a running shift
+    // or open a new shift/till before entering any POS terminal.
   }, [currentBusiness, currentOutlet, outlets, activeShift, router, user])
 
   const loadRegisterStatuses = useCallback(async () => {
