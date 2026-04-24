@@ -591,6 +591,7 @@ export function BarPOS() {
         customer_phone: openTabForm.customer_phone || undefined,
         customer_id: openTabForm.customer_id || undefined, // Link to CRM customer
         table_id: openTabForm.table_id || undefined,
+        outlet_id: outlet?.id,
         notes: openTabForm.notes || undefined,
       })
       

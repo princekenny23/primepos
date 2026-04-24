@@ -154,10 +154,10 @@ def deduct_stock(product, outlet, quantity, user, reference_id, reason='', movem
     
     # Bulk update all batches (1 query instead of N queries)
     Batch.objects.bulk_update(batches_to_update, ['quantity', 'updated_at'], batch_size=100)
-    
+
     # Bulk create all stock movements (1 query instead of N queries)
     StockMovement.objects.bulk_create(movements_to_create, batch_size=100)
-    
+
     # Update LocationStock once (after all batch updates)
     location_stock, created = LocationStock.objects.get_or_create(
         product=product,
@@ -166,7 +166,24 @@ def deduct_stock(product, outlet, quantity, user, reference_id, reason='', movem
         defaults={'quantity': 0}
     )
     location_stock.sync_quantity_from_batches()
-    
+
+    # --- PHASE 1 FIX: keep Product.stock in sync with batch reality ---
+    # Product.stock is a denormalised projection; we recompute it from the
+    # non-expired batch totals so it is never stale after a sale deduction.
+    new_stock = sum(
+        b.quantity
+        for b in Batch.objects.filter(
+            product=product,
+            outlet=outlet,
+            expiry_date__gt=today,
+            quantity__gt=0,
+        )
+    )
+    from apps.products.models import Product as _Product
+    _Product.objects.filter(id=product.id).update(stock=new_stock)
+    # Refresh the in-memory instance so callers see the updated value.
+    product.stock = new_stock
+
     return deductions
 
 
@@ -383,10 +400,93 @@ def get_expiring_soon(days=30, product=None, outlet=None):
         expiry_date__lte=threshold,
         quantity__gt=0
     ).order_by('expiry_date')
-    
+
     if product:
         query = query.filter(product=product)
     if outlet:
         query = query.filter(outlet=outlet)
-    
+
     return query
+
+
+@transaction.atomic
+def restore_stock_for_refund(product, outlet, quantity, user, reference_id, reason='Refund'):
+    """
+    Return stock to inventory after a refund.  Creates a StockMovement of type
+    'return' and updates Product.stock.  If an active batch exists we bump its
+    quantity; otherwise a new perpetual batch is created.
+
+    Args:
+        product: Product instance
+        outlet: Outlet instance
+        quantity: int – number of base units being returned
+        user: User instance
+        reference_id: str – refund or sale receipt number
+        reason: str
+
+    Returns:
+        Batch that received the stock
+    """
+    from datetime import timedelta
+
+    today = timezone.now().date()
+
+    # Try to restore into the youngest non-expired batch for this product/outlet.
+    existing_batch = (
+        Batch.objects.select_for_update()
+        .filter(product=product, outlet=outlet, expiry_date__gt=today, quantity__gte=0)
+        .order_by('-expiry_date')
+        .first()
+    )
+
+    if existing_batch:
+        existing_batch.quantity += quantity
+        existing_batch.save(update_fields=['quantity', 'updated_at'])
+        target_batch = existing_batch
+    else:
+        # No usable batch – create a perpetual one with a 1-year expiry.
+        batch_number = f"RET-{today.strftime('%Y%m%d')}-{product.id}-{reference_id}"
+        target_batch = Batch.objects.create(
+            tenant=product.tenant,
+            outlet=outlet,
+            product=product,
+            batch_number=batch_number,
+            expiry_date=today + timedelta(days=365),
+            quantity=quantity,
+            cost_price=product.cost,
+        )
+
+    StockMovement.objects.create(
+        tenant=product.tenant,
+        batch=target_batch,
+        product=product,
+        outlet=outlet,
+        user=user,
+        movement_type='return',
+        quantity=quantity,
+        reference_id=reference_id,
+        reason=reason,
+    )
+
+    # Sync LocationStock and Product.stock projections.
+    location_stock, _ = LocationStock.objects.get_or_create(
+        product=product,
+        outlet=outlet,
+        tenant=product.tenant,
+        defaults={'quantity': 0},
+    )
+    location_stock.sync_quantity_from_batches()
+
+    new_stock = sum(
+        b.quantity
+        for b in Batch.objects.filter(product=product, outlet=outlet, expiry_date__gt=today, quantity__gt=0)
+    )
+    from apps.products.models import Product as _Product
+    _Product.objects.filter(id=product.id).update(stock=new_stock)
+    product.stock = new_stock
+
+    logger.info(
+        f"Restored {quantity} units to batch {target_batch.batch_number} "
+        f"({product.name}) at {outlet.name} via refund {reference_id}"
+    )
+    return target_batch

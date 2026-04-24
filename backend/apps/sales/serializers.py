@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from decimal import Decimal, InvalidOperation
-from .models import Sale, SaleItem, Receipt, PrintJob, PrintDevice, Printer
+from .models import Sale, SaleItem, Receipt, PrintJob, PrintDevice, Printer, Refund, RefundItem
 from .models import ReceiptTemplate
 from apps.products.serializers import ProductSerializer
 from apps.tenants.permissions import resolve_tenant_from_request
@@ -417,4 +417,58 @@ class ReceiptTemplateSerializer(serializers.ModelSerializer):
         if attrs.get('format') in ['text', 'html'] and not attrs.get('content'):
             raise serializers.ValidationError("Template content cannot be empty for text/html formats")
         return attrs
+
+
+# ---------------------------------------------------------------------------
+# PHASE 3: Refund serializers
+# ---------------------------------------------------------------------------
+
+class RefundItemInputSerializer(serializers.Serializer):
+    """Input only – used to validate each item in a refund request body."""
+    sale_item_id = serializers.IntegerField()
+    quantity = serializers.IntegerField(min_value=1)
+
+
+class RefundItemSerializer(serializers.ModelSerializer):
+    """Read serializer for a RefundItem line."""
+
+    class Meta:
+        model = RefundItem
+        fields = (
+            'id', 'original_item', 'product', 'product_name',
+            'quantity', 'quantity_in_base_units',
+            'price', 'cost', 'total',
+        )
+        read_only_fields = fields
+
+
+class RefundSerializer(serializers.ModelSerializer):
+    """Read serializer for a Refund, including its line items."""
+    items = RefundItemSerializer(many=True, read_only=True)
+    original_sale_receipt = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Refund
+        fields = (
+            'id', 'refund_number', 'status', 'reason',
+            'payment_method',
+            'subtotal_refunded', 'tax_refunded',
+            'discount_reversed', 'total_refunded',
+            'stock_restored',
+            'processed_by', 'approved_by',
+            'created_at',
+            'original_sale', 'original_sale_receipt',
+            'items',
+        )
+        read_only_fields = fields
+
+    def get_original_sale_receipt(self, obj):
+        sale = obj.original_sale
+        if not sale:
+            return None
+        return {
+            'id': sale.id,
+            'receipt_number': sale.receipt_number,
+            'total': str(sale.total),
+        }
 

@@ -32,6 +32,22 @@ class Shift(models.Model):
     # Enhanced fields
     device_id = models.CharField(max_length=255, blank=True, help_text="Device identifier for multi-device tracking")
     sync_status = models.CharField(max_length=20, choices=[('synced', 'Synced'), ('pending', 'Pending'), ('conflict', 'Conflict')], default='synced')
+
+    # PHASE 4: Variance accountability fields
+    closed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='closed_shifts',
+        help_text="Staff member who closed this shift (may differ from opener)"
+    )
+    variance_reason = models.TextField(
+        blank=True,
+        help_text="Explanation required when |variance| > threshold"
+    )
+    variance_approved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='variance_approved_shifts',
+        help_text="Manager who signed off the variance"
+    )
     
     @property
     def cashier(self):
@@ -40,13 +56,40 @@ class Shift(models.Model):
 
     @property
     def system_total(self):
-        """Expected till cash: opening balance plus completed cash sales."""
-        sales_total = self.sales.filter(
+        """
+        Expected till cash: opening balance plus completed cash sales,
+        minus cash expenses, minus withdrawals, plus deposits.
+
+        Formula: opening + sales - expenses - withdrawals + deposits
+        """
+        from apps.sales.models import Sale
+        from apps.expenses.models import Expense
+
+        cash_sales = Sale.objects.filter(
+            shift=self,
             status='completed',
             is_void=False,
             payment_method='cash',
         ).aggregate(total=models.Sum('total'))['total'] or Decimal('0')
-        return self.opening_cash_balance + sales_total
+
+        cash_expenses = Expense.objects.filter(
+            shift=self,
+            status='approved',
+            payment_method='cash',
+        ).aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+
+        # Withdrawals and deposits via CashMovement records
+        cash_movements = CashMovement.objects.filter(shift=self)
+        withdrawals = (
+            cash_movements.filter(movement_type='withdrawal')
+            .aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+        )
+        deposits = (
+            cash_movements.filter(movement_type='deposit')
+            .aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+        )
+
+        return (self.opening_cash_balance + cash_sales - cash_expenses - withdrawals + deposits)
 
     @property
     def difference(self):
@@ -72,4 +115,52 @@ class Shift(models.Model):
     def __str__(self):
         return f"{self.outlet.name} - {self.till.name} - {self.operating_date}"
 
+
+# ---------------------------------------------------------------------------
+# PHASE 4: Cash reconciliation
+# ---------------------------------------------------------------------------
+
+class CashMovement(models.Model):
+    """
+    Records deposits, withdrawals, and other cash movements during a shift.
+
+    Used by system_total property to compute expected cash:
+      system_total = opening + sales - expenses - withdrawals + deposits
+    """
+
+    MOVEMENT_TYPES = [
+        ('deposit', 'Deposit'),
+        ('withdrawal', 'Withdrawal'),
+        ('float_add', 'Float Add'),
+        ('paid_out', 'Paid Out'),
+    ]
+
+    shift = models.ForeignKey(
+        Shift, on_delete=models.CASCADE, related_name='cash_movements'
+    )
+    movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES)
+    amount = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0.01'))],
+    )
+    note = models.TextField(blank=True)
+    recorded_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='cash_movements_recorded',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'shifts_cashmovement'
+        verbose_name = 'Cash Movement'
+        verbose_name_plural = 'Cash Movements'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['shift']),
+            models.Index(fields=['movement_type']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.get_movement_type_display()} {self.amount} on {self.shift}"
 

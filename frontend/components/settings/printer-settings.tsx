@@ -751,7 +751,7 @@ export function PrinterSettings() {
             <div className="flex gap-2">
               <Button
                 onClick={claimCloudPairing}
-                disabled={!connected || isClaimingPairing || pairingCode.trim().length < 6}
+                disabled={isClaimingPairing || pairingCode.trim().length < 6}
               >
                 {isClaimingPairing ? "Pairing..." : "Pair Connector"}
               </Button>

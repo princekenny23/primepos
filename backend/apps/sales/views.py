@@ -16,12 +16,12 @@ import logging
 import secrets
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
-from .models import Sale, SaleItem, Receipt, ReceiptTemplate, PrintJob, PrintDevice, Printer, ConnectorPairingSession
-from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer, PrintJobSerializer, PrintDeviceSerializer, PrinterSerializer
+from .models import Sale, SaleItem, Receipt, ReceiptTemplate, PrintJob, PrintDevice, Printer, ConnectorPairingSession, Refund, RefundItem
+from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer, PrintJobSerializer, PrintDeviceSerializer, PrinterSerializer, RefundSerializer, RefundItemInputSerializer
 from .services import ReceiptService
 from apps.products.models import Product, ProductUnit
 from apps.inventory.models import StockMovement, LocationStock, Batch
-from apps.inventory.stock_helpers import get_available_stock, deduct_stock, add_stock
+from apps.inventory.stock_helpers import get_available_stock, deduct_stock, restore_stock_for_refund
 from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 
 
@@ -399,28 +399,33 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 except ProductUnit.DoesNotExist:
                     raise serializers.ValidationError(f"Item {idx + 1}: Unit {unit_id} not found or inactive")
             
-            # Check stock availability (UNITS ONLY ARCHITECTURE)
-            if product.stock < quantity_in_base_units:
+            # --- PHASE 1 FIX: batch-aware stock check ---
+            # Use authoritative batch total; fall back to Product.stock only when
+            # no batches have been configured for this product yet.
+            available_from_batches = get_available_stock(product, outlet)
+            available = available_from_batches if available_from_batches > 0 else product.stock
+
+            if available < quantity_in_base_units:
                 raise serializers.ValidationError(
                     f"Item {idx + 1}: Insufficient stock for {product.name}. "
-                    f"Available: {product.stock} {product.unit}, Requested: {quantity_in_base_units} {product.unit}"
+                    f"Available: {available} {product.unit}, Requested: {quantity_in_base_units} {product.unit}"
                 )
 
             # Option B for delivery-required sales:
             # reserve/deduct is handled by Distribution delivery workflow, not instant POS deduction.
             should_deduct_now = not bool(getattr(sale, 'delivery_required', False))
-            if should_deduct_now:
-                product.stock -= quantity_in_base_units
-                product.save(update_fields=['stock'])
-            
+
             # Calculate item total - round to 2 decimal places
             item_total = (price * Decimal(quantity)).quantize(Decimal('0.01'))
             total_subtotal += item_total
-            
+
             # Extract item notes and kitchen_status if provided
             item_notes = item_data.get('notes', '')
             kitchen_status = item_data.get('kitchen_status', 'pending')
-            
+
+            # Snapshot cost before any mutation so COGS is always immutable.
+            cost_snapshot = self._snapshot_cost(product, unit)
+
             # Create sale item (UNITS ONLY ARCHITECTURE - no variations)
             sale_item = SaleItem.objects.create(
                 sale=sale,
@@ -432,25 +437,41 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 quantity=quantity,
                 quantity_in_base_units=quantity_in_base_units,
                 price=price,
-                cost=self._snapshot_cost(product, unit),
+                cost=cost_snapshot,
                 tax_rate_at_sale=Decimal('0'),
                 total=item_total,
                 notes=item_notes,
                 kitchen_status=kitchen_status
             )
-            
-            # Record immediate stock movement only for non-delivery-required sales.
+
+            # --- PHASE 1 FIX: single authoritative deduction path ---
+            # deduct_stock handles: batch FIFO, StockMovement creation,
+            # LocationStock sync, and Product.stock sync in one atomic call.
             if should_deduct_now:
-                StockMovement.objects.create(
-                    tenant=tenant,
-                    product=product,
-                    outlet=sale.outlet,
-                    user=request.user,
-                    movement_type='sale',
-                    quantity=quantity_in_base_units,
-                    reference_id=str(sale.id),
-                    reason=f"Sale {sale.receipt_number}"
-                )
+                try:
+                    deduct_stock(
+                        product=product,
+                        outlet=outlet,
+                        quantity=quantity_in_base_units,
+                        user=request.user,
+                        reference_id=str(sale.id),
+                        reason=f"Sale {sale.receipt_number}",
+                    )
+                except ValueError:
+                    # Fallback: product has no batches configured – deduct directly
+                    # and record a movement so the audit trail is preserved.
+                    product.stock = max(0, product.stock - quantity_in_base_units)
+                    product.save(update_fields=['stock'])
+                    StockMovement.objects.create(
+                        tenant=tenant,
+                        product=product,
+                        outlet=sale.outlet,
+                        user=request.user,
+                        movement_type='sale',
+                        quantity=quantity_in_base_units,
+                        reference_id=str(sale.id),
+                        reason=f"Sale {sale.receipt_number}",
+                    )
         
         # Calculate totals - round to 2 decimal places to match DecimalField precision
         tax = sale.tax or Decimal('0')
@@ -700,6 +721,249 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
         response_serializer = SaleSerializer(sale)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    # ------------------------------------------------------------------
+    # PHASE 3: Refund endpoint
+    # ------------------------------------------------------------------
+
+    @transaction.atomic
+    @action(detail=True, methods=['post'], url_path='refund')
+    def refund_sale(self, request, pk=None):
+        """
+        Create a full or partial refund for an existing completed sale.
+
+        POST /api/sales/<sale_id>/refund/
+        Body:
+            {
+                "reason": "Customer returned damaged goods",
+                "payment_method": "cash",   // method used for the payout
+                "restore_stock": true,       // default true
+                "items": [
+                    {"sale_item_id": 42, "quantity": 1},
+                    ...
+                ]
+            }
+
+        Rules:
+        - Sale must be 'completed' (not voided, not already refunded).
+        - Per item: refund quantity ≤ original quantity minus already-refunded qty.
+        - COGS reversal uses the immutable cost snapshot from the original SaleItem.
+        - Stock is restored via restore_stock_for_refund() (StockMovement type='return').
+        - If all items are fully refunded the original sale status flips to 'refunded'.
+        - The refund number format is REF-{YYYYMMDD}-{sale.receipt_number}.
+        """
+        logger = logging.getLogger(__name__)
+
+        tenant = self.get_tenant_for_request(request)
+        if not tenant:
+            return Response({"detail": "Tenant required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # --- Fetch and validate the original sale -------------------------
+        try:
+            sale = Sale.objects.select_for_update().get(
+                pk=pk, tenant=tenant, is_void=False
+            )
+        except Sale.DoesNotExist:
+            return Response({"detail": "Sale not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        if sale.status not in ('completed', 'paid'):
+            return Response(
+                {"detail": f"Cannot refund a sale with status '{sale.status}'. "
+                           "Only completed/paid sales can be refunded."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # --- Validate request body ----------------------------------------
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({"detail": "reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        payment_method = request.data.get('payment_method', 'cash')
+        valid_payment_methods = [choice[0] for choice in Sale.PAYMENT_METHODS]
+        if payment_method not in valid_payment_methods:
+            return Response(
+                {"detail": f"Invalid payment_method. Choose from: {valid_payment_methods}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        restore_stock = request.data.get('restore_stock', True)
+        items_data = request.data.get('items', [])
+
+        if not items_data:
+            return Response({"detail": "items list is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate item input shapes
+        item_input_serializer = RefundItemInputSerializer(data=items_data, many=True)
+        if not item_input_serializer.is_valid():
+            return Response(item_input_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Build lookup: original_item_id -> already-refunded quantity
+        from django.db.models import Sum as DjSum
+        already_refunded = (
+            RefundItem.objects
+            .filter(refund__original_sale=sale, refund__status__in=('approved', 'pending'))
+            .values('original_item_id')
+            .annotate(total_qty=DjSum('quantity'))
+        )
+        refunded_qty_by_item = {r['original_item_id']: r['total_qty'] for r in already_refunded}
+
+        parsed_refund_items = []
+        subtotal = Decimal('0')
+        tax_portion = Decimal('0')
+        discount_portion = Decimal('0')
+
+        for entry in item_input_serializer.validated_data:
+            sale_item_id = entry['sale_item_id']
+            refund_qty = entry['quantity']
+
+            try:
+                sale_item = SaleItem.objects.get(pk=sale_item_id, sale=sale)
+            except SaleItem.DoesNotExist:
+                return Response(
+                    {"detail": f"SaleItem {sale_item_id} does not belong to this sale."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            max_refundable = sale_item.quantity - refunded_qty_by_item.get(sale_item.id, 0)
+            if refund_qty > max_refundable:
+                return Response(
+                    {"detail": (
+                        f"SaleItem {sale_item_id} ({sale_item.product_name}): "
+                        f"requested qty {refund_qty} exceeds refundable qty {max_refundable}."
+                    )},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Cost snapshot from original SaleItem (never falls back to live product.cost)
+            unit_cost = sale_item.cost if sale_item.cost is not None else Decimal('0')
+
+            # Pro-rate base units
+            if sale_item.quantity > 0:
+                base_units = round(
+                    sale_item.quantity_in_base_units * refund_qty / sale_item.quantity
+                )
+            else:
+                base_units = refund_qty
+
+            item_total = (sale_item.price * Decimal(refund_qty)).quantize(Decimal('0.01'))
+            subtotal += item_total
+
+            parsed_refund_items.append({
+                'sale_item': sale_item,
+                'refund_qty': refund_qty,
+                'base_units': base_units,
+                'unit_cost': unit_cost,
+                'item_total': item_total,
+            })
+
+        # Pro-rate tax/discount from the original sale
+        if sale.total and sale.total > 0:
+            proportion = (subtotal / sale.total).quantize(Decimal('0.0001'))
+        else:
+            proportion = Decimal('1')
+
+        tax_portion = (sale.tax * proportion).quantize(Decimal('0.01'))
+        discount_portion = (sale.discount * proportion).quantize(Decimal('0.01'))
+        total_refunded = (subtotal + tax_portion - discount_portion).quantize(Decimal('0.01'))
+
+        if total_refunded <= 0:
+            return Response(
+                {"detail": "Computed refund total is zero or negative."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # --- Generate unique refund number --------------------------------
+        today_str = timezone.now().strftime('%Y%m%d')
+        base_refund_number = f"REF-{today_str}-{sale.receipt_number}"
+        refund_number = base_refund_number
+        suffix = 1
+        while Refund.objects.filter(tenant=tenant, refund_number=refund_number).exists():
+            refund_number = f"{base_refund_number}-{suffix}"
+            suffix += 1
+
+        # --- Create Refund + RefundItems in a single atomic block ---------
+        refund = Refund.objects.create(
+            tenant=tenant,
+            outlet=sale.outlet,
+            original_sale=sale,
+            refund_number=refund_number,
+            status='approved',
+            reason=reason,
+            payment_method=payment_method,
+            subtotal_refunded=subtotal,
+            tax_refunded=tax_portion,
+            discount_reversed=discount_portion,
+            total_refunded=total_refunded,
+            processed_by=request.user,
+            approved_by=request.user,
+            stock_restored=False,  # will flip below if restore succeeds
+        )
+
+        for entry in parsed_refund_items:
+            si = entry['sale_item']
+            RefundItem.objects.create(
+                refund=refund,
+                original_item=si,
+                product=si.product,
+                product_name=si.product_name,
+                quantity=entry['refund_qty'],
+                quantity_in_base_units=entry['base_units'],
+                price=si.price,
+                cost=entry['unit_cost'],
+                total=entry['item_total'],
+            )
+
+        # --- Restore stock ------------------------------------------------
+        if restore_stock:
+            for entry in parsed_refund_items:
+                si = entry['sale_item']
+                if si.product and entry['base_units'] > 0:
+                    try:
+                        restore_stock_for_refund(
+                            product=si.product,
+                            outlet=sale.outlet,
+                            quantity=entry['base_units'],
+                            user=request.user,
+                            reference_id=str(refund.id),
+                            reason=f"Refund {refund_number}",
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"Stock restore failed for SaleItem {si.id} in refund {refund.id}: {exc}"
+                        )
+            refund.stock_restored = True
+            refund.save(update_fields=['stock_restored'])
+
+        # --- Flip original sale status if fully refunded ------------------
+        all_item_ids = set(sale.items.values_list('id', flat=True))
+        fully_refunded_ids = set(
+            RefundItem.objects
+            .filter(refund__original_sale=sale, refund__status='approved')
+            .values_list('original_item_id', flat=True)
+        )
+        if all_item_ids == fully_refunded_ids:
+            Sale.objects.filter(pk=sale.pk).update(status='refunded')
+
+        # --- Audit log ----------------------------------------------------
+        try:
+            from apps.audit.models import ActivityLog
+            ActivityLog.objects.create(
+                tenant=tenant,
+                user=request.user,
+                action='create',
+                model_name='Refund',
+                object_id=str(refund.id),
+                description=f"Refund {refund_number} created for sale {sale.receipt_number}. Total: {total_refunded}",
+            )
+        except Exception:
+            pass  # Audit log failure must not roll back the refund
+
+        logger.info(
+            f"Refund created: refund_id={refund.id}, refund_number={refund_number}, "
+            f"sale={sale.receipt_number}, total={total_refunded}"
+        )
+
+        return Response(RefundSerializer(refund).data, status=status.HTTP_201_CREATED)
 
     @transaction.atomic
     @action(detail=False, methods=['post'], url_path='initiate-payment')

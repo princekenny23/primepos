@@ -63,6 +63,7 @@ export function OpenTabModal({ open, onOpenChange, onTabOpened }: OpenTabModalPr
       await tabService.open({
         customer_name: customerName.trim(),
         customer_phone: customerPhone.trim(),
+        outlet_id: currentOutlet.id,
         notes: bartender ? `Assigned bartender: ${bartender}` : "",
       })
 

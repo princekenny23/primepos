@@ -11,14 +11,12 @@ const barOptions: (Omit<OptionCardProps, "iconSize">)[] = [
   {
     id: "tabs",
     title: "Bar Tabs",
-    titleKey: "pos.bar.tabs",
     href: "/dashboard/bar/tabs",
     icon: CreditCard,
   },
   {
     id: "tables",
-    title: "bar tables",
-    titleKey: "pos.bar.tables",
+    title: "Bar Tables",
     href: "/dashboard/bar/tables",
     icon: Table2,
   },

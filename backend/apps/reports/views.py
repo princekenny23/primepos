@@ -2,8 +2,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Sum, Count, Avg, Q, F
-from django.db.models.functions import TruncDate
+from django.db.models import Sum, Count, Avg, Q, F, ExpressionWrapper, DecimalField
+from django.db.models.functions import TruncDate, Coalesce
 from django.utils import timezone
 from django.http import HttpResponse
 from datetime import datetime, timedelta, date
@@ -251,29 +251,34 @@ def profit_loss_report(request):
         sales_queryset = sales_queryset.filter(created_at__date__lte=end_date)
     
     # Revenue
-    total_revenue = sales_queryset.aggregate(Sum('total'))['total__sum'] or 0
+    total_revenue = sales_queryset.aggregate(total=Sum('total'))['total'] or Decimal('0')
+
+    # --- PHASE 2 FIX: COGS via single DB aggregation (no Python loop) ---
+    # Uses only the immutable cost snapshot captured at sale time.
+    # cost * quantity_in_base_units mirrors effective_cogs_total on SaleItem.
+    cogs_expr = ExpressionWrapper(
+        Coalesce(F('cost'), Decimal('0')) * F('quantity_in_base_units'),
+        output_field=DecimalField(max_digits=20, decimal_places=2),
+    )
+    total_cost = (
+        SaleItem.objects.filter(sale__in=sales_queryset)
+        .aggregate(total=Sum(cogs_expr))['total'] or Decimal('0')
+    )
     
-    # Cost of goods sold
-    sale_items = SaleItem.objects.filter(sale__in=sales_queryset).select_related('product')
-    total_cost = Decimal('0.00')
-    for item in sale_items:
-        total_cost += item.effective_cogs_total
-    
-    # Expenses
+    # Expenses – only approved, filtered by expense_date (not approval date)
     expense_qs = Expense.objects.filter(tenant=tenant, status='approved')
     if outlet_id:
-        expense_qs = expense_qs.filter(outlet_id=outlet_id)
+        expense_qs = expense_qs.filter(Q(outlet_id=outlet_id) | Q(outlet__isnull=True))
     if start_date:
         expense_qs = expense_qs.filter(expense_date__gte=start_date)
     if end_date:
         expense_qs = expense_qs.filter(expense_date__lte=end_date)
-    total_expenses = expense_qs.aggregate(Sum('amount'))['amount__sum'] or 0
+    total_expenses = expense_qs.aggregate(total=Sum('amount'))['total'] or Decimal('0')
 
-    # Gross profit
     gross_profit = total_revenue - total_cost
     net_profit = gross_profit - total_expenses
-    gross_margin = (gross_profit / total_revenue * 100) if total_revenue > 0 else 0
-    net_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else 0
+    gross_margin = (gross_profit / total_revenue * 100) if total_revenue > 0 else Decimal('0')
+    net_margin = (net_profit / total_revenue * 100) if total_revenue > 0 else Decimal('0')
     
     return Response({
         'total_revenue': float(total_revenue),

@@ -312,19 +312,150 @@ class SaleItem(models.Model):
     def effective_cost(self):
         if self.cost is not None:
             return self.cost
-
         return None
 
     @property
     def effective_cogs_total(self):
+        """
+        PHASE 2 FIX – immutable COGS.
+        ONLY use the snapshot captured at sale time (self.cost).
+        We deliberately do NOT fall back to product.cost so that changing
+        a product's cost never retroactively changes historical P&L.
+        If cost was not captured at sale time it is reported as 0 and
+        should be investigated / corrected via a data-quality report.
+        """
         effective_cost = self.effective_cost
         if effective_cost is not None:
-            return effective_cost * Decimal(self.quantity)
-
-        if self.product and self.product.cost is not None:
-            return Decimal(str(self.product.cost)) * Decimal(self.quantity_in_base_units)
-
+            return effective_cost * Decimal(self.quantity_in_base_units)
         return Decimal('0.00')
+
+
+# ---------------------------------------------------------------------------
+# PHASE 3: Refund models
+# ---------------------------------------------------------------------------
+
+class Refund(models.Model):
+    """
+    Tracks a full or partial refund against an original Sale.
+
+    Invariants:
+    - A Refund record is immutable once created (status may progress to
+      approved/rejected but financial amounts never change).
+    - Refunding reverses revenue, tax, discount, and COGS for the returned
+      items. Stock is restored via a StockMovement of type 'return'.
+    - refund_number is globally unique per tenant.
+    """
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    PAYMENT_METHOD_CHOICES = Sale.PAYMENT_METHODS
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='refunds')
+    outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='refunds')
+    original_sale = models.ForeignKey(
+        Sale, on_delete=models.PROTECT, related_name='refunds',
+        help_text="The sale being (partially) refunded"
+    )
+    refund_number = models.CharField(max_length=50, db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='approved')
+    reason = models.TextField()
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+
+    # Financials (immutable snapshot at refund time)
+    subtotal_refunded = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    tax_refunded = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    discount_reversed = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    total_refunded = models.DecimalField(
+        max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))],
+    )
+
+    # Audit
+    processed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, related_name='processed_refunds'
+    )
+    approved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_refunds'
+    )
+    stock_restored = models.BooleanField(
+        default=False, help_text="Whether stock was restored to inventory"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sales_refund'
+        verbose_name = 'Refund'
+        verbose_name_plural = 'Refunds'
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'refund_number'],
+                name='uniq_refund_number_per_tenant',
+            )
+        ]
+        indexes = [
+            models.Index(fields=['tenant']),
+            models.Index(fields=['outlet']),
+            models.Index(fields=['original_sale']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"Refund {self.refund_number} for Sale {self.original_sale.receipt_number}"
+
+
+class RefundItem(models.Model):
+    """Line-item detail for a Refund – one row per returned SaleItem."""
+
+    refund = models.ForeignKey(Refund, on_delete=models.CASCADE, related_name='items')
+    original_item = models.ForeignKey(
+        SaleItem, on_delete=models.PROTECT, related_name='refund_items'
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.SET_NULL, null=True, blank=True
+    )
+    product_name = models.CharField(max_length=255)
+    quantity = models.IntegerField(validators=[MinValueValidator(1)])
+    quantity_in_base_units = models.IntegerField(
+        validators=[MinValueValidator(1)], default=1
+    )
+    price = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    # Snapshot of cost at original sale time (never null – copied from SaleItem).
+    cost = models.DecimalField(
+        max_digits=15, decimal_places=2, default=Decimal('0'),
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+    total = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0'))],
+    )
+
+    class Meta:
+        db_table = 'sales_refunditem'
+        verbose_name = 'Refund Item'
+        verbose_name_plural = 'Refund Items'
+        indexes = [
+            models.Index(fields=['refund']),
+            models.Index(fields=['original_item']),
+        ]
+
+    def __str__(self):
+        return f"{self.product_name} x{self.quantity} (Refund {self.refund.refund_number})"
 
 
 class Receipt(models.Model):

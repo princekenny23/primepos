@@ -123,6 +123,7 @@ export interface OpenTabData {
   customer_name?: string
   customer_phone?: string
   table_id?: string
+  outlet_id?: number | string
   credit_limit?: number
   notes?: string
 }

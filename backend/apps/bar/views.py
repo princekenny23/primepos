@@ -161,6 +161,14 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
         # Get tenant using the mixin helper
         tenant = self.require_tenant(request)
         outlet = self.get_outlet_for_request(request)
+
+        # Fallback: if header-based outlet resolution failed, use outlet_id from body
+        if not outlet and data.get('outlet_id'):
+            from apps.outlets.models import Outlet
+            try:
+                outlet = Outlet.objects.get(id=data['outlet_id'], tenant=tenant)
+            except Outlet.DoesNotExist:
+                pass
         
         with transaction.atomic():
             # Get customer if provided

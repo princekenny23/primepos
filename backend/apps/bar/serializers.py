@@ -129,6 +129,7 @@ class OpenTabSerializer(serializers.Serializer):
     customer_name = serializers.CharField(required=False, allow_blank=True, max_length=255)
     customer_phone = serializers.CharField(required=False, allow_blank=True, max_length=50)
     table_id = serializers.UUIDField(required=False, allow_null=True)
+    outlet_id = serializers.IntegerField(required=False, allow_null=True)
     credit_limit = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True, default='')
     
