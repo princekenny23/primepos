@@ -20,7 +20,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'tenant', 'outlet', 'outlet_id', 'outlet_name', 'user',
             'shift', 'shift_id',
-            'expense_number', 'title', 'category', 'vendor', 'description',
+            'expense_number', 'title', 'vendor', 'description',
             'amount', 'payment_method', 'payment_reference', 'expense_date',
             'status', 'approved_by', 'approved_by_name', 'approved_at', 
             'approval_notes', 'rejected_by', 'rejected_by_name', 'rejected_at',

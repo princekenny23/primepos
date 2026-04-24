@@ -28,7 +28,6 @@ interface Expense {
   id: string
   expense_number: string
   title: string
-  category: string
   vendor?: string
   description: string
   amount: number
@@ -46,17 +45,6 @@ interface EditExpenseModalProps {
   currentBusiness: any
   onSuccess?: () => void
 }
-
-const expenseCategories = [
-  "Supplies",
-  "Utilities",
-  "Rent",
-  "Marketing",
-  "Travel",
-  "Equipment",
-  "Maintenance",
-  "Other"
-]
 
 const paymentMethods = [
   { value: "cash", label: "Cash" },
@@ -77,7 +65,6 @@ export function EditExpenseModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     title: "",
-    category: "",
     vendor: "",
     description: "",
     amount: "",
@@ -90,7 +77,6 @@ export function EditExpenseModal({
     if (expense && open) {
       setFormData({
         title: expense.title || "",
-        category: expense.category || "",
         vendor: expense.vendor || "",
         description: expense.description || "",
         amount: expense.amount?.toString() || "",
@@ -162,31 +148,8 @@ export function EditExpenseModal({
             />
           </div>
 
-          {/* Category and Date */}
+          {/* Date */}
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-900">
-                Category <span className="text-red-500">*</span>
-              </label>
-              <Select
-                value={formData.category}
-                onValueChange={(value) => setFormData({ ...formData, category: value })}
-                disabled={isSubmitting}
-                required
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  {expenseCategories.map((category) => (
-                    <SelectItem key={category} value={category}>
-                      {category}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-900">
                 Expense Date <span className="text-red-500">*</span>
@@ -286,7 +249,7 @@ export function EditExpenseModal({
             </Button>
             <Button
               type="submit"
-              disabled={isSubmitting || !formData.title || !formData.category || !formData.amount}
+              disabled={isSubmitting || !formData.title || !formData.amount}
               className="bg-blue-900 hover:bg-blue-800"
             >
               {isSubmitting ? "Saving..." : "Save Changes"}

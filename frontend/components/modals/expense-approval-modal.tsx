@@ -21,7 +21,6 @@ interface Expense {
   expense_number: string
   title: string
   amount: number
-  category: string
   vendor?: string
   description: string
   expense_date: string

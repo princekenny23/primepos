@@ -61,6 +61,13 @@ export interface RegisterData {
   role?: string
 }
 
+export interface VerifiedUserContext {
+  role: string
+  effectiveRole: string
+  staffRoleName: string
+  isSaasAdmin: boolean
+}
+
 export const authService = {
   async login(identifier: string, password: string): Promise<LoginResponse> {
     try {
@@ -157,13 +164,22 @@ export const authService = {
     return response
   },
 
-  async verifyCredentials(identifier: string, password: string): Promise<boolean> {
-    await api.post(apiEndpoints.auth.login, {
+  async verifyCredentials(identifier: string, password: string): Promise<VerifiedUserContext> {
+    const response = await api.post<any>(apiEndpoints.auth.login, {
       identifier,
       email: identifier,
       password,
     })
-    return true
+
+    const backendUser = response?.user || {}
+    const isSaasAdmin = Boolean(backendUser?.is_saas_admin)
+
+    return {
+      role: String(backendUser?.role || ""),
+      effectiveRole: String(backendUser?.effective_role || ""),
+      staffRoleName: String(backendUser?.staff_role?.name || ""),
+      isSaasAdmin,
+    }
   },
 
   async logout(): Promise<void> {

@@ -61,7 +61,6 @@ interface Expense {
   id: string
   expense_number: string
   title: string
-  category: string
   vendor?: string
   description: string
   amount: number
@@ -79,17 +78,6 @@ interface Expense {
   rejected_at?: string
 }
 
-const expenseCategories = [
-  "Supplies",
-  "Utilities",
-  "Rent",
-  "Marketing",
-  "Travel",
-  "Equipment",
-  "Maintenance",
-  "Other"
-]
-
 const paymentMethods = [
   "cash",
 ]
@@ -101,7 +89,6 @@ export default function ExpensesPage() {
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState<string>("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [dateRange, setDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({
     from: undefined,

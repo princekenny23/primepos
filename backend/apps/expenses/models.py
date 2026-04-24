@@ -9,17 +9,6 @@ from apps.shifts.models import Shift
 
 class Expense(models.Model):
     """Expense model for tracking business expenses"""
-    CATEGORY_CHOICES = [
-        ('Supplies', 'Supplies'),
-        ('Utilities', 'Utilities'),
-        ('Rent', 'Rent'),
-        ('Marketing', 'Marketing'),
-        ('Travel', 'Travel'),
-        ('Equipment', 'Equipment'),
-        ('Maintenance', 'Maintenance'),
-        ('Other', 'Other'),
-    ]
-    
     PAYMENT_METHOD_CHOICES = [
         ('cash', 'Cash'),
         ('card', 'Card'),
@@ -41,7 +30,6 @@ class Expense(models.Model):
     
     expense_number = models.CharField(max_length=50, unique=True, db_index=True)
     title = models.CharField(max_length=255)
-    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
     vendor = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
     amount = models.DecimalField(
@@ -74,7 +62,6 @@ class Expense(models.Model):
             models.Index(fields=['outlet']),
             models.Index(fields=['expense_date']),
             models.Index(fields=['status']),
-            models.Index(fields=['category']),
         ]
     
     def __str__(self):

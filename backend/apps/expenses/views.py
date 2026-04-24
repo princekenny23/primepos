@@ -19,7 +19,7 @@ class ExpenseViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_office']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    filterset_fields = ['tenant', 'outlet', 'category', 'status', 'payment_method']
+    filterset_fields = ['tenant', 'outlet', 'status', 'payment_method']
     search_fields = ['expense_number', 'title', 'description', 'vendor']
     ordering_fields = ['expense_date', 'amount', 'created_at']
     ordering = ['-expense_date', '-created_at']
@@ -99,12 +99,6 @@ class ExpenseViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Pending approval count
         pending_count = queryset.filter(status='pending').count()
         
-        # Category breakdown
-        category_breakdown = queryset.values('category').annotate(
-            total=Sum('amount'),
-            count=Count('id')
-        ).order_by('-total')
-        
         # Status breakdown
         status_breakdown = queryset.values('status').annotate(
             total=Sum('amount'),
@@ -115,7 +109,6 @@ class ExpenseViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             'total_expenses': float(total_expenses),
             'today_expenses': float(today_expenses),
             'pending_count': pending_count,
-            'category_breakdown': list(category_breakdown),
             'status_breakdown': list(status_breakdown),
         })
     

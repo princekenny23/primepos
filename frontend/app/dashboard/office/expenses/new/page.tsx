@@ -25,17 +25,6 @@ import { expenseService } from "@/lib/services/expenseService"
 import { shiftService, type Shift } from "@/lib/services/shiftService"
 import { format, isValid, parseISO } from "date-fns"
 
-const expenseCategories = [
-  "Supplies",
-  "Utilities",
-  "Rent",
-  "Marketing",
-  "Travel",
-  "Equipment",
-  "Maintenance",
-  "Other"
-]
-
 const paymentMethods = [
   { value: "cash", label: "Cash" },
   { value: "card", label: "Card" },
@@ -54,7 +43,6 @@ export default function NewExpensePage() {
   const [openShifts, setOpenShifts] = useState<Shift[]>([])
   const [formData, setFormData] = useState({
     title: "",
-    category: "",
     vendor: "",
     description: "",
     amount: "",
@@ -127,10 +115,10 @@ export default function NewExpensePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.title || !formData.category || !formData.amount || !formData.payment_method || !formData.description) {
+    if (!formData.title || !formData.amount || !formData.payment_method || !formData.description) {
       toast({
         title: "Validation Error",
-        description: "Please fill in all required fields (Title, Category, Amount, Payment Method, and Description).",
+        description: "Please fill in all required fields (Title, Amount, Payment Method, and Description).",
         variant: "destructive",
       })
       return
@@ -149,7 +137,6 @@ export default function NewExpensePage() {
     try {
       await expenseService.create({
         title: formData.title.trim(),
-        category: formData.category,
         vendor: formData.vendor.trim() || undefined,
         description: formData.description.trim(),
         amount: parseFloat(formData.amount),
@@ -198,23 +185,6 @@ export default function NewExpensePage() {
                       value={formData.title}
                       onChange={(e) => handleInputChange("title", e.target.value)}
                     />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="category">Category *</Label>
-                    <Select
-                      value={formData.category}
-                      onValueChange={(value) => handleInputChange("category", value)}
-                    >
-                      <SelectTrigger id="category">
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {expenseCategories.map(cat => (
-                          <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
 
                   <div className="space-y-2">

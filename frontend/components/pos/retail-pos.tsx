@@ -52,6 +52,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
+  ChevronLeft,
+  ChevronRight,
   History,
   Lock,
   PauseCircle,
@@ -507,10 +509,9 @@ export function RetailPOS() {
       toast({ title: "Hold Sale", description: "Cart is empty." })
       return
     }
-    const holdId = holdSale()
+    holdSale()
     setSelectedCustomer(null)
     setSaleDiscount(null)
-    toast({ title: "Hold Sale", description: `Sale held: ${holdId}` })
     loadHeldSales()
   }
 
@@ -522,7 +523,6 @@ export function RetailPOS() {
     }
     retrieveHoldSale(holdId)
     setShowHoldSales(false)
-    toast({ title: "Hold Sale", description: "Hold sale retrieved." })
   }
 
   const handleConfirmReplaceCart = () => {
@@ -531,7 +531,6 @@ export function RetailPOS() {
     setShowHoldSales(false)
     setShowReplaceCartConfirm(false)
     setPendingHoldId(null)
-    toast({ title: "Hold Sale", description: "Hold sale retrieved." })
   }
 
   const handleCancelReplaceCart = () => {
@@ -560,7 +559,6 @@ export function RetailPOS() {
         clearCart()
         setSaleDiscount(null)
         setSelectedCustomer(null)
-        toast({ title: "Cart cleared", description: "Cart cleared before switching sale type." })
       }
       setSaleType(pendingSaleType)
       setPendingSaleType(null)
@@ -726,11 +724,6 @@ export function RetailPOS() {
       setSelectedCustomer(null)
       setSaleDiscount(null)
       setIsDeliveryRequired(false)
-
-      toast({
-        title: "Sent to deliveries",
-        description: "Sale created and delivery order generated.",
-      })
     } catch (error: any) {
       toast({
         title: "Delivery failed",
@@ -873,13 +866,8 @@ export function RetailPOS() {
         console.warn('Failed to fetch full sale from backend, using immediate response', err)
       }
 
-      // Show success message
       const saleAny = sale as any
       const receiptNumber = saleAny._raw?.receipt_number || saleAny.receipt_number || sale.id
-      toast({
-        title: "Sale completed successfully",
-        description: `Receipt #${receiptNumber}`,
-      })
 
       // Dispatch event to notify other components (e.g., sales history page)
       if (typeof window !== 'undefined') {
@@ -973,15 +961,6 @@ export function RetailPOS() {
     try {
       const voidSale = await saleService.voidTransaction(initiatedSaleId, reason)
 
-      const receiptNumber =
-        voidSale._raw?.receipt_number ||
-        ("receipt_number" in voidSale ? (voidSale as any).receipt_number : undefined) ||
-        voidSale.id
-      toast({
-        title: "Void Sale",
-        description: `Sale voided. Receipt #${receiptNumber}`,
-      })
-
       setShowVoidReasonDialog(false)
       setVoidReason("")
       clearCart()
@@ -1059,42 +1038,7 @@ export function RetailPOS() {
     setIsVerifyingRowAction(false)
   }
 
-  const requestRowActionConfirmation = (action: PosRowAction) => {
-    setPendingRowAction(action)
-    setRowActionUsername(user?.email || "")
-    setRowActionPassword("")
-    setShowRowActionConfirm(true)
-  }
-
-  const handleConfirmRowAction = async () => {
-    if (!pendingRowAction) return
-
-    if (!rowActionUsername.trim() || !rowActionPassword.trim()) {
-      toast({
-        title: "Login details required",
-        description: "Enter username and password to continue.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsVerifyingRowAction(true)
-
-    try {
-      await authService.verifyCredentials(rowActionUsername.trim(), rowActionPassword)
-    } catch (error: any) {
-      toast({
-        title: "Verification failed",
-        description: error?.message || "Invalid login details. Please try again.",
-        variant: "destructive",
-      })
-      setIsVerifyingRowAction(false)
-      return
-    }
-
-    const action = pendingRowAction
-    closeRowActionConfirm()
-
+  const runRowAction = async (action: PosRowAction) => {
     switch (action) {
       case "discount":
         setShowSaleDiscount(true)
@@ -1131,6 +1075,68 @@ export function RetailPOS() {
       default:
         break
     }
+  }
+
+  const requestRowActionConfirmation = (action: PosRowAction) => {
+    if (action !== "close") {
+      void runRowAction(action)
+      return
+    }
+
+    setPendingRowAction(action)
+    setRowActionUsername(user?.email || "")
+    setRowActionPassword("")
+    setShowRowActionConfirm(true)
+  }
+
+  const handleConfirmRowAction = async () => {
+    if (!pendingRowAction) return
+
+    if (!rowActionUsername.trim() || !rowActionPassword.trim()) {
+      toast({
+        title: "Login details required",
+        description: "Enter username and password to continue.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsVerifyingRowAction(true)
+
+    let verifiedUser
+    try {
+      verifiedUser = await authService.verifyCredentials(rowActionUsername.trim(), rowActionPassword)
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error?.message || "Invalid login details. Please try again.",
+        variant: "destructive",
+      })
+      setIsVerifyingRowAction(false)
+      return
+    }
+
+    const verifiedRole =
+      verifiedUser.effectiveRole || verifiedUser.staffRoleName || verifiedUser.role || ""
+    const normalizedVerifiedRole = verifiedRole.toLowerCase()
+    const canClose =
+      verifiedUser.isSaasAdmin ||
+      normalizedVerifiedRole.includes("admin") ||
+      normalizedVerifiedRole.includes("manager")
+
+    if (!canClose) {
+      toast({
+        title: "Access denied",
+        description: "Only admin or manager accounts can close shift.",
+        variant: "destructive",
+      })
+      setIsVerifyingRowAction(false)
+      return
+    }
+
+    const action = pendingRowAction
+    closeRowActionConfirm()
+    await runRowAction(action)
   }
 
   if (!currentBusiness) {
@@ -1402,8 +1408,9 @@ export function RetailPOS() {
                   onClick={handlePreviousProductsPage}
                   disabled={productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage}
                   title={productsPage > 1 ? "Load previous products" : "Already first page"}
+                  aria-label="Previous products"
                 >
-                  Previous Products
+                  <ChevronLeft className="h-4 w-4" />
                 </Button>
                 <Button
                   type="button"
@@ -1413,8 +1420,9 @@ export function RetailPOS() {
                   onClick={handleNextProductsPage}
                   disabled={!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage}
                   title={hasNextProductsPage ? "Load next products" : "No more products"}
+                  aria-label={isLoadingNextProductsPage ? "Loading products" : "Next products"}
                 >
-                  {isLoadingNextProductsPage ? "Loading..." : hasNextProductsPage ? "Next Products" : "No More"}
+                  <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
             </div>

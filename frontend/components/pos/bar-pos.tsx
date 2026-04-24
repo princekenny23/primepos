@@ -66,7 +66,8 @@ import {
   Lock, RefreshCw, Users, ArrowRightLeft, Merge, Split, Clock, User,
   Table2, Armchair, List, AlertCircle, Check, Trash2,
   RotateCcw, Percent, Pencil,
-  Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Truck, Eye, EyeOff
+  Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Truck, Eye, EyeOff,
+  ChevronLeft, ChevronRight
 } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { PaymentPopup } from "@/components/pos/payment-popup"
@@ -794,20 +795,8 @@ export function BarPOS() {
         setCart([])
         setSaleDiscount(null)
         setSelectedCustomer(null)
-        toast({
-          title: "Void Sale",
-          description: `Tab #${tabId} voided successfully.`,
-        })
       } else {
-        const voidSale = await saleService.voidTransaction(initiatedSaleId, reason)
-        const receiptNumber =
-          (voidSale as any)._raw?.receipt_number ||
-          ("receipt_number" in (voidSale as any) ? (voidSale as any).receipt_number : undefined) ||
-          voidSale.id
-        toast({
-          title: "Void Sale",
-          description: `Sale voided. Receipt #${receiptNumber}`,
-        })
+        await saleService.voidTransaction(initiatedSaleId, reason)
       }
 
       setShowVoidReasonDialog(false)
@@ -936,10 +925,6 @@ export function BarPOS() {
       if (initiatedSaleId.startsWith(TAB_PENDING_SALE_PREFIX)) {
         const tabId = initiatedSaleId.slice(TAB_PENDING_SALE_PREFIX.length)
         await voidAllTabItems(tabId, reason)
-        toast({
-          title: "Payment canceled",
-          description: `Tab #${tabId} items were voided and total reset.`,
-        })
       } else {
         await saleService.voidTransaction(initiatedSaleId, reason)
       }
@@ -1047,50 +1032,7 @@ export function BarPOS() {
     setIsVerifyingRowAction(false)
   }
 
-  const requestRowActionConfirmation = (action: PosRowAction) => {
-    if (action === "delivery" && !showDeliveryAction) {
-      toast({
-        title: "Distribution inactive",
-        description: "Delivery is available only when distribution is active for this outlet.",
-        variant: "destructive",
-      })
-      return
-    }
-    setPendingRowAction(action)
-    setRowActionUsername(user?.email || "")
-    setRowActionPassword("")
-    setShowRowActionConfirm(true)
-  }
-
-  const handleConfirmRowAction = async () => {
-    if (!pendingRowAction) return
-
-    if (!rowActionUsername.trim() || !rowActionPassword.trim()) {
-      toast({
-        title: "Login details required",
-        description: "Enter username and password to continue.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsVerifyingRowAction(true)
-
-    try {
-      await authService.verifyCredentials(rowActionUsername.trim(), rowActionPassword)
-    } catch (error: any) {
-      toast({
-        title: "Verification failed",
-        description: error?.message || "Invalid login details. Please try again.",
-        variant: "destructive",
-      })
-      setIsVerifyingRowAction(false)
-      return
-    }
-
-    const action = pendingRowAction
-    closeRowActionConfirm()
-
+  const runRowAction = async (action: PosRowAction) => {
     switch (action) {
       case "discount":
         setShowDiscountModal(true)
@@ -1127,6 +1069,68 @@ export function BarPOS() {
       default:
         break
     }
+  }
+
+  const requestRowActionConfirmation = (action: PosRowAction) => {
+    if (action !== "close") {
+      void runRowAction(action)
+      return
+    }
+
+    setPendingRowAction(action)
+    setRowActionUsername(user?.email || "")
+    setRowActionPassword("")
+    setShowRowActionConfirm(true)
+  }
+
+  const handleConfirmRowAction = async () => {
+    if (!pendingRowAction) return
+
+    if (!rowActionUsername.trim() || !rowActionPassword.trim()) {
+      toast({
+        title: "Login details required",
+        description: "Enter username and password to continue.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsVerifyingRowAction(true)
+
+    let verifiedUser
+    try {
+      verifiedUser = await authService.verifyCredentials(rowActionUsername.trim(), rowActionPassword)
+    } catch (error: any) {
+      toast({
+        title: "Verification failed",
+        description: error?.message || "Invalid login details. Please try again.",
+        variant: "destructive",
+      })
+      setIsVerifyingRowAction(false)
+      return
+    }
+
+    const verifiedRole =
+      verifiedUser.effectiveRole || verifiedUser.staffRoleName || verifiedUser.role || ""
+    const normalizedVerifiedRole = verifiedRole.toLowerCase()
+    const canClose =
+      verifiedUser.isSaasAdmin ||
+      normalizedVerifiedRole.includes("admin") ||
+      normalizedVerifiedRole.includes("manager")
+
+    if (!canClose) {
+      toast({
+        title: "Access denied",
+        description: "Only admin or manager accounts can close shift.",
+        variant: "destructive",
+      })
+      setIsVerifyingRowAction(false)
+      return
+    }
+
+    const action = pendingRowAction
+    closeRowActionConfirm()
+    await runRowAction(action)
   }
 
   // Close tab with payment data from PaymentMethodModal
@@ -1630,8 +1634,9 @@ export function BarPOS() {
                       onClick={handlePreviousProductsPage}
                       disabled={productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage}
                       title={productsPage > 1 ? "Load previous products" : "Already first page"}
+                      aria-label="Previous products"
                     >
-                      Previous Products
+                      <ChevronLeft className="h-4 w-4" />
                     </Button>
                     <Button
                       type="button"
@@ -1641,8 +1646,9 @@ export function BarPOS() {
                       onClick={handleNextProductsPage}
                       disabled={!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage}
                       title={hasNextProductsPage ? "Load next products" : "No more products"}
+                      aria-label={isLoadingNextProductsPage ? "Loading products" : "Next products"}
                     >
-                      {isLoadingNextProductsPage ? "Loading..." : hasNextProductsPage ? "Next Products" : "No More"}
+                      <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
