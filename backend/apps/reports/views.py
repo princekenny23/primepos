@@ -2,8 +2,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Sum, Count, Avg, Q, F, ExpressionWrapper, DecimalField
+from django.db.models import Sum, Count, Avg, Q, F, ExpressionWrapper, DecimalField, OuterRef, Subquery
 from django.db.models.functions import TruncDate, Coalesce
+from django.core.paginator import Paginator
 from django.utils import timezone
 from django.http import HttpResponse
 from datetime import datetime, timedelta, date
@@ -157,30 +158,63 @@ def products_report(request):
         sales_queryset = sales_queryset.filter(created_at__gte=start_date)
     if end_date:
         sales_queryset = sales_queryset.filter(created_at__lte=end_date)
-    
-    # Product performance
-    product_performance = []
-    for product in queryset:
-        items = SaleItem.objects.filter(
-            product=product,
-            sale__in=sales_queryset
+
+    # Single aggregated query — avoids N+1 loop over products
+    sold_subq = (
+        SaleItem.objects
+        .filter(product=OuterRef('pk'), sale__in=sales_queryset)
+        .values('product')
+        .annotate(s=Sum('quantity'))
+        .values('s')
+    )
+    revenue_subq = (
+        SaleItem.objects
+        .filter(product=OuterRef('pk'), sale__in=sales_queryset)
+        .values('product')
+        .annotate(s=Sum('total'))
+        .values('s')
+    )
+
+    page_size = int(request.query_params.get('page_size', 10))
+    page_num = int(request.query_params.get('page', 1))
+
+    products_qs = (
+        queryset
+        .select_related('category')
+        .annotate(
+            total_sold=Coalesce(Subquery(sold_subq, output_field=DecimalField()), Decimal('0')),
+            total_revenue_ann=Coalesce(Subquery(revenue_subq, output_field=DecimalField()), Decimal('0')),
         )
-        total_sold = items.aggregate(Sum('quantity'))['quantity__sum'] or 0
-        total_revenue = items.aggregate(Sum('total'))['total__sum'] or 0
-        
-        product_performance.append({
-            'product_id': product.id,
-            'product_name': product.name,
-            'product_sku': product.sku or '',
-            'category': product.category.name if product.category else 'Uncategorized',
-            'total_sold': total_sold,
-            'total_revenue': float(total_revenue),
-            'current_stock': product.stock,
-            'is_low_stock': product.is_low_stock,
-        })
-    
+        .order_by('-total_revenue_ann')
+    )
+
+    paginator = Paginator(products_qs, page_size)
+    page_obj = paginator.get_page(page_num)
+
+    product_performance = [
+        {
+            'product_id': p.id,
+            'product_name': p.name,
+            'product_sku': p.sku or '',
+            'category': p.category.name if p.category else 'Uncategorized',
+            'total_sold': float(p.total_sold),
+            'total_revenue': float(p.total_revenue_ann),
+            'current_stock': p.stock,
+            'is_low_stock': p.is_low_stock,
+        }
+        for p in page_obj
+    ]
+
     return Response({
-        'products': sorted(product_performance, key=lambda x: x['total_revenue'], reverse=True),
+        'products': product_performance,
+        'pagination': {
+            'page': page_num,
+            'page_size': page_size,
+            'total_items': paginator.count,
+            'total_pages': paginator.num_pages,
+            'has_next': page_obj.has_next(),
+            'has_previous': page_obj.has_previous(),
+        },
     })
 
 
@@ -203,21 +237,34 @@ def customers_report(request):
     total_spent = queryset.aggregate(Sum('total_spent'))['total_spent__sum'] or 0
     avg_points = queryset.aggregate(Avg('loyalty_points'))['loyalty_points__avg'] or 0
     
-    # Customers list (ranked)
-    customers_list = queryset.order_by('-total_spent').values(
+    # Customers list (ranked) — paginated at 10 per page
+    customers_qs = queryset.order_by('-total_spent').values(
         'id', 'name', 'email', 'phone', 'loyalty_points', 'total_spent', 'last_visit'
     )
 
-    # Top customers
-    top_customers = list(customers_list[:10])
+    page_size = int(request.query_params.get('page_size', 10))
+    page_num = int(request.query_params.get('page', 1))
+    paginator = Paginator(customers_qs, page_size)
+    page_obj = paginator.get_page(page_num)
+
+    # Top customers always fixed at top 10 (no pagination overhead)
+    top_customers = list(customers_qs[:10])
     
     return Response({
         'total_customers': total_customers,
         'total_points': total_points,
         'total_spent': float(total_spent),
         'avg_points': float(avg_points),
-        'customers': list(customers_list),
+        'customers': list(page_obj),
         'top_customers': top_customers,
+        'pagination': {
+            'page': page_num,
+            'page_size': page_size,
+            'total_items': paginator.count,
+            'total_pages': paginator.num_pages,
+            'has_next': page_obj.has_next(),
+            'has_previous': page_obj.has_previous(),
+        },
     })
 
 

@@ -1157,25 +1157,27 @@ export function BarPOS() {
         window.dispatchEvent(new CustomEvent("sale-completed"))
       }
       
-      // Try to print receipt
-      try {
-        await printReceipt({
-          cart: currentTab.items.filter(i => !i.is_voided).map(i => ({
-            id: i.id,
-            name: i.product_name,
-            price: i.price,
-            quantity: i.quantity,
-            total: i.total,
-          })),
-          subtotal: currentTab.subtotal,
-          discount: discountAmount,
-          tax: currentTab.tax,
-          total: result.sale.total,
-          sale: result.sale,
-        }, outlet?.id || "")
-      } catch (printError) {
-        console.warn("Print failed:", printError)
-      }
+      // Try to print receipt without blocking sale completion
+      void (async () => {
+        try {
+          await printReceipt({
+            cart: currentTab.items.filter(i => !i.is_voided).map(i => ({
+              id: i.id,
+              name: i.product_name,
+              price: i.price,
+              quantity: i.quantity,
+              total: i.total,
+            })),
+            subtotal: currentTab.subtotal,
+            discount: discountAmount,
+            tax: currentTab.tax,
+            total: result.sale.total,
+            sale: result.sale,
+          }, outlet?.id || "")
+        } catch (printError) {
+          console.warn("Print failed:", printError)
+        }
+      })()
       
       // Reset and reload
       setShowPaymentModal(false)
@@ -1235,25 +1237,27 @@ export function BarPOS() {
         window.dispatchEvent(new CustomEvent("sale-completed"))
       }
       
-      // Try to print receipt
-      try {
-        await printReceipt({
-          cart: currentTab.items.filter(i => !i.is_voided).map(i => ({
-            id: i.id,
-            name: i.product_name,
-            price: i.price,
-            quantity: i.quantity,
-            total: i.total,
-          })),
-          subtotal: currentTab.subtotal,
-          discount: discountAmount,
-          tax: currentTab.tax,
-          total: result.sale.total,
-          sale: result.sale,
-        }, outlet?.id || "")
-      } catch (printError) {
-        console.warn("Print failed:", printError)
-      }
+      // Try to print receipt without blocking sale completion
+      void (async () => {
+        try {
+          await printReceipt({
+            cart: currentTab.items.filter(i => !i.is_voided).map(i => ({
+              id: i.id,
+              name: i.product_name,
+              price: i.price,
+              quantity: i.quantity,
+              total: i.total,
+            })),
+            subtotal: currentTab.subtotal,
+            discount: discountAmount,
+            tax: currentTab.tax,
+            total: result.sale.total,
+            sale: result.sale,
+          }, outlet?.id || "")
+        } catch (printError) {
+          console.warn("Print failed:", printError)
+        }
+      })()
       
       // Reset and reload
       setShowCloseTab(false)
@@ -2429,21 +2433,23 @@ export function BarPOS() {
                   })),
                 })
 
-                try {
-                  await printReceipt(
-                    {
-                      cart: offlineSale.items,
-                      subtotal: offlineSale.subtotal,
-                      discount: offlineSale.discount,
-                      tax: offlineSale.tax,
-                      total: offlineSale.total,
-                      sale: buildOfflinePrintableSale(offlineSale),
-                    },
-                    outlet!.id
-                  )
-                } catch (printError) {
-                  console.warn("Offline print failed:", printError)
-                }
+                void (async () => {
+                  try {
+                    await printReceipt(
+                      {
+                        cart: offlineSale.items,
+                        subtotal: offlineSale.subtotal,
+                        discount: offlineSale.discount,
+                        tax: offlineSale.tax,
+                        total: offlineSale.total,
+                        sale: buildOfflinePrintableSale(offlineSale),
+                      },
+                      outlet!.id
+                    )
+                  } catch (printError) {
+                    console.warn("Offline print failed:", printError)
+                  }
+                })()
 
                 setCart([])
                 setSaleDiscount(null)
@@ -2463,28 +2469,30 @@ export function BarPOS() {
 
               const saleAny = sale as any
 
-              try {
-                const saleAny = sale as any
-                await printReceipt(
-                  {
-                    cart: cart.map((i) => ({
-                      id: i.id,
-                      name: i.name,
-                      price: i.price,
-                      quantity: i.quantity,
-                      total: i.total,
-                    })),
-                    subtotal: Number(saleAny.subtotal ?? saleAny._raw?.subtotal ?? 0),
-                    discount: Number(saleAny.discount ?? saleAny._raw?.discount ?? 0),
-                    tax: Number(saleAny.tax ?? saleAny._raw?.tax ?? 0),
-                    total: Number(saleAny.total ?? saleAny._raw?.total ?? 0),
-                    sale,
-                  },
-                  outlet!.id
-                )
-              } catch (printError) {
-                console.warn("Print failed:", printError)
-              }
+              void (async () => {
+                try {
+                  const saleAny = sale as any
+                  await printReceipt(
+                    {
+                      cart: cart.map((i) => ({
+                        id: i.id,
+                        name: i.name,
+                        price: i.price,
+                        quantity: i.quantity,
+                        total: i.total,
+                      })),
+                      subtotal: Number(saleAny.subtotal ?? saleAny._raw?.subtotal ?? 0),
+                      discount: Number(saleAny.discount ?? saleAny._raw?.discount ?? 0),
+                      tax: Number(saleAny.tax ?? saleAny._raw?.tax ?? 0),
+                      total: Number(saleAny.total ?? saleAny._raw?.total ?? 0),
+                      sale,
+                    },
+                    outlet!.id
+                  )
+                } catch (printError) {
+                  console.warn("Print failed:", printError)
+                }
+              })()
 
               setCart([])
               setSaleDiscount(null)

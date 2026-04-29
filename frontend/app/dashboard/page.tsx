@@ -278,7 +278,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <PageRefreshButton />
-            <DateRangeFilter onRangeChange={setSelectedRange} />
+            <DateRangeFilter defaultPreset="today" onRangeChange={setSelectedRange} />
           </div>
         </div>
 

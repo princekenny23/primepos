@@ -2,9 +2,43 @@ from django.utils.deprecation import MiddlewareMixin
 from rest_framework_simplejwt.tokens import UntypedToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from .models import Tenant
 
 User = get_user_model()
+
+_TENANT_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_tenant_by_host(host: str):
+    """Resolve tenant by domain or subdomain with a 5-minute in-process cache."""
+    key = f"tenant:host:{host}"
+    tenant = cache.get(key)
+    if tenant is not None:
+        return tenant
+    tenant = Tenant.objects.filter(is_active=True, domain__iexact=host).first()
+    if not tenant and '.' in host:
+        subdomain = host.split('.', 1)[0]
+        if subdomain and subdomain not in {'www', 'api', 'admin'}:
+            tenant = Tenant.objects.filter(is_active=True, subdomain__iexact=subdomain).first()
+    # Cache even a None result so repeated misses skip the DB
+    cache.set(key, tenant or False, timeout=_TENANT_CACHE_TTL)
+    return tenant if tenant else None
+
+
+def _get_tenant_by_id(tenant_id: str):
+    """Resolve tenant by explicit header ID with a 5-minute cache."""
+    key = f"tenant:id:{tenant_id}"
+    tenant = cache.get(key)
+    if tenant is not None:
+        return tenant if tenant is not False else None
+    try:
+        tenant = Tenant.objects.filter(is_active=True).get(id=int(tenant_id))
+        cache.set(key, tenant, timeout=_TENANT_CACHE_TTL)
+        return tenant
+    except (ValueError, TypeError, Tenant.DoesNotExist):
+        cache.set(key, False, timeout=_TENANT_CACHE_TTL)
+        return None
 
 
 class TenantMiddleware(MiddlewareMixin):
@@ -22,7 +56,7 @@ class TenantMiddleware(MiddlewareMixin):
         if request.path.startswith('/admin/') or request.path.startswith('/static/'):
             return None
 
-        # Resolve tenant from host/subdomain first (Odoo-style URL tenancy).
+        # Resolve tenant from host/subdomain first (cached)
         host = (
             request.META.get('HTTP_X_TENANT_HOST')
             or request.META.get('HTTP_HOST')
@@ -31,22 +65,15 @@ class TenantMiddleware(MiddlewareMixin):
         ).split(':')[0].strip().lower()
 
         if host:
-            tenant = Tenant.objects.filter(is_active=True, domain__iexact=host).first()
-            if not tenant and '.' in host:
-                subdomain = host.split('.', 1)[0]
-                if subdomain and subdomain not in {'www', 'api', 'admin'}:
-                    tenant = Tenant.objects.filter(is_active=True, subdomain__iexact=subdomain).first()
+            tenant = _get_tenant_by_host(host)
             if tenant:
                 request.tenant = tenant
 
-        # Allow explicit tenant targeting for business-scoped API requests.
+        # Allow explicit tenant targeting via header (cached)
         if request.tenant is None:
             tenant_header = request.META.get('HTTP_X_TENANT_ID')
             if tenant_header not in (None, '', 'null'):
-                try:
-                    request.tenant = Tenant.objects.filter(is_active=True).get(id=int(tenant_header))
-                except (ValueError, TypeError, Tenant.DoesNotExist):
-                    pass
+                request.tenant = _get_tenant_by_id(tenant_header)
 
         # Get token from Authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')

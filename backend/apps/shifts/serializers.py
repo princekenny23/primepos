@@ -1,9 +1,13 @@
 from rest_framework import serializers
 from django.db.models import Sum
+from django.db import DatabaseError, ProgrammingError
+import logging
 from .models import Shift
 from apps.outlets.serializers import OutletSerializer, TillSerializer
 from apps.accounts.serializers import UserSerializer
-from apps.expenses.models import Expense
+
+
+logger = logging.getLogger(__name__)
 
 
 class ShiftSerializer(serializers.ModelSerializer):
@@ -25,22 +29,31 @@ class ShiftSerializer(serializers.ModelSerializer):
                   'total_sales', 'cash_total', 'total_expense')
         read_only_fields = ('id', 'outlet', 'till', 'user', 'status', 'start_time', 'end_time')
 
+    def _safe_sum(self, queryset, field_name: str):
+        """Guard list serialization from blowing up when aggregate backends fail."""
+        try:
+            total = queryset.aggregate(sum=Sum(field_name)).get('sum')
+            return total or 0
+        except (DatabaseError, ProgrammingError, AttributeError) as exc:
+            logger.exception("Shift aggregate failed for %s: %s", field_name, exc)
+            return 0
+
     def get_total_sales(self, obj):
         """Sum completed, non-void sales linked to this shift."""
-        total = obj.sales.filter(status='completed', is_void=False).aggregate(sum=Sum('total'))['sum']
-        return total or 0
+        queryset = obj.sales.filter(status='completed', is_void=False)
+        return self._safe_sum(queryset, 'total')
 
     def get_total_expense(self, obj):
         """Sum approved expenses linked to this shift."""
-        total = obj.expenses.filter(status='approved').aggregate(sum=Sum('amount'))['sum']
-        return total or 0
+        queryset = obj.expenses.filter(status='approved')
+        return self._safe_sum(queryset, 'amount')
 
     def get_cash_total(self, obj):
         """Sum completed, non-void cash sales linked to this shift."""
-        total = obj.sales.filter(
+        queryset = obj.sales.filter(
             status='completed',
             is_void=False,
             payment_method='cash',
-        ).aggregate(sum=Sum('total'))['sum']
-        return total or 0
+        )
+        return self._safe_sum(queryset, 'total')
 

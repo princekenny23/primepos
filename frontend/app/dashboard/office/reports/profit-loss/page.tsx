@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -45,7 +45,7 @@ export default function ProfitLossReportsPage() {
   
   const [chartData, setChartData] = useState<any[]>([])
 
-  const loadReportData = async () => {
+  const loadReportData = useCallback(async () => {
     if (!currentBusiness) return
 
     if (!currentOutlet) {
@@ -131,7 +131,7 @@ export default function ProfitLossReportsPage() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [currentBusiness, currentOutlet, startDate, endDate, toast, t])
 
   useEffect(() => {
     loadReportData()
@@ -296,10 +296,12 @@ export default function ProfitLossReportsPage() {
         </Card>
       </PageLayout>
 
-      <ReportSettingsModal
-        open={showSettings}
-        onOpenChange={setShowSettings}
-      />
+      {showSettings && (
+        <ReportSettingsModal
+          open={showSettings}
+          onOpenChange={setShowSettings}
+        />
+      )}
     </DashboardLayout>
   )
 }

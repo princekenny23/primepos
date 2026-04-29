@@ -457,20 +457,9 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         reference_id=str(sale.id),
                         reason=f"Sale {sale.receipt_number}",
                     )
-                except ValueError:
-                    # Fallback: product has no batches configured – deduct directly
-                    # and record a movement so the audit trail is preserved.
-                    product.stock = max(0, product.stock - quantity_in_base_units)
-                    product.save(update_fields=['stock'])
-                    StockMovement.objects.create(
-                        tenant=tenant,
-                        product=product,
-                        outlet=sale.outlet,
-                        user=request.user,
-                        movement_type='sale',
-                        quantity=quantity_in_base_units,
-                        reference_id=str(sale.id),
-                        reason=f"Sale {sale.receipt_number}",
+                except ValueError as e:
+                    raise serializers.ValidationError(
+                        f"Item {idx + 1}: Stock deduction failed for {product.name}. {str(e)}"
                     )
         
         # Calculate totals - round to 2 decimal places to match DecimalField precision
@@ -1155,25 +1144,20 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
                 product = Product.objects.select_for_update().get(id=item.product.id, tenant=sale.tenant, outlet=sale.outlet)
                 required = int(item.quantity_in_base_units or item.quantity)
-                if product.stock < required:
+                try:
+                    deduct_stock(
+                        product=product,
+                        outlet=sale.outlet,
+                        quantity=required,
+                        user=request.user,
+                        reference_id=str(sale.id),
+                        reason=f"Sale {sale.receipt_number} finalized",
+                    )
+                except ValueError as e:
                     return Response(
-                        {"detail": f"Insufficient stock for {product.name}. Available: {product.stock}, required: {required}."},
+                        {"detail": f"Insufficient stock for {product.name}. {str(e)}"},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
-
-                product.stock -= required
-                product.save(update_fields=['stock'])
-
-                StockMovement.objects.create(
-                    tenant=sale.tenant,
-                    product=product,
-                    outlet=sale.outlet,
-                    user=request.user,
-                    movement_type='sale',
-                    quantity=required,
-                    reference_id=str(sale.id),
-                    reason=f"Sale {sale.receipt_number} finalized",
-                )
 
         sale.payment_method = payment_method
         if payment_method in ['cash', 'card', 'mobile']:

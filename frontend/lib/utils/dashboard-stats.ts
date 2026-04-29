@@ -4,7 +4,6 @@ import { saleService } from "../services/saleService"
 import { productService } from "../services/productService"
 import { customerService } from "../services/customerService"
 import { reportService } from "../services/reportService"
-import { staffService } from "../services/staffService"
 import { requestCache } from "./request-cache"
 
 export interface DashboardKPI {
@@ -41,7 +40,10 @@ export interface DashboardDateRange {
 function toDateOnlyString(date: Date): string {
   const d = new Date(date)
   d.setHours(0, 0, 0, 0)
-  return d.toISOString().split("T")[0]
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function buildRange(range?: DashboardDateRange): { start: Date; end: Date; previousStart: Date; previousEnd: Date } {
@@ -157,7 +159,7 @@ export async function generateKPIData(
     const [
       currentPnl,
       previousPnl,
-      staffList,
+      productsSummary,
       customerMetrics,
     ] = await Promise.all([
       requestCache.getOrSet(`pnl-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () => 
@@ -172,8 +174,10 @@ export async function generateKPIData(
           return null
         })
       ),
-      requestCache.getOrSet(`staff-active-${businessId}-${outletId || 'all'}`, () =>
-        staffService.list({ is_active: true }).then(res => res.results || []).catch(() => [])
+      requestCache.getOrSet(`products-count-${businessId}-${outletId || 'all'}`, () =>
+        productService
+          .list({ outlet: outletId, limit: 1 })
+          .catch(() => ({ results: [], count: 0 }))
       ),
       fetchCustomerMetrics(businessId, outletId, startStr, endStr, prevStartStr, prevEndStr),
     ])
@@ -211,37 +215,13 @@ export async function generateKPIData(
     // For now, the card shows the TOTAL outstanding credit amount only
     const outstandingCreditChange = 0
     
-    // Calculate employees metrics
-    // Filter staff by outlet if outletId is provided (staff can work at multiple outlets)
-    const staffArray = Array.isArray(staffList) ? staffList : (staffList?.results || [])
-    const filteredStaff = outletId 
-      ? staffArray.filter((s: any) => 
-          s.outlets && Array.isArray(s.outlets) && 
-          s.outlets.some((o: any) => String(o.id) === String(outletId))
-        )
-      : staffArray
-    
-    const employeesCount = filteredStaff.length
-    
-    // Calculate employee change - compare active employees this month vs last month
-    const thisRangeNewStaff = filteredStaff.filter((s: any) => {
-      if (!s.created_at) return false
-      const createdDate = new Date(s.created_at)
-      return createdDate >= start && createdDate <= end
-    }).length
-    
-    const previousRangeNewStaff = filteredStaff.filter((s: any) => {
-      if (!s.created_at) return false
-      const createdDate = new Date(s.created_at)
-      return createdDate >= previousStart && createdDate <= previousEnd
-    }).length
-    
-    const employeesChange = percentChange(thisRangeNewStaff, previousRangeNewStaff)
+    const productsCount = Number(productsSummary?.count || 0)
+    const productsChange = 0
     
     return {
       sales: { value: currentRevenue, change: salesChange },
       customers: { value: customersCount, change: customersChange },
-      products: { value: employeesCount, change: employeesChange },
+      products: { value: productsCount, change: productsChange },
       expenses: { value: currentExpenses, change: expensesChange },
       profit: { value: currentProfit, change: profitChange },
       lowStockItems: { value: 0, change: 0 },

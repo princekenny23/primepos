@@ -21,6 +21,11 @@ export const apiConfig = {
 let throttleUntilMs = 0
 let lastThrottleLogMs = 0
 
+// Module-level cache for parsed localStorage values — avoids JSON.parse on every request
+let _tenantIdCache: string | null = null
+let _tenantIdRaw: string | null = null   // tracks the raw string that produced the cached value
+let _outletIdCache: string | null = null
+
 export function getThrottleRemainingSeconds(): number {
   if (throttleUntilMs <= Date.now()) {
     return 0
@@ -141,7 +146,9 @@ export class ApiClient {
     if (typeof window !== "undefined" && !isAuthEndpoint) {
       try {
         // Try to get current outlet from localStorage (set by tenant context)
+        // Use cached value — localStorage.getItem is fast but avoids repeated string comparison overhead
         const outletId = localStorage.getItem("currentOutletId")
+        _outletIdCache = outletId
         if (outletId && !isManagementEndpoint) {
           config.headers = {
             ...config.headers,
@@ -149,17 +156,30 @@ export class ApiClient {
           }
         }
 
-        // Add tenant ID header if available (critical for SaaS admin context)
+        // Add tenant ID header — parse JSON only when the raw value has changed
         const businessRaw = localStorage.getItem("primepos-business")
         if (businessRaw) {
-          const parsed = JSON.parse(businessRaw)
-          const tenantId = parsed?.state?.currentBusiness?.id
-          if (tenantId) {
-            config.headers = {
-              ...config.headers,
-              "X-Tenant-ID": String(tenantId),
+          if (businessRaw !== _tenantIdRaw) {
+            _tenantIdRaw = businessRaw
+            try {
+              const parsed = JSON.parse(businessRaw)
+              _tenantIdCache = parsed?.state?.currentBusiness?.id
+                ? String(parsed.state.currentBusiness.id)
+                : null
+            } catch {
+              _tenantIdCache = null
             }
           }
+          if (_tenantIdCache) {
+            config.headers = {
+              ...config.headers,
+              "X-Tenant-ID": _tenantIdCache,
+            }
+          }
+        } else {
+          // Business cleared — invalidate cache
+          _tenantIdCache = null
+          _tenantIdRaw = null
         }
 
         // Preserve browser host so backend can resolve tenant URL even when API is hosted separately.

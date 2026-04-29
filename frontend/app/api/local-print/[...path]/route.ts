@@ -94,6 +94,23 @@ async function proxyToAgent(request: NextRequest, pathParts: string[]): Promise<
     })
   } catch (error: any) {
     const reason = error?.cause?.code || error?.code || "FETCH_FAILED"
+
+    if (requestedPath === "health") {
+      return new Response(
+        JSON.stringify({
+          status: "local",
+          connected: false,
+          detail: "Local Print Agent is unreachable",
+          target: targetUrl,
+          reason,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    }
+
     return new Response(
       JSON.stringify({
         detail: "Local Print Agent is unreachable",

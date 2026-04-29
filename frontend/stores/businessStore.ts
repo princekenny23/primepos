@@ -247,11 +247,17 @@ export const useBusinessStore = create<BusinessState>()(
     {
       name: "primepos-business",
       storage: createJSONStorage(() => localStorage),
+      // Only persist the selections — outlets/tills arrays are large and re-fetched on boot
+      partialize: (state) => ({
+        currentBusiness: state.currentBusiness,
+        currentOutlet: state.currentOutlet,
+        currentTill: state.currentTill,
+      }),
       onRehydrateStorage: () => (state) => {
         if (!state) return
 
         state.currentBusiness = normalizeBusinessCurrency(state.currentBusiness)
-        state.businesses = state.businesses.map((business) => normalizeBusinessCurrency(business) as Business)
+        state.businesses = (state.businesses ?? []).map((business) => normalizeBusinessCurrency(business) as Business)
       },
     }
   )

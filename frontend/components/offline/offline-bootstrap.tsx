@@ -24,7 +24,7 @@ async function probeConnectivity(): Promise<boolean> {
   const timer = window.setTimeout(() => controller.abort(), 5000)
   try {
     const res = await fetch(PROBE_URL, {
-      method: "HEAD",
+      method: "GET",
       cache: "no-store",
       signal: controller.signal,
     })

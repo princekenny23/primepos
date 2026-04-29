@@ -64,15 +64,15 @@ function getPresetRange(value: string) {
       start = new Date(today.getFullYear(), 0, 1)
       break
     default:
-      start = new Date(today)
-      start.setDate(start.getDate() - 6)
+      start = today
+      end = today
       break
   }
 
   return { start, end }
 }
 
-export function DateRangeFilter({ onRangeChange, defaultPreset = "last7" }: DateRangeFilterProps) {
+export function DateRangeFilter({ onRangeChange, defaultPreset = "today" }: DateRangeFilterProps) {
   const initialRange = getPresetRange(defaultPreset)
 
   const [selectedPreset, setSelectedPreset] = useState<string>(defaultPreset)

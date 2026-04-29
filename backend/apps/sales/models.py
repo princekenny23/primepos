@@ -173,6 +173,15 @@ class Sale(models.Model):
             models.Index(fields=['shift']),
             models.Index(fields=['created_at']),
             models.Index(fields=['receipt_number']),
+            # Composite indexes for the most frequent report filter patterns
+            models.Index(
+                fields=['tenant', 'outlet', 'is_void', 'status', 'created_at'],
+                name='sale_report_filter_idx',
+            ),
+            models.Index(
+                fields=['tenant', 'outlet', 'created_at'],
+                name='sale_tenant_outlet_date_idx',
+            ),
         ]
 
     def __str__(self):
