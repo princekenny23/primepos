@@ -332,12 +332,21 @@ class TillViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     queryset = Till.objects.select_related('outlet', 'outlet__tenant')
     serializer_class = TillSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
-    required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['outlet', 'is_active', 'is_in_use']
     search_fields = ['name']
     ordering_fields = ['name', 'created_at']
     ordering = ['name']
+    
+    def get_permissions(self):
+        """
+        Allow list/retrieve for all authenticated users (required for POS shifts).
+        Restrict create/update/destroy to users with 'allow_settings' permission.
+        This prevents blocking cashiers/admins from loading tills for operations.
+        """
+        if self.action in ['list', 'retrieve']:
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), HasTenantModuleAccess()]
     
     def get_queryset(self):
         """Filter tills by tenant through outlet"""
