@@ -8,7 +8,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -30,18 +36,23 @@ interface ReceiveItem {
   product_id: string
   product_name?: string
   quantity: string
-  unit_price: string
 }
 
 export default function ReceiveStockPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const { currentBusiness, currentOutlet } = useBusinessStore()
+  const { currentOutlet, outlets } = useBusinessStore()
   const [isSubmitting, setIsSubmitting] = useState(false)
   
-  const [supplier, setSupplier] = useState("")
+  const [receiveFromType, setReceiveFromType] = useState<"warehouse" | "outlet">("warehouse")
+  const [warehouseName, setWarehouseName] = useState("")
+  const [fromOutletId, setFromOutletId] = useState("")
   const [receiveItems, setReceiveItems] = useState<ReceiveItem[]>([])
   const [showProductSelector, setShowProductSelector] = useState(false)
+
+  const availableOutlets = useMemo(() => {
+    return outlets.filter((outlet) => String(outlet.id) !== String(currentOutlet?.id))
+  }, [outlets, currentOutlet?.id])
 
   const handleAddItem = (product: Product) => {
     if (receiveItems.some((item) => item.product_id === String(product.id))) {
@@ -57,7 +68,6 @@ export default function ReceiveStockPage() {
       product_id: String(product.id),
       product_name: product.name,
       quantity: "",
-      unit_price: "",
     }
 
     setReceiveItems((prev) => [...prev, newItem])
@@ -75,14 +85,6 @@ export default function ReceiveStockPage() {
     )
   }
 
-  const totalValue = useMemo(() => {
-    return receiveItems.reduce((sum, item) => {
-      const qty = Number(item.quantity) || 0
-      const price = Number(item.unit_price) || 0
-      return sum + qty * price
-    }, 0)
-  }, [receiveItems])
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -95,10 +97,21 @@ export default function ReceiveStockPage() {
       return
     }
 
-    if (!supplier.trim()) {
+    const selectedSourceOutlet = availableOutlets.find((outlet) => String(outlet.id) === fromOutletId)
+
+    if (receiveFromType === "warehouse" && !warehouseName.trim()) {
       toast({
         title: "Validation Error",
-        description: "Please enter a supplier name",
+        description: "Please enter a warehouse name",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (receiveFromType === "outlet" && !fromOutletId) {
+      toast({
+        title: "Validation Error",
+        description: "Please select the source outlet",
         variant: "destructive",
       })
       return
@@ -130,10 +143,14 @@ export default function ReceiveStockPage() {
           inventoryService.createMovement({
             product_id: item.product_id,
             outlet_id: String(currentOutlet.id),
-            movement_type: "purchase",
+            movement_type: receiveFromType === "outlet" ? "transfer_in" : "purchase",
             quantity: Number(item.quantity),
-            reason: `Purchase from ${supplier}`,
-            reference_id: supplier,
+            reason: receiveFromType === "outlet"
+              ? `Received from outlet ${selectedSourceOutlet?.name || fromOutletId}`
+              : `Received from warehouse ${warehouseName}`,
+            reference_id: receiveFromType === "outlet"
+              ? `outlet:${fromOutletId}`
+              : `warehouse:${warehouseName.trim()}`,
           })
         )
       )
@@ -160,7 +177,7 @@ export default function ReceiveStockPage() {
     <DashboardLayout>
       <PageLayout
         title="Receive Stock"
-        description="Record incoming inventory from suppliers"
+        description="Record incoming inventory from another outlet or warehouse"
         actions={
           <Link href="/dashboard/inventory/stock-control">
             <Button variant="ghost" size="icon">
@@ -188,14 +205,51 @@ export default function ReceiveStockPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="supplier">Supplier *</Label>
-                    <Input
-                      id="supplier"
-                      placeholder="Enter supplier name"
-                      value={supplier}
-                      onChange={(e) => setSupplier(e.target.value)}
-                    />
+                    <Label htmlFor="receiveFromType">Receive From *</Label>
+                    <Select
+                      value={receiveFromType}
+                      onValueChange={(value: "warehouse" | "outlet") => {
+                        setReceiveFromType(value)
+                        setFromOutletId("")
+                      }}
+                    >
+                      <SelectTrigger id="receiveFromType">
+                        <SelectValue placeholder="Select source type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="warehouse">Warehouse</SelectItem>
+                        <SelectItem value="outlet">Other Outlet</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
+
+                  {receiveFromType === "warehouse" ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="warehouse">Warehouse Name *</Label>
+                      <Input
+                        id="warehouse"
+                        placeholder="Enter warehouse name"
+                        value={warehouseName}
+                        onChange={(e) => setWarehouseName(e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="fromOutlet">From Outlet *</Label>
+                      <Select value={fromOutletId} onValueChange={setFromOutletId}>
+                        <SelectTrigger id="fromOutlet">
+                          <SelectValue placeholder="Select source outlet" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableOutlets.map((outlet) => (
+                            <SelectItem key={String(outlet.id)} value={String(outlet.id)}>
+                              {outlet.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -228,16 +282,11 @@ export default function ReceiveStockPage() {
                           <TableRow className="bg-gray-50">
                             <TableHead>Product</TableHead>
                             <TableHead>Quantity</TableHead>
-                            <TableHead>Unit Price</TableHead>
-                            <TableHead>Total</TableHead>
                             <TableHead className="w-10"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {receiveItems.map((item) => {
-                            const qty = Number(item.quantity) || 0
-                            const price = Number(item.unit_price) || 0
-                            const total = qty * price
                             return (
                               <TableRow key={item.id}>
                                 <TableCell className="font-medium">
@@ -254,22 +303,6 @@ export default function ReceiveStockPage() {
                                     className="w-24"
                                     min="0"
                                   />
-                                </TableCell>
-                                <TableCell>
-                                  <Input
-                                    type="number"
-                                    placeholder="0.00"
-                                    value={item.unit_price}
-                                    onChange={(e) =>
-                                      handleUpdateItem(item.id, "unit_price", e.target.value)
-                                    }
-                                    className="w-24"
-                                    step="0.01"
-                                    min="0"
-                                  />
-                                </TableCell>
-                                <TableCell className="font-medium">
-                                  {total.toFixed(2)}
                                 </TableCell>
                                 <TableCell>
                                   <Button
@@ -309,12 +342,11 @@ export default function ReceiveStockPage() {
                   </div>
 
                   <div className="border-t pt-4">
-                    <p className="text-sm text-gray-600">Total Value</p>
-                    <p className="text-2xl font-semibold">
-                      {totalValue.toLocaleString("en-US", {
-                        style: "currency",
-                        currency: "USD",
-                      })}
+                    <p className="text-sm text-gray-600">Receive From</p>
+                    <p className="text-base font-semibold">
+                      {receiveFromType === "warehouse"
+                        ? warehouseName || "Warehouse"
+                        : (availableOutlets.find((outlet) => String(outlet.id) === fromOutletId)?.name || "Other Outlet")}
                     </p>
                   </div>
 

@@ -32,7 +32,8 @@ export interface StockReceivingData {
 
 export interface CreateMovementData {
   product_id: string
-  outlet_id: string
+  outlet?: string
+  outlet_id?: string
   movement_type: string
   quantity: number
   reason?: string
@@ -65,7 +66,17 @@ export const inventoryService = {
   },
 
   async createMovement(data: CreateMovementData): Promise<any> {
-    return api.post(apiEndpoints.inventory.movements, data)
+    const { outlet_id, outlet, ...rest } = data
+    const normalizedOutlet = outlet ?? outlet_id
+
+    if (!normalizedOutlet) {
+      throw new Error("Outlet is required to create stock movement")
+    }
+
+    return api.post(apiEndpoints.inventory.movements, {
+      ...rest,
+      outlet: normalizedOutlet,
+    })
   },
 
   async getMovements(filters?: {

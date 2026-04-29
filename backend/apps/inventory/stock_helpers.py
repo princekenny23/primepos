@@ -249,6 +249,23 @@ def add_stock(product, outlet, quantity, batch_number, expiry_date, cost_price=N
         defaults={'quantity': 0}
     )
     location_stock.sync_quantity_from_batches()
+
+    # --- PHASE 1 FIX: Sync Product.stock with batch reality after add ---
+    # Ensures Product.stock is always in sync after stock additions
+    # (previously only deduct_stock did this, causing stale fallback in sale checks)
+    today = timezone.now().date()
+    new_stock = sum(
+        b.quantity
+        for b in Batch.objects.filter(
+            product=product,
+            outlet=outlet,
+            expiry_date__gt=today,
+            quantity__gt=0,
+        )
+    )
+    from apps.products.models import Product as _Product
+    _Product.objects.filter(id=product.id).update(stock=new_stock)
+    product.stock = new_stock
     
     logger.info(
         f"Added {quantity} to batch {batch_number} "
