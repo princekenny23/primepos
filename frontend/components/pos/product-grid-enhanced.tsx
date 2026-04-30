@@ -87,7 +87,13 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
           {products.map((product) => {
             const stockQty = Number(product.sellable_stock ?? 0)
             const lowStockThreshold = Number((product as any).low_stock_threshold ?? product.lowStockThreshold ?? 0)
-            const isLowStock = Boolean((product as any).is_low_stock || (lowStockThreshold > 0 && stockQty <= lowStockThreshold))
+            const isLowStock = Boolean(lowStockThreshold > 0 && stockQty <= lowStockThreshold)
+            const parsedExpiry = product.expiry_date ? new Date(product.expiry_date) : null
+            const today = new Date()
+            today.setHours(0, 0, 0, 0)
+            const isExpired = Boolean(
+              parsedExpiry && !Number.isNaN(parsedExpiry.getTime()) && parsedExpiry <= today
+            )
 
             return (
               <Card
@@ -99,10 +105,13 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
                   <p className="text-xs font-medium leading-tight line-clamp-2 overflow-hidden break-words">
                     {product.name}
                   </p>
-                  <p className="text-[10px] text-muted-foreground mt-auto">
-                    Stock: {stockQty}
-                    {isLowStock ? <span className="ml-1 font-semibold text-destructive">LOW</span> : null}
-                  </p>
+                  <div className="mt-auto text-[10px] text-muted-foreground">
+                    <p>
+                      Stock: {stockQty}
+                    </p>
+                    {isLowStock ? <p className="font-semibold text-destructive">LOW</p> : null}
+                    {isExpired ? <p className="font-semibold text-destructive">EXPIRED</p> : null}
+                  </div>
                 </CardContent>
               </Card>
             )
