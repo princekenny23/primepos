@@ -466,33 +466,56 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     logger.warning(f"Tenant mismatch for StockTakeItem {item.id} in stock_take {stock_take.id}")
                     continue
 
-                # Update product stock (backward compatibility for legacy products)
+                # UNITS ONLY ARCHITECTURE: Update product.stock, LocationStock, and batches
                 if not variation or not variation.track_inventory:
-                    product.stock += difference
+                    # Fix: Set to counted value (absolute), not += difference
+                    product.stock = max(0, item.counted_quantity)
                     product.save(update_fields=['stock'])
 
-                # Update batches if variation tracks inventory
-                if variation and variation.track_inventory:
+                    # Fix: Update LocationStock so sale checks see current stock
+                    location_stock, _ = LocationStock.objects.get_or_create(
+                        tenant=stock_take.tenant,
+                        product=product,
+                        outlet=stock_take.outlet,
+                        defaults={'quantity': 0}
+                    )
+                    location_stock.quantity = max(0, item.counted_quantity)
+                    location_stock.save(update_fields=['quantity'])
+
+                    # Fix: Create/adjust batch so get_available_stock() returns correct count
                     try:
-                        # Use adjust_stock helper to create/update batch
-                        current_stock = get_available_stock(variation, stock_take.outlet)
-                        new_quantity = item.counted_quantity
-                        
-                        # Adjust to the counted quantity
                         adjust_stock(
-                            variation=variation,
+                            product=product,
                             outlet=stock_take.outlet,
-                            new_quantity=new_quantity,
+                            new_quantity=item.counted_quantity,
+                            user=request.user,
+                            reason=f"Stock take {stock_take.id}: Expected {item.expected_quantity}, Counted {item.counted_quantity}"
+                        )
+                        logger.info(
+                            f"Stock take adjusted for {product.name}: "
+                            f"{item.expected_quantity} -> {item.counted_quantity} (product.stock, LocationStock, and batch updated)"
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to adjust batch stock for product {product.id}: {str(e)}")
+                        # LocationStock already updated so sales can proceed
+
+                # Update batches if variation tracks inventory
+                elif variation and variation.track_inventory:
+                    try:
+                        adjust_stock(
+                            product=product,
+                            outlet=stock_take.outlet,
+                            new_quantity=item.counted_quantity,
                             user=request.user,
                             reason=f"Stock take {stock_take.id}: Expected {item.expected_quantity}, Counted {item.counted_quantity}"
                         )
                         
                         logger.info(
-                            f"Stock adjusted for {variation.product.name} - {variation.name}: "
+                            f"Stock adjusted for {product.name}: "
                             f"{item.expected_quantity} -> {item.counted_quantity}"
                         )
                     except Exception as e:
-                        logger.error(f"Failed to adjust stock for variation {variation.id}: {str(e)}")
+                        logger.error(f"Failed to adjust stock for product {product.id}: {str(e)}")
                         # Continue with other items even if one fails
                         continue
 

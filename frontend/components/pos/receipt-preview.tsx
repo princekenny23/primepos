@@ -19,9 +19,14 @@ interface ReceiptPreviewProps {
   discount: number
   tax: number
   total: number
+  outletName?: string
+  outletAddress?: string
+  outletPhone?: string
+  outletEmail?: string
+  businessName?: string
 }
 
-export function ReceiptPreview({ cart, subtotal, discount, tax, total }: ReceiptPreviewProps) {
+export function ReceiptPreview({ cart, subtotal, discount, tax, total, outletName, outletAddress, outletPhone, outletEmail, businessName }: ReceiptPreviewProps) {
   return (
     <Card className="flex-1 min-h-0 flex flex-col">
       <CardHeader className="pb-3">
@@ -34,8 +39,11 @@ export function ReceiptPreview({ cart, subtotal, discount, tax, total }: Receipt
         <ScrollArea className="h-full">
           <div className="space-y-3 text-sm">
             <div className="text-center border-b pb-2">
-              <p className="font-bold">PRIMEPOS</p>
-              <p className="text-xs text-muted-foreground">Receipt</p>
+              <p className="font-bold">{businessName || "PRIMEPOS"}</p>
+              {outletName && <p className="text-xs font-medium">{outletName}</p>}
+              {outletAddress && <p className="text-xs text-muted-foreground">{outletAddress}</p>}
+              {outletPhone && <p className="text-xs text-muted-foreground">Tel: {outletPhone}</p>}
+              {outletEmail && <p className="text-xs text-muted-foreground">{outletEmail}</p>}
               <p className="text-xs text-muted-foreground mt-1">
                 {new Date().toLocaleString()}
               </p>

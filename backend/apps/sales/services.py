@@ -557,6 +557,16 @@ class ReceiptService:
         if outlet:
             lines.extend([line.center(width) for line in wrap_text(outlet, width)])
 
+        outlet_address = sale.outlet.address if sale.outlet and sale.outlet.address else ""
+        outlet_phone = sale.outlet.phone if sale.outlet and sale.outlet.phone else ""
+        outlet_email = sale.outlet.email if sale.outlet and sale.outlet.email else ""
+        if outlet_address:
+            lines.extend([line.center(width) for line in wrap_text(outlet_address, width)])
+        if outlet_phone:
+            lines.extend([line.center(width) for line in wrap_text(f"Tel: {outlet_phone}", width)])
+        if outlet_email:
+            lines.extend([line.center(width) for line in wrap_text(f"Email: {outlet_email}", width)])
+
         lines.extend(align_lr("Receipt #:", str(sale.receipt_number), width))
         lines.extend(align_lr("Date:", sale.created_at.strftime('%Y-%m-%d %H:%M:%S'), width))
 

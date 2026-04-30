@@ -284,9 +284,13 @@ async function getDefaultPrinterNameForOutlet(outletId: number | string): Promis
 function buildPlainTextReceipt(payload: ReceiptPayload): string {
   const sale = payload.sale || {}
   const lines: string[] = []
+  const outletInfo = sale.outlet_detail || sale.outlet || {}
   const businessName =
-    sale.business?.name || sale.outlet?.business?.name || sale.tenant?.name || "Business"
-  const address = sale.outlet?.address || sale.business?.address || sale.tenant?.address || ""
+    sale.business?.name || outletInfo?.business?.name || sale.tenant?.name || "Business"
+  const outletName = outletInfo?.name || ""
+  const address = outletInfo?.address || sale.business?.address || sale.tenant?.address || ""
+  const phone = outletInfo?.phone || ""
+  const email = outletInfo?.email || ""
   const date = sale.created_at || new Date().toLocaleString()
   const cashier =
     sale.cashier?.username ||
@@ -299,7 +303,10 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
     "Cashier"
 
   lines.push(String(businessName).toUpperCase())
+  if (outletName && outletName !== businessName) lines.push(outletName)
   if (address) lines.push(String(address))
+  if (phone) lines.push(`Tel: ${phone}`)
+  if (email) lines.push(email)
   lines.push(`Receipt #: ${sale.receipt_number || sale.id || ""}`)
   lines.push(`Date: ${date}`)
   lines.push(`Cashier: ${cashier}`)
