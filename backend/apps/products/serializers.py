@@ -137,7 +137,10 @@ class ProductSerializer(serializers.ModelSerializer):
         }
     
     def get_is_low_stock(self, obj):
-        """Check if product has low stock"""
+        """Check if product has low stock - outlet-scoped when outlet is in serializer context."""
+        outlet = self.context.get('outlet')
+        if outlet:
+            return obj.get_is_low_stock_for_outlet(outlet)
         return obj.is_low_stock
     
     def get_price(self, obj):

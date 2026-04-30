@@ -126,9 +126,29 @@ class Product(models.Model):
                     total += get_available_stock(unit, outlet_obj)
             return total
     
+    def get_is_low_stock_for_outlet(self, outlet):
+        """Check if product is low on stock for a specific outlet (batch-aware)."""
+        from apps.inventory.stock_helpers import get_available_stock
+        units = self.selling_units.filter(is_active=True)
+
+        if not units.exists():
+            return self.low_stock_threshold > 0 and self.stock <= self.low_stock_threshold
+
+        for unit in units:
+            available_stock = get_available_stock(unit, outlet)
+            if unit.low_stock_threshold > 0 and available_stock <= unit.low_stock_threshold:
+                return True
+
+        if self.low_stock_threshold > 0:
+            total_stock = self.get_total_stock(outlet=outlet)
+            if total_stock <= self.low_stock_threshold:
+                return True
+
+        return False
+
     @property
     def is_low_stock(self):
-        """Check if product is low on stock by checking all units (computed from batches)"""
+        """Check if product is low on stock by checking all units across all outlets (computed from batches)."""
         # Check if any unit is low stock
         units = self.selling_units.filter(is_active=True)
         

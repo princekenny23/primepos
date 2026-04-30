@@ -1336,7 +1336,7 @@ export function RetailPOS() {
                               {product.sku && <span>SKU: {product.sku}</span>}
                               {product.barcode && <span>Barcode: {product.barcode}</span>}
                               {product.sellable_stock !== undefined && (
-                                <span className={Number(product.sellable_stock) <= 10 ? "text-destructive font-medium" : ""}>
+                                <span className={(() => { const thr = Number((product as any).low_stock_threshold ?? product.lowStockThreshold ?? 0); return thr > 0 && Number(product.sellable_stock) <= thr ? "text-destructive font-medium" : ""; })()}>
                                   Stock: {product.sellable_stock}
                                 </span>
                               )}

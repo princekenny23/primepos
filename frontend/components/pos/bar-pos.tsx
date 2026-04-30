@@ -486,8 +486,9 @@ export function BarPOS() {
 
   const isLowStockProduct = (product: Product) => {
     const stockQty = getProductStockQty(product)
-    const threshold = Number((product as any).low_stock_threshold ?? (product as any).lowStockThreshold ?? 10)
-    return Boolean((product as any).is_low_stock || (stockQty > 0 && stockQty <= threshold))
+    const threshold = Number((product as any).low_stock_threshold ?? (product as any).lowStockThreshold ?? 0)
+    // Only use threshold-based check when a threshold is actually configured (> 0)
+    return Boolean((product as any).is_low_stock || (threshold > 0 && stockQty <= threshold))
   }
 
   // ==================== Cart Calculations ====================
