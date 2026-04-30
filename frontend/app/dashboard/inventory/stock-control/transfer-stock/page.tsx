@@ -126,6 +126,24 @@ export default function TransferStockPage() {
       return
     }
 
+    if (transferItems.some((item) => !item.product_id)) {
+      toast({
+        title: "Validation Error",
+        description: "All items must have a product selected",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!currentOutlet || !currentOutlet.id) {
+      toast({
+        title: "Validation Error",
+        description: "Outlet is required but not selected",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsSubmitting(true)
     try {
       await Promise.all(

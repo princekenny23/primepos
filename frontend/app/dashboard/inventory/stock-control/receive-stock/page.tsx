@@ -135,12 +135,30 @@ export default function ReceiveStockPage() {
       return
     }
 
+    if (receiveItems.some((item) => !item.product_id)) {
+      toast({
+        title: "Validation Error",
+        description: "All items must have a product selected",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!currentOutlet || !currentOutlet.id) {
+      toast({
+        title: "Validation Error",
+        description: "Outlet is required but not selected",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsSubmitting(true)
     try {
       // Create receive movements
       await Promise.all(
-        receiveItems.map((item) =>
-          inventoryService.createMovement({
+        receiveItems.map((item) => {
+          const payload = {
             product_id: item.product_id,
             outlet_id: String(currentOutlet.id),
             movement_type: receiveFromType === "outlet" ? "transfer_in" : "purchase",
@@ -151,9 +169,10 @@ export default function ReceiveStockPage() {
             reference_id: receiveFromType === "outlet"
               ? `outlet:${fromOutletId}`
               : `warehouse:${warehouseName.trim()}`,
-          })
-        )
-      )
+          }
+          console.log("Creating receive movement with payload:", payload)
+          return inventoryService.createMovement(payload)
+        })
 
       toast({
         title: "Success",

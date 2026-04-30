@@ -118,7 +118,7 @@ export default function AdjustStockPage() {
       return
     }
 
-    // Validate all items have quantity
+    // Validate all items have quantity and product_id
     if (adjustmentItems.some((item) => !item.quantity || Number(item.quantity) === 0)) {
       toast({
         title: "Validation Error",
@@ -128,20 +128,40 @@ export default function AdjustStockPage() {
       return
     }
 
+    if (adjustmentItems.some((item) => !item.product_id)) {
+      toast({
+        title: "Validation Error",
+        description: "All items must have a product selected",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!currentOutlet || !currentOutlet.id) {
+      toast({
+        title: "Validation Error",
+        description: "Outlet is required but not selected",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsSubmitting(true)
     try {
       // Create adjustment movements
       await Promise.all(
-        adjustmentItems.map((item) =>
-          inventoryService.createMovement({
+        adjustmentItems.map((item) => {
+          const payload = {
             product_id: item.product_id,
             outlet_id: String(currentOutlet.id),
             movement_type: "adjustment",
             quantity: Number(item.quantity),
             reason: reason,
             reference_id: item.adjustmentType === "decrease" ? "negative" : "positive",
-          })
-        )
+          }
+          console.log("Creating adjustment with payload:", payload)
+          return inventoryService.createMovement(payload)
+        })
       )
 
       toast({

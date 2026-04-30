@@ -350,7 +350,7 @@ export class ApiClient {
         // If no detail, try to get field-specific errors
         if (!errorMessage && typeof errorData === 'object') {
           // Check for common field errors
-          const fieldErrors = ['email', 'password', 'name', 'phone', 'role', 'outlet_ids']
+          const fieldErrors = ['email', 'password', 'name', 'phone', 'role', 'outlet_ids', 'product_id', 'outlet', 'movement_type', 'quantity', 'product', 'reason']
           for (const field of fieldErrors) {
             if (errorData[field]) {
               const fieldError = errorData[field]

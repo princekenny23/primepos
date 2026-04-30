@@ -66,17 +66,38 @@ export const inventoryService = {
   },
 
   async createMovement(data: CreateMovementData): Promise<any> {
-    const { outlet_id, outlet, ...rest } = data
+    const { outlet_id, outlet, product_id, ...rest } = data
     const normalizedOutlet = outlet ?? outlet_id
 
     if (!normalizedOutlet) {
       throw new Error("Outlet is required to create stock movement")
     }
 
-    return api.post(apiEndpoints.inventory.movements, {
+    if (!product_id) {
+      throw new Error("Product ID is required to create stock movement")
+    }
+
+    const payload = {
       ...rest,
       outlet: normalizedOutlet,
-    })
+      product_id: product_id,
+    }
+
+    console.log("Sending stock movement payload to API:", payload)
+
+    try {
+      const response = await api.post(apiEndpoints.inventory.movements, payload)
+      console.log("Stock movement created successfully:", response)
+      return response
+    } catch (error: any) {
+      console.error("Stock movement creation failed:", {
+        payload,
+        error: error.message,
+        status: error?.status,
+        errorData: error?.errorData,
+      })
+      throw error
+    }
   },
 
   async getMovements(filters?: {

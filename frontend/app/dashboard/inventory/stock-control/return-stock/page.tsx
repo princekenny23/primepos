@@ -140,21 +140,40 @@ export default function ReturnStockPage() {
       return
     }
 
+    if (returnItems.some((item) => !item.product_id)) {
+      toast({
+        title: "Validation Error",
+        description: "All items must have a product selected",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!currentOutlet || !currentOutlet.id) {
+      toast({
+        title: "Validation Error",
+        description: "Outlet is required but not selected",
+        variant: "destructive",
+      })
+      return
+    }
+
     setIsSubmitting(true)
     try {
       // Create return movements
       await Promise.all(
-        returnItems.map((item) =>
-          inventoryService.createMovement({
+        returnItems.map((item) => {
+          const payload = {
             product_id: item.product_id,
             outlet_id: String(currentOutlet.id),
             movement_type: returnType === "supplier" ? "supplier_return" : "return",
             quantity: Number(item.quantity),
             reason: reason,
             reference_id: returnType === "supplier" ? supplier : "customer_return",
-          })
-        )
-      )
+          }
+          console.log("Creating return movement with payload:", payload)
+          return inventoryService.createMovement(payload)
+        })
 
       toast({
         title: "Success",
