@@ -174,6 +174,7 @@ export default function ReturnStockPage() {
           console.log("Creating return movement with payload:", payload)
           return inventoryService.createMovement(payload)
         })
+      )
 
       toast({
         title: "Success",

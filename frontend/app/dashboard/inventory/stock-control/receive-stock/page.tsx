@@ -173,6 +173,7 @@ export default function ReceiveStockPage() {
           console.log("Creating receive movement with payload:", payload)
           return inventoryService.createMovement(payload)
         })
+      )
 
       toast({
         title: "Success",
