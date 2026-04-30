@@ -101,79 +101,47 @@ class Product(models.Model):
         return self.name
 
     def get_total_stock(self, outlet=None):
-        """Get total stock from all units using batch-aware calculation"""
-        from apps.inventory.stock_helpers import get_available_stock
+        """Get total stock using get_sellable_stock as single source of truth."""
+        from apps.inventory.stock_helpers import get_sellable_stock
         from apps.outlets.models import Outlet
-        
-        # Get all active units
-        units = self.selling_units.filter(is_active=True)
-        
-        if not units.exists():
-            # Fallback to legacy stock field if no units
-            return self.stock
-        
-        # Sum stock from all units (each with conversion_factor)
-        # Base unit has conversion_factor=1.0, represents actual stock
+
         if outlet:
-            # Get stock for specific outlet from non-expired batches
-            return sum(get_available_stock(unit, outlet) for unit in units)
-        else:
-            # Sum across all outlets
-            total = 0
-            outlets = Outlet.objects.filter(tenant=self.tenant)
-            for unit in units:
-                for outlet_obj in outlets:
-                    total += get_available_stock(unit, outlet_obj)
-            return total
+            return get_sellable_stock(self, outlet)
+
+        # Sum across all outlets
+        outlets = Outlet.objects.filter(tenant=self.tenant)
+        if not outlets.exists():
+            return int(self.stock or 0)
+        return sum(get_sellable_stock(self, o) for o in outlets)
     
     def get_is_low_stock_for_outlet(self, outlet):
-        """Check if product is low on stock for a specific outlet (batch-aware)."""
-        from apps.inventory.stock_helpers import get_available_stock
-        units = self.selling_units.filter(is_active=True)
+        """Check if product is low on stock for a specific outlet.
 
-        if not units.exists():
-            return self.low_stock_threshold > 0 and self.stock <= self.low_stock_threshold
-
-        for unit in units:
-            available_stock = get_available_stock(unit, outlet)
-            if unit.low_stock_threshold > 0 and available_stock <= unit.low_stock_threshold:
-                return True
-
-        if self.low_stock_threshold > 0:
-            total_stock = self.get_total_stock(outlet=outlet)
-            if total_stock <= self.low_stock_threshold:
-                return True
-
-        return False
+        Uses get_sellable_stock as the single source of truth so this always
+        agrees with the sellable_stock value shown in the POS.
+        """
+        if self.low_stock_threshold <= 0:
+            return False
+        from apps.inventory.stock_helpers import get_sellable_stock
+        return get_sellable_stock(self, outlet) <= self.low_stock_threshold
 
     @property
     def is_low_stock(self):
-        """Check if product is low on stock by checking all units across all outlets (computed from batches)."""
-        # Check if any unit is low stock
-        units = self.selling_units.filter(is_active=True)
-        
-        if not units.exists():
-            # Fallback to legacy check if no units
-            return self.low_stock_threshold > 0 and self.stock <= self.low_stock_threshold
-        
-        # Check each unit for low stock using batch-aware calculation
-        for unit in units:
-            from apps.inventory.stock_helpers import get_available_stock
-            from apps.outlets.models import Outlet
-            
-            # Check stock across all outlets for this unit
-            outlets = Outlet.objects.filter(tenant=self.tenant)
-            for outlet in outlets:
-                available_stock = get_available_stock(unit, outlet)
-                if unit.low_stock_threshold > 0 and available_stock <= unit.low_stock_threshold:
-                    return True
-        
-        # Also check product-level threshold if set (sum of all units)
-        if self.low_stock_threshold > 0:
-            total_stock = self.get_total_stock()
-            if total_stock <= self.low_stock_threshold:
+        """Check if product is low on stock across any outlet.
+
+        Uses get_sellable_stock as the single source of truth so this always
+        agrees with the sellable_stock value shown in the POS.
+        """
+        if self.low_stock_threshold <= 0:
+            return False
+        from apps.inventory.stock_helpers import get_sellable_stock
+        from apps.outlets.models import Outlet
+        outlets = Outlet.objects.filter(tenant=self.tenant)
+        if not outlets.exists():
+            return int(self.stock or 0) <= self.low_stock_threshold
+        for outlet in outlets:
+            if get_sellable_stock(self, outlet) <= self.low_stock_threshold:
                 return True
-        
         return False
     
     @property
