@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
@@ -29,6 +29,7 @@ import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { useBusinessStore } from "@/stores/businessStore"
+import { outletService } from "@/lib/services/outletService"
 import type { Product } from "@/lib/types"
 import { SelectProductModal } from "@/components/modals/select-product-modal"
 
@@ -37,17 +38,36 @@ interface ReturnItem {
   product_id: string
   product_name?: string
   quantity: string
-  unit_price: string
 }
 
 export default function ReturnStockPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const { currentBusiness, currentOutlet } = useBusinessStore()
+  const { currentOutlet, outlets: storeOutlets } = useBusinessStore()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
-  const [returnType, setReturnType] = useState("customer")
-  const [supplier, setSupplier] = useState("")
+  const [allOutlets, setAllOutlets] = useState<typeof storeOutlets>([])
+
+  useEffect(() => {
+    outletService.list()
+      .then((fetched) => {
+        if (fetched.length > 0) {
+          setAllOutlets(fetched)
+        } else if (storeOutlets.length > 0) {
+          setAllOutlets(storeOutlets)
+        }
+      })
+      .catch((err) => {
+        console.error("[return-stock] Failed to load outlets:", err)
+        if (storeOutlets.length > 0) setAllOutlets(storeOutlets)
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const availableOutlets = allOutlets.filter(
+    (outlet) => String(outlet.id) !== String(currentOutlet?.id)
+  )
+
+  const [toOutletId, setToOutletId] = useState("")
   const [reason, setReason] = useState("")
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([])
   const [showProductSelector, setShowProductSelector] = useState(false)
@@ -66,7 +86,6 @@ export default function ReturnStockPage() {
       product_id: String(product.id),
       product_name: product.name,
       quantity: "",
-      unit_price: "",
     }
 
     setReturnItems((prev) => [...prev, newItem])
@@ -83,14 +102,6 @@ export default function ReturnStockPage() {
       )
     )
   }
-
-  const totalValue = useMemo(() => {
-    return returnItems.reduce((sum, item) => {
-      const qty = Number(item.quantity) || 0
-      const price = Number(item.unit_price) || 0
-      return sum + qty * price
-    }, 0)
-  }, [returnItems])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -113,10 +124,10 @@ export default function ReturnStockPage() {
       return
     }
 
-    if (returnType === "supplier" && !supplier.trim()) {
+    if (!toOutletId) {
       toast({
         title: "Validation Error",
-        description: "Please enter a supplier name",
+        description: "Please select the destination outlet",
         variant: "destructive",
       })
       return
@@ -158,27 +169,29 @@ export default function ReturnStockPage() {
       return
     }
 
+    const selectedDestinationOutlet = availableOutlets.find(
+      (outlet) => String(outlet.id) === toOutletId
+    )
+
     setIsSubmitting(true)
     try {
-      // Create return movements
       await Promise.all(
         returnItems.map((item) => {
           const payload = {
             product_id: item.product_id,
             outlet_id: String(currentOutlet.id),
-            movement_type: returnType === "supplier" ? "supplier_return" : "return",
+            movement_type: "transfer_out",
             quantity: Number(item.quantity),
-            reason: reason,
-            reference_id: returnType === "supplier" ? supplier : "customer_return",
+            reason: `Returned to ${selectedDestinationOutlet?.name || "outlet"}. ${reason}`,
+            reference_id: `outlet:${toOutletId}`,
           }
-          console.log("Creating return movement with payload:", payload)
           return inventoryService.createMovement(payload)
         })
       )
 
       toast({
         title: "Success",
-        description: `${returnItems.length} product${returnItems.length !== 1 ? "s" : ""} returned successfully`,
+        description: `${returnItems.length} product${returnItems.length !== 1 ? "s" : ""} returned to outlet successfully`,
       })
 
       router.push("/dashboard/inventory/stock-control")
@@ -198,7 +211,7 @@ export default function ReturnStockPage() {
     <DashboardLayout>
       <PageLayout
         title="Return Stock"
-        description="Record stock returns from customers or to suppliers"
+        description="Move stock from this outlet back to another outlet"
         actions={
           <Link href="/dashboard/inventory/stock-control">
             <Button variant="ghost" size="icon">
@@ -226,35 +239,32 @@ export default function ReturnStockPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="returnType">Return Type *</Label>
-                    <Select value={returnType} onValueChange={setReturnType}>
-                      <SelectTrigger id="returnType">
-                        <SelectValue />
+                    <Label htmlFor="toOutlet">Return To Outlet *</Label>
+                    <Select value={toOutletId} onValueChange={setToOutletId}>
+                      <SelectTrigger id="toOutlet">
+                        <SelectValue placeholder="Select destination outlet" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="customer">Customer Return</SelectItem>
-                        <SelectItem value="supplier">Supplier Return</SelectItem>
+                        {availableOutlets.length > 0 ? (
+                          availableOutlets.map((outlet) => (
+                            <SelectItem key={String(outlet.id)} value={String(outlet.id)}>
+                              {outlet.name}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <div className="px-2 py-1.5 text-sm text-gray-600">
+                            No other outlets available
+                          </div>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
-
-                  {returnType === "supplier" && (
-                    <div className="space-y-2">
-                      <Label htmlFor="supplier">Supplier Name *</Label>
-                      <Input
-                        id="supplier"
-                        placeholder="Enter supplier name"
-                        value={supplier}
-                        onChange={(e) => setSupplier(e.target.value)}
-                      />
-                    </div>
-                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="reason">Reason for Return *</Label>
                     <Textarea
                       id="reason"
-                      placeholder="e.g., Defective product, damaged in transit, wrong item..."
+                      placeholder="e.g., Returning stock to main branch"
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       rows={4}
@@ -275,7 +285,7 @@ export default function ReturnStockPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <p className="text-sm text-muted-foreground">
-                    Use the add button to open the product picker and add items to this return.
+                    Use the add button to open the product picker and add items to return to another outlet.
                   </p>
                 </CardContent>
               </Card>
@@ -292,62 +302,39 @@ export default function ReturnStockPage() {
                           <TableRow className="bg-gray-50">
                             <TableHead>Product</TableHead>
                             <TableHead>Quantity</TableHead>
-                            <TableHead>Unit Price</TableHead>
-                            <TableHead>Total</TableHead>
                             <TableHead className="w-10"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {returnItems.map((item) => {
-                            const qty = Number(item.quantity) || 0
-                            const price = Number(item.unit_price) || 0
-                            const total = qty * price
-                            return (
-                              <TableRow key={item.id}>
-                                <TableCell className="font-medium">
-                                  {item.product_name}
-                                </TableCell>
-                                <TableCell>
-                                  <Input
-                                    type="number"
-                                    placeholder="0"
-                                    value={item.quantity}
-                                    onChange={(e) =>
-                                      handleUpdateItem(item.id, "quantity", e.target.value)
-                                    }
-                                    className="w-24"
-                                    min="0"
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <Input
-                                    type="number"
-                                    placeholder="0.00"
-                                    value={item.unit_price}
-                                    onChange={(e) =>
-                                      handleUpdateItem(item.id, "unit_price", e.target.value)
-                                    }
-                                    className="w-24"
-                                    step="0.01"
-                                    min="0"
-                                  />
-                                </TableCell>
-                                <TableCell className="font-medium">
-                                  {total.toFixed(2)}
-                                </TableCell>
-                                <TableCell>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleRemoveItem(item.id)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            )
-                          })}
+                          {returnItems.map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell className="font-medium">
+                                {item.product_name}
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  type="number"
+                                  placeholder="0"
+                                  value={item.quantity}
+                                  onChange={(e) =>
+                                    handleUpdateItem(item.id, "quantity", e.target.value)
+                                  }
+                                  className="w-24"
+                                  min="0"
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRemoveItem(item.id)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
                         </TableBody>
                       </Table>
                     </div>
@@ -373,30 +360,16 @@ export default function ReturnStockPage() {
                   </div>
 
                   <div className="border-t pt-4">
-                    <p className="text-sm text-gray-600">Total Value</p>
-                    <p className="text-2xl font-semibold">
-                      {totalValue.toLocaleString("en-US", {
-                        style: "currency",
-                        currency: "USD",
-                      })}
+                    <p className="text-sm font-medium mb-2">Return To</p>
+                    <p className="text-sm text-gray-600">
+                      {availableOutlets.find((outlet) => String(outlet.id) === toOutletId)?.name || "Not selected"}
                     </p>
                   </div>
 
                   <div className="border-t pt-4">
-                    <p className="text-sm font-medium mb-2">Return Type</p>
-                    <p className="text-sm text-gray-600">
-                      {returnType === "customer" ? "Customer Return" : "Supplier Return"}
-                    </p>
+                    <p className="text-sm font-medium mb-2">Reason</p>
+                    <p className="text-sm text-gray-600">{reason || "Not provided"}</p>
                   </div>
-
-                  {returnType === "supplier" && (
-                    <div className="border-t pt-4">
-                      <p className="text-sm font-medium mb-2">Supplier</p>
-                      <p className="text-sm text-gray-600">
-                        {supplier || "Not entered"}
-                      </p>
-                    </div>
-                  )}
 
                   <div className="border-t pt-4 space-y-3">
                     <Button
@@ -404,7 +377,7 @@ export default function ReturnStockPage() {
                       className="w-full"
                       disabled={isSubmitting || returnItems.length === 0}
                     >
-                      {isSubmitting ? "Processing..." : "Process Return"}
+                      {isSubmitting ? "Processing..." : "Return To Outlet"}
                     </Button>
                     <Link href="/dashboard/inventory/stock-control" className="w-full">
                       <Button

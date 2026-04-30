@@ -1615,9 +1615,9 @@ export function RestaurantPOS() {
                               <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
                                 {product.sku && <span>SKU: {product.sku}</span>}
                                 {product.barcode && <span>Barcode: {product.barcode}</span>}
-                                {product.stock !== undefined && (
-                                  <span className={product.stock <= 10 ? "text-destructive font-medium" : ""}>
-                                    Stock: {product.stock}
+                                {product.sellable_stock !== undefined && (
+                                  <span className={Number(product.sellable_stock) <= 10 ? "text-destructive font-medium" : ""}>
+                                    Stock: {product.sellable_stock}
                                   </span>
                                 )}
                               </div>
@@ -1702,7 +1702,7 @@ export function RestaurantPOS() {
                           >
                             <CardContent className="h-full p-1 flex flex-col justify-between">
                               <h3 className="text-xs font-medium leading-tight line-clamp-2 overflow-hidden break-words">{product.name}</h3>
-                              <p className="text-[10px] text-muted-foreground">Stock: {product.stock ?? 0}</p>
+                              <p className="text-[10px] text-muted-foreground">Stock: {product.sellable_stock ?? 0}</p>
                             </CardContent>
                           </Card>
                         ))}

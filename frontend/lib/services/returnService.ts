@@ -164,17 +164,31 @@ export const returnService = {
         allReturns.push(...supplierReturns)
       }
       
-      // Get outlet returns (from stock movements with outlet transfer)
+      // Get outlet returns (legacy "return" movements + new outlet-to-outlet "transfer_out" flow)
       if (!filters?.return_type || filters.return_type === "outlet") {
-        const movements = await inventoryService.getMovements({
-          movement_type: "return",
-          outlet: filters?.outlet,
-        })
-        
-        const outletReturns = (movements.results || []).filter((m: any) => {
+        const [legacyResp, transferOutResp] = await Promise.all([
+          inventoryService.getMovements({
+            movement_type: "return",
+            outlet: filters?.outlet,
+          }),
+          inventoryService.getMovements({
+            movement_type: "transfer_out",
+            outlet: filters?.outlet,
+          }),
+        ])
+
+        const legacyOutletMovements = (legacyResp.results || []).filter((m: any) => {
           const reason = (m.reason || "").toLowerCase()
           return reason.includes("outlet") && !reason.includes("supplier") && !reason.includes("customer")
-        }).map((m: any) => ({
+        })
+
+        const transferOutletMovements = (transferOutResp.results || []).filter((m: any) => {
+          const reason = (m.reason || "").toLowerCase()
+          const ref = String(m.reference_id || "")
+          return reason.includes("returned to") || ref.startsWith("outlet:")
+        })
+
+        const outletReturns = [...legacyOutletMovements, ...transferOutletMovements].map((m: any) => ({
           id: `outlet_${m.id}`,
           return_type: "outlet" as ReturnType,
           return_number: m.reference_id || `OUTLET-RET-${m.id}`,
@@ -393,11 +407,19 @@ export const returnService = {
         created_at: purchaseReturn.created_at,
       }
     } else {
-      // Outlet return
-      const movements = await inventoryService.getMovements({
-        movement_type: "return",
+      // Outlet return — check legacy "return" first, then new "transfer_out" flow
+      const [legacyResp, transferOutResp] = await Promise.all([
+        inventoryService.getMovements({ movement_type: "return" }),
+        inventoryService.getMovements({ movement_type: "transfer_out" }),
+      ])
+      const transferOutletMovements = (transferOutResp.results || []).filter((m: any) => {
+        const reason = (m.reason || "").toLowerCase()
+        const ref = String(m.reference_id || "")
+        return reason.includes("returned to") || ref.startsWith("outlet:")
       })
-      const movement = movements.results?.find((m: any) => String(m.id) === returnId)
+      const movement =
+        (legacyResp.results || []).find((m: any) => String(m.id) === returnId) ||
+        transferOutletMovements.find((m: any) => String(m.id) === returnId)
       if (!movement) throw new Error("Return not found")
       
       return {

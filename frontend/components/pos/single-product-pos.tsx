@@ -143,7 +143,7 @@ export function SingleProductPOS() {
     if (selectedUnit && selectedUnit.stock_in_unit !== undefined) {
       return selectedUnit.stock_in_unit
     }
-    return selectedProduct.stock || 0
+    return Number((selectedProduct as any).sellable_stock ?? 0)
   }, [selectedProduct, selectedUnit])
 
   const handleAddToCart = () => {

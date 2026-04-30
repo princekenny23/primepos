@@ -12,6 +12,18 @@ from apps.inventory.models import Batch, LocationStock, StockMovement
 logger = logging.getLogger(__name__)
 
 
+def get_sellable_stock(product, outlet):
+    """Return sellable stock from non-expired batches for a product at an outlet."""
+    today = timezone.now().date()
+    batches = Batch.objects.filter(
+        product=product,
+        outlet=outlet,
+        expiry_date__gt=today,
+        quantity__gt=0
+    )
+    return sum(batch.quantity for batch in batches)
+
+
 def get_available_stock(unit, outlet):
     """
     Get available stock for a product unit at an outlet (excluding expired batches)
@@ -24,22 +36,14 @@ def get_available_stock(unit, outlet):
     Returns:
         int: Total available quantity (non-expired batches)
     """
-    today = timezone.now().date()
-    
     # Support both ProductUnit and Product for backward compatibility
-    from apps.products.models import ProductUnit, Product
+    from apps.products.models import ProductUnit
     if isinstance(unit, ProductUnit):
         product = unit.product
     else:
         product = unit
-    
-    batches = Batch.objects.filter(
-        product=product,
-        outlet=outlet,
-        expiry_date__gt=today,
-        quantity__gt=0
-    )
-    return sum(batch.quantity for batch in batches)
+
+    return get_sellable_stock(product, outlet)
 
 
 def get_batch_for_sale(product, outlet, required_quantity):

@@ -79,6 +79,7 @@ export const inventoryService = {
 
     const payload = {
       ...rest,
+      outlet_id: normalizedOutlet,
       outlet: normalizedOutlet,
       product_id: product_id,
     }
@@ -94,7 +95,7 @@ export const inventoryService = {
         payload,
         error: error.message,
         status: error?.status,
-        errorData: error?.errorData,
+        errorData: error?.data,
       })
       throw error
     }

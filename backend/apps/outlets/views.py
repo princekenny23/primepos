@@ -22,6 +22,13 @@ class OutletViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_settings']
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+
+    def get_permissions(self):
+        # List and retrieve are safe reads — any authenticated tenant user can access.
+        # Write actions (create/update/destroy) still require allow_settings.
+        if self.action in ('list', 'retrieve'):
+            return [IsAuthenticated()]
+        return super().get_permissions()
     filterset_fields = ['is_active', 'tenant']
     search_fields = ['name', 'phone', 'email', 'address']
     ordering_fields = ['name', 'created_at']

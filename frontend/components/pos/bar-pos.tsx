@@ -482,7 +482,7 @@ export function BarPOS() {
     return matchesSearch && matchesCategory && product.isActive
   })
 
-  const getProductStockQty = (product: Product) => Number(product.stock ?? 0)
+  const getProductStockQty = (product: Product) => Number((product as any).sellable_stock ?? 0)
 
   const isLowStockProduct = (product: Product) => {
     const stockQty = getProductStockQty(product)
@@ -617,7 +617,7 @@ export function BarPOS() {
   }
 
   const handleAddItemToTab = async (product: Product) => {
-    if (product.stock !== undefined && getProductStockQty(product) <= 0) {
+    if ((product as any).sellable_stock !== undefined && getProductStockQty(product) <= 0) {
       toast({
         title: "Out of stock",
         description: `${product.name} has no stock available.`,
@@ -1508,7 +1508,7 @@ export function BarPOS() {
                               <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
                                 {product.sku && <span>SKU: {product.sku}</span>}
                                 {product.barcode && <span>Barcode: {product.barcode}</span>}
-                                {product.stock !== undefined && (
+                                {(product as any).sellable_stock !== undefined && (
                                   <span
                                     className={
                                       getProductStockQty(product) <= 0

@@ -121,6 +121,7 @@ function transformProduct(backendProduct: any): Product {
     outlet_id: outletId,
     outlet_name: outletName,
     stock: backendProduct.stock || 0,
+    sellable_stock: Number(backendProduct.sellable_stock || 0),
     lowStockThreshold: backendProduct.low_stock_threshold || backendProduct.lowStockThreshold || 0,
     is_low_stock: backendProduct.is_low_stock || false, // Include low stock flag from backend
     selling_units: backendProduct.selling_units || [], // Keep legacy field for backward compatibility

@@ -11,7 +11,7 @@ interface Product {
   price: number
   barcode: string
   sku: string
-  stock: number
+  sellable_stock?: number
 }
 
 interface ProductGridProps {
@@ -35,7 +35,7 @@ export function ProductGrid({ products, onAddToCart }: ProductGridProps) {
     <ScrollArea className="flex-1">
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-4 gap-3 p-2">
         {products.map((product) => {
-          const stockQty = Number(product.stock ?? 0)
+          const stockQty = Number(product.sellable_stock ?? 0)
           const lowStockThreshold = Number((product as any).low_stock_threshold ?? (product as any).lowStockThreshold ?? 0)
           const isLowStock = Boolean((product as any).is_low_stock || (lowStockThreshold > 0 && stockQty <= lowStockThreshold))
 

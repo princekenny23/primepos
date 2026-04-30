@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
@@ -29,6 +29,7 @@ import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { useBusinessStore } from "@/stores/businessStore"
+import { outletService } from "@/lib/services/outletService"
 import type { Product } from "@/lib/types"
 import { SelectProductModal } from "@/components/modals/select-product-modal"
 
@@ -43,17 +44,34 @@ interface TransferItem {
 export default function TransferStockPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const { currentOutlet, outlets } = useBusinessStore()
+  const { currentOutlet, outlets: storeOutlets } = useBusinessStore()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
+  const [allOutlets, setAllOutlets] = useState<typeof storeOutlets>([])
+
+  useEffect(() => {
+    outletService.list()
+      .then((fetched) => {
+        if (fetched.length > 0) {
+          setAllOutlets(fetched)
+        } else if (storeOutlets.length > 0) {
+          setAllOutlets(storeOutlets)
+        }
+      })
+      .catch((err) => {
+        console.error("[transfer-stock] Failed to load outlets:", err)
+        if (storeOutlets.length > 0) setAllOutlets(storeOutlets)
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const [toOutlet, setToOutlet] = useState("")
   const [reason, setReason] = useState("")
   const [transferItems, setTransferItems] = useState<TransferItem[]>([])
   const [showProductSelector, setShowProductSelector] = useState(false)
 
   const availableOutlets = useMemo(() => {
-    return outlets.filter((o) => String(o.id) !== String(currentOutlet?.id))
-  }, [outlets, currentOutlet?.id])
+    return allOutlets.filter((o) => String(o.id) !== String(currentOutlet?.id))
+  }, [allOutlets, currentOutlet?.id])
 
   const handleAddItem = (product: Product) => {
     if (transferItems.some((item) => item.product_id === String(product.id))) {

@@ -89,6 +89,7 @@ class ProductSerializer(serializers.ModelSerializer):
         allow_null=True
     )
     is_low_stock = serializers.SerializerMethodField()
+    sellable_stock = serializers.SerializerMethodField()
     # selling_units for reading
     selling_units = ProductUnitSerializer(many=True, read_only=True)
     # selling_units_data for writing (accepts raw data)
@@ -119,7 +120,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'outlet', 'category', 'category_id', 'name', 'description', 
             'sku', 'barcode', 'retail_price', 'price', 'cost', 'cost_price', 
             'wholesale_price', 'wholesale_enabled', 'minimum_wholesale_quantity', 
-            'stock', 'low_stock_threshold', 'unit', 'image', 'is_active', 
+            'stock', 'sellable_stock', 'low_stock_threshold', 'unit', 'image', 'is_active', 
             'new_stock_override', 'new_stock_override_until',
             'is_low_stock', 'selling_units', 'selling_units_data',
             'track_expiration', 'manufacturing_date', 'expiry_date',
@@ -146,6 +147,16 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_cost_price(self, obj):
         """Get cost from product model (backward compatibility)"""
         return obj.cost
+
+    def get_sellable_stock(self, obj):
+        """Get outlet sellable stock from non-expired batches only."""
+        from apps.inventory.stock_helpers import get_sellable_stock
+
+        outlet = self.context.get('outlet') or getattr(obj, 'outlet', None)
+        if not outlet:
+            return 0
+
+        return get_sellable_stock(obj, outlet)
     
     def validate(self, data):
         """Validate that product configuration is valid"""

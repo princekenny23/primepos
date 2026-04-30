@@ -133,8 +133,6 @@ export function RetailPOS() {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false)
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [showCustomerSelect, setShowCustomerSelect] = useState(false)
-  const [showSaleTypeConfirm, setShowSaleTypeConfirm] = useState(false)
-  const [pendingSaleType, setPendingSaleType] = useState<SaleType | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [showDiscount, setShowDiscount] = useState(false)
@@ -545,30 +543,40 @@ export function RetailPOS() {
   }
 
   const handleSaleTypeChange = (newType: SaleType) => {
-    if (cart.length > 0 && saleType !== newType) {
-      setPendingSaleType(newType)
-      setShowSaleTypeConfirm(true)
-    } else {
-      setSaleType(newType)
-    }
-  }
+    if (newType === saleType) return
 
-  const handleConfirmSaleTypeChange = async () => {
-    if (pendingSaleType) {
-      if (cart.length > 0) {
-        clearCart()
-        setSaleDiscount(null)
-        setSelectedCustomer(null)
+    setSaleType(newType)
+
+    // Keep cart items and reprice them to match the selected sale type.
+    cart.forEach((item) => {
+      const product = products.find((p) => String(p.id) === String(item.productId)) as any
+      if (!product) return
+
+      let newPrice: number
+
+      if (item.unitId) {
+        const units = product.units || product.selling_units || []
+        const selectedUnit = units.find((u: any) => String(u.id) === String(item.unitId))
+        if (selectedUnit) {
+          newPrice = newType === "wholesale"
+            ? toNumber(selectedUnit.wholesale_price ?? selectedUnit.wholesalePrice ?? selectedUnit.price ?? selectedUnit.retail_price)
+            : toNumber(selectedUnit.retail_price ?? selectedUnit.price)
+        } else {
+          newPrice = newType === "wholesale"
+            ? toNumber(product.wholesale_price ?? product.wholesalePrice ?? product.retail_price ?? product.price)
+            : toNumber(product.retail_price ?? product.price)
+        }
+      } else {
+        newPrice = newType === "wholesale"
+          ? toNumber(product.wholesale_price ?? product.wholesalePrice ?? product.retail_price ?? product.price)
+          : toNumber(product.retail_price ?? product.price)
       }
-      setSaleType(pendingSaleType)
-      setPendingSaleType(null)
-      setShowSaleTypeConfirm(false)
-    }
-  }
 
-  const handleCancelSaleTypeChange = () => {
-    setPendingSaleType(null)
-    setShowSaleTypeConfirm(false)
+      updateCartItem(item.id, {
+        price: newPrice,
+        saleType: newType,
+      })
+    })
   }
 
   const handleCheckout = async () => {
@@ -849,6 +857,32 @@ export function RetailPOS() {
 
       if (!initiatedSaleId) {
         throw new Error("No initiated transaction found. Click PAY to start again.")
+      }
+
+      // Revalidate stock with latest sellable quantities before finalizing payment.
+      const productIds = Array.from(new Set(cart.map((item) => String(item.productId))))
+      const latestProducts = await Promise.all(productIds.map((id) => productService.get(id)))
+      const latestById = new Map(latestProducts.map((p) => [String(p.id), p]))
+
+      const requiredByProduct = new Map<string, number>()
+      cart.forEach((item) => {
+        const productId = String(item.productId)
+        const latestProduct = latestById.get(productId) as any
+        const units = latestProduct?.selling_units || latestProduct?.units || []
+        const selectedUnit = units.find((u: any) => String(u.id) === String((item as any).unitId))
+        const conversionFactor = Number(selectedUnit?.conversion_factor || selectedUnit?.conversionFactor || 1)
+        const requiredBaseUnits = Number(item.quantity || 0) * conversionFactor
+        requiredByProduct.set(productId, (requiredByProduct.get(productId) || 0) + requiredBaseUnits)
+      })
+
+      for (const [productId, requestedQty] of requiredByProduct.entries()) {
+        const latestProduct = latestById.get(productId) as any
+        const sellableStock = Number(latestProduct?.sellable_stock || 0)
+        if (requestedQty > sellableStock) {
+          throw new Error(
+            `Insufficient stock for ${latestProduct?.name || "item"}. Available: ${sellableStock}, Requested: ${requestedQty}`
+          )
+        }
       }
 
       // Finalize previously initiated sale
@@ -1301,9 +1335,9 @@ export function RetailPOS() {
                             <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
                               {product.sku && <span>SKU: {product.sku}</span>}
                               {product.barcode && <span>Barcode: {product.barcode}</span>}
-                              {product.stock !== undefined && (
-                                <span className={product.stock <= 10 ? "text-destructive font-medium" : ""}>
-                                  Stock: {product.stock}
+                              {product.sellable_stock !== undefined && (
+                                <span className={Number(product.sellable_stock) <= 10 ? "text-destructive font-medium" : ""}>
+                                  Stock: {product.sellable_stock}
                                 </span>
                               )}
                             </div>
@@ -1764,27 +1798,6 @@ export function RetailPOS() {
         />
       )}
       
-      {/* Sale Type Change Confirmation */}
-      <AlertDialog open={showSaleTypeConfirm} onOpenChange={setShowSaleTypeConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Clear Cart?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Switching to <strong>{pendingSaleType}</strong> will clear your current cart. 
-              All items in the cart will be removed. Do you want to continue?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={handleCancelSaleTypeChange}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmSaleTypeChange}>
-              Continue
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
       {/* Replace Cart Confirmation for Hold Retrieval */}
       <AlertDialog open={showReplaceCartConfirm} onOpenChange={setShowReplaceCartConfirm}>
         <AlertDialogContent>

@@ -2,6 +2,7 @@ from rest_framework import serializers  # pyright: ignore[reportMissingImports]
 from .models import StockMovement, StockTake, StockTakeItem, LocationStock, Batch
 from apps.products.serializers import ProductSerializer
 from apps.products.models import Product
+from apps.outlets.models import Outlet
 
 
 class BatchSerializer(serializers.ModelSerializer):
@@ -41,6 +42,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     product_name = serializers.SerializerMethodField()
     product_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, allow_null=True, source='product', queryset=Product.objects.all())
+    outlet_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, source='outlet', queryset=Outlet.objects.all())
     user_name = serializers.SerializerMethodField()
     outlet_name = serializers.SerializerMethodField()
     
@@ -66,10 +68,14 @@ class StockMovementSerializer(serializers.ModelSerializer):
         instance = getattr(self, 'instance', None)
 
         product = attrs.get('product') or (instance.product if instance else None)
+        outlet = attrs.get('outlet') or (instance.outlet if instance else None)
         
         # UNITS ONLY ARCHITECTURE: No variation support
         if not product:
             raise serializers.ValidationError("product is required")
+
+        if not outlet:
+            raise serializers.ValidationError({"outlet": ["This field is required."]})
 
         return attrs
 
@@ -77,9 +83,9 @@ class StockMovementSerializer(serializers.ModelSerializer):
     class Meta:
         model = StockMovement
         fields = ('id', 'tenant', 'batch', 'batch_id', 'product', 'product_id', 'product_name', 
-                  'outlet', 'outlet_name', 'user', 'user_name', 
+                  'outlet', 'outlet_id', 'outlet_name', 'user', 'user_name', 
                   'movement_type', 'quantity', 'reason', 'reference_id', 'created_at')
-        read_only_fields = ('id', 'created_at', 'product_name', 'user_name', 'outlet_name', 'batch')
+        read_only_fields = ('id', 'tenant', 'user', 'created_at', 'product_name', 'user_name', 'outlet_name', 'batch', 'outlet')
 
 
 class StockTakeItemSerializer(serializers.ModelSerializer):

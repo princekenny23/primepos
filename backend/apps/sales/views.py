@@ -21,7 +21,7 @@ from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, 
 from .services import ReceiptService
 from apps.products.models import Product, ProductUnit
 from apps.inventory.models import StockMovement, LocationStock, Batch
-from apps.inventory.stock_helpers import get_available_stock, deduct_stock, restore_stock_for_refund
+from apps.inventory.stock_helpers import get_sellable_stock, deduct_stock, restore_stock_for_refund
 from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 
 
@@ -399,11 +399,8 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 except ProductUnit.DoesNotExist:
                     raise serializers.ValidationError(f"Item {idx + 1}: Unit {unit_id} not found or inactive")
             
-            # --- PHASE 1 FIX: batch-aware stock check ---
-            # Use authoritative batch total; fall back to Product.stock only when
-            # no batches have been configured for this product yet.
-            available_from_batches = get_available_stock(product, outlet)
-            available = available_from_batches if available_from_batches > 0 else product.stock
+            # Sellable stock is always derived from non-expired batches.
+            available = get_sellable_stock(product, outlet)
 
             if available < quantity_in_base_units:
                 raise serializers.ValidationError(
@@ -1051,6 +1048,13 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 except ProductUnit.DoesNotExist:
                     raise serializers.ValidationError(f"Item {idx + 1}: Unit {unit_id} not found or inactive")
 
+            sellable_stock = get_sellable_stock(product, outlet)
+            if sellable_stock < quantity_in_base_units:
+                raise serializers.ValidationError(
+                    f"Item {idx + 1}: Insufficient stock for {product.name}. "
+                    f"Available: {sellable_stock} {product.unit}, Requested: {quantity_in_base_units} {product.unit}"
+                )
+
             line_total = (price * Decimal(quantity)).quantize(Decimal("0.01"))
             computed_subtotal += line_total
 
@@ -1378,16 +1382,9 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # UNITS ONLY ARCHITECTURE: use product/batch-aware stock checks
+            # UNITS ONLY ARCHITECTURE: use strict sellable stock checks
             variation = None
-            try:
-                available_stock = get_available_stock(product, outlet)
-            except Exception:
-                available_stock = 0
-
-            # Fallback to legacy product.stock if no batch stock present
-            if available_stock <= 0:
-                available_stock = product.stock
+            available_stock = get_sellable_stock(product, outlet)
 
             if available_stock < quantity:
                 return Response(

@@ -130,13 +130,34 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     
                 elif movement_type in ['sale', 'transfer_out', 'damage', 'expiry']:
                     # Removing stock - deduct from batches (FIFO)
+                    # Bootstrap legacy stock into a batch if only product.stock exists.
+                    today = timezone.now().date()
+                    available_in_batches = get_available_stock(product, outlet)
+                    if available_in_batches == 0 and product.stock > 0:
+                        bootstrap_batch_number = f"LEGACY-{today.strftime('%Y%m%d')}-{product.id}"
+                        add_stock(
+                            product=product,
+                            outlet=outlet,
+                            quantity=product.stock,
+                            batch_number=bootstrap_batch_number,
+                            expiry_date=today + timedelta(days=365),
+                            user=self.request.user,
+                            reason="Legacy stock bootstrap - migrating product.stock to batch",
+                            movement_type='adjustment',
+                        )
+                        logger.info(
+                            f"Bootstrapped legacy stock: {product.stock} units of "
+                            f"{product.name} at {outlet.name}"
+                        )
+
                     deduct_stock(
                         product=product,
                         outlet=outlet,
                         quantity=quantity,
                         user=self.request.user,
                         reference_id=f"MANUAL-{timezone.now().strftime('%Y%m%d%H%M%S')}",
-                        reason=reason or f"{movement_type} movement"
+                        reason=reason or f"{movement_type} movement",
+                        movement_type=movement_type,
                     )
                     
                     # Movement already created in deduct_stock, just return it
@@ -203,6 +224,9 @@ class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             # Legacy: Save movement without batch logic (for products without variations or track_inventory=False)
             movement = serializer.save(tenant=tenant, user=self.request.user)
         
+        # Ensure create responses serialize the saved model instance,
+        # not serializer.validated_data (which is an OrderedDict).
+        serializer.instance = movement
         return movement
     
     def list(self, request, *args, **kwargs):

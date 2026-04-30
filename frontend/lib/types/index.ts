@@ -149,6 +149,7 @@ export interface Product {
   cost_price?: number
   categoryId?: string
   stock: number
+  sellable_stock?: number
   lowStockThreshold?: number
   is_low_stock?: boolean // Backend-calculated low stock flag
   unit?: string

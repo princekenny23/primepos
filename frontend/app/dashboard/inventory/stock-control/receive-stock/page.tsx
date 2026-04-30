@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
@@ -28,6 +28,7 @@ import Link from "next/link"
 import { useToast } from "@/components/ui/use-toast"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { useBusinessStore } from "@/stores/businessStore"
+import { outletService } from "@/lib/services/outletService"
 import type { Product } from "@/lib/types"
 import { SelectProductModal } from "@/components/modals/select-product-modal"
 
@@ -41,18 +42,33 @@ interface ReceiveItem {
 export default function ReceiveStockPage() {
   const router = useRouter()
   const { toast } = useToast()
-  const { currentOutlet, outlets } = useBusinessStore()
+  const { currentOutlet, outlets: storeOutlets } = useBusinessStore()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  
-  const [receiveFromType, setReceiveFromType] = useState<"warehouse" | "outlet">("warehouse")
-  const [warehouseName, setWarehouseName] = useState("")
+  const [allOutlets, setAllOutlets] = useState<typeof storeOutlets>([])
+
+  useEffect(() => {
+    outletService.list()
+      .then((fetched) => {
+        if (fetched.length > 0) {
+          setAllOutlets(fetched)
+        } else if (storeOutlets.length > 0) {
+          setAllOutlets(storeOutlets)
+        }
+      })
+      .catch((err) => {
+        console.error("[receive-stock] Failed to load outlets:", err)
+        if (storeOutlets.length > 0) setAllOutlets(storeOutlets)
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const availableOutlets = allOutlets.filter(
+    (outlet) => String(outlet.id) !== String(currentOutlet?.id)
+  )
+
   const [fromOutletId, setFromOutletId] = useState("")
   const [receiveItems, setReceiveItems] = useState<ReceiveItem[]>([])
   const [showProductSelector, setShowProductSelector] = useState(false)
-
-  const availableOutlets = useMemo(() => {
-    return outlets.filter((outlet) => String(outlet.id) !== String(currentOutlet?.id))
-  }, [outlets, currentOutlet?.id])
 
   const handleAddItem = (product: Product) => {
     if (receiveItems.some((item) => item.product_id === String(product.id))) {
@@ -99,16 +115,7 @@ export default function ReceiveStockPage() {
 
     const selectedSourceOutlet = availableOutlets.find((outlet) => String(outlet.id) === fromOutletId)
 
-    if (receiveFromType === "warehouse" && !warehouseName.trim()) {
-      toast({
-        title: "Validation Error",
-        description: "Please enter a warehouse name",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (receiveFromType === "outlet" && !fromOutletId) {
+    if (!fromOutletId) {
       toast({
         title: "Validation Error",
         description: "Please select the source outlet",
@@ -161,14 +168,10 @@ export default function ReceiveStockPage() {
           const payload = {
             product_id: item.product_id,
             outlet_id: String(currentOutlet.id),
-            movement_type: receiveFromType === "outlet" ? "transfer_in" : "purchase",
+            movement_type: "transfer_in",
             quantity: Number(item.quantity),
-            reason: receiveFromType === "outlet"
-              ? `Received from outlet ${selectedSourceOutlet?.name || fromOutletId}`
-              : `Received from warehouse ${warehouseName}`,
-            reference_id: receiveFromType === "outlet"
-              ? `outlet:${fromOutletId}`
-              : `warehouse:${warehouseName.trim()}`,
+            reason: `Received from outlet ${selectedSourceOutlet?.name || fromOutletId}`,
+            reference_id: `outlet:${fromOutletId}`,
           }
           console.log("Creating receive movement with payload:", payload)
           return inventoryService.createMovement(payload)
@@ -197,7 +200,7 @@ export default function ReceiveStockPage() {
     <DashboardLayout>
       <PageLayout
         title="Receive Stock"
-        description="Record incoming inventory from another outlet or warehouse"
+        description="Record incoming inventory from another outlet"
         actions={
           <Link href="/dashboard/inventory/stock-control">
             <Button variant="ghost" size="icon">
@@ -225,51 +228,26 @@ export default function ReceiveStockPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="receiveFromType">Receive From *</Label>
-                    <Select
-                      value={receiveFromType}
-                      onValueChange={(value: "warehouse" | "outlet") => {
-                        setReceiveFromType(value)
-                        setFromOutletId("")
-                      }}
-                    >
-                      <SelectTrigger id="receiveFromType">
-                        <SelectValue placeholder="Select source type" />
+                    <Label htmlFor="fromOutlet">From Outlet *</Label>
+                    <Select value={fromOutletId} onValueChange={setFromOutletId}>
+                      <SelectTrigger id="fromOutlet">
+                        <SelectValue placeholder="Select source outlet" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="warehouse">Warehouse</SelectItem>
-                        <SelectItem value="outlet">Other Outlet</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {receiveFromType === "warehouse" ? (
-                    <div className="space-y-2">
-                      <Label htmlFor="warehouse">Warehouse Name *</Label>
-                      <Input
-                        id="warehouse"
-                        placeholder="Enter warehouse name"
-                        value={warehouseName}
-                        onChange={(e) => setWarehouseName(e.target.value)}
-                      />
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <Label htmlFor="fromOutlet">From Outlet *</Label>
-                      <Select value={fromOutletId} onValueChange={setFromOutletId}>
-                        <SelectTrigger id="fromOutlet">
-                          <SelectValue placeholder="Select source outlet" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableOutlets.map((outlet) => (
+                        {availableOutlets.length > 0 ? (
+                          availableOutlets.map((outlet) => (
                             <SelectItem key={String(outlet.id)} value={String(outlet.id)}>
                               {outlet.name}
                             </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
+                          ))
+                        ) : (
+                          <div className="px-2 py-1.5 text-sm text-gray-600">
+                            No other outlets available
+                          </div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -364,9 +342,7 @@ export default function ReceiveStockPage() {
                   <div className="border-t pt-4">
                     <p className="text-sm text-gray-600">Receive From</p>
                     <p className="text-base font-semibold">
-                      {receiveFromType === "warehouse"
-                        ? warehouseName || "Warehouse"
-                        : (availableOutlets.find((outlet) => String(outlet.id) === fromOutletId)?.name || "Other Outlet")}
+                      {availableOutlets.find((outlet) => String(outlet.id) === fromOutletId)?.name || "Select outlet"}
                     </p>
                   </div>
 
