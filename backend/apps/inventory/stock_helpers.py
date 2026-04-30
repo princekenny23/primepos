@@ -134,9 +134,51 @@ def deduct_stock(product, outlet, quantity, user, reference_id, reason='', movem
         expiry_date__gt=today,
         quantity__gt=0
     ).order_by('expiry_date', 'created_at')
-    
-    # Check total available
-    total_available = sum(b.quantity for b in batches)
+
+    # Check total available. If a legacy/non-expiry product has no batches,
+    # fall back to outlet projections so checkout matches the stock value shown in POS.
+    batch_total_available = sum(b.quantity for b in batches)
+    if batch_total_available < quantity and not batches.exists():
+        total_available = get_sellable_stock(product, outlet)
+        if total_available < quantity:
+            raise ValueError(
+                f"Insufficient stock for product. "
+                f"Available: {total_available}, Requested: {quantity}"
+            )
+
+        location_stock, _ = LocationStock.objects.get_or_create(
+            product=product,
+            outlet=outlet,
+            tenant=product.tenant,
+            defaults={'quantity': 0}
+        )
+        next_quantity = max(0, int(location_stock.quantity or 0) - quantity)
+        LocationStock.objects.filter(id=location_stock.id).update(quantity=next_quantity)
+        location_stock.quantity = next_quantity
+
+        from apps.products.models import Product as _Product
+        next_product_stock = max(0, int(getattr(product, 'stock', 0) or 0) - quantity)
+        _Product.objects.filter(id=product.id).update(stock=next_product_stock)
+        product.stock = next_product_stock
+
+        StockMovement.objects.create(
+            tenant=product.tenant,
+            batch=None,
+            product=product,
+            outlet=outlet,
+            user=user,
+            movement_type=movement_type,
+            quantity=quantity,
+            reference_id=reference_id,
+            reason=reason or f"{movement_type.title()} {reference_id}"
+        )
+
+        logger.info(
+            f"Deducted {quantity} from legacy stock projection for {product.name} at {outlet.name}"
+        )
+        return [(None, quantity)]
+
+    total_available = batch_total_available
     if total_available < quantity:
         raise ValueError(
             f"Insufficient stock for product. "
