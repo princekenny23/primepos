@@ -258,7 +258,7 @@ export function RetailPOS() {
     setProductsError(null)
 
     try {
-      const outletId = currentOutlet?.id ? String(currentOutlet.id) : undefined
+      const outletId = outlet?.id ? String(outlet.id) : undefined
       const [productsData, categoriesData] = await Promise.all([
         productService.list({ is_active: true, page, outlet: outletId, limit: 18 }),
         page === 1
@@ -302,7 +302,7 @@ export function RetailPOS() {
   useEffect(() => {
     void fetchProductsAndCategories(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentBusiness, currentOutlet])
+  }, [currentBusiness, currentOutlet, tenantOutlet])
 
   const loadHeldSales = () => {
     if (typeof window === "undefined") return
