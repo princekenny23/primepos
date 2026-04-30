@@ -323,24 +323,10 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         """Add request and outlet to serializer context"""
         context = super().get_serializer_context()
         context['request'] = self.request
-        
-        # Add outlet to context if provided (for stock calculations)
-        # Check query params first, then headers (X-Outlet-ID)
-        outlet_id = self.request.query_params.get('outlet') or self.request.query_params.get('outlet_id')
-        
-        # Check headers if not in query params
-        if not outlet_id:
-            outlet_id = self.request.headers.get('X-Outlet-ID')
-        
-        if outlet_id:
-            from apps.outlets.models import Outlet
-            tenant = getattr(self.request, 'tenant', None) or (self.request.user.tenant if hasattr(self.request, 'user') and self.request.user.is_authenticated else None)
-            if tenant:
-                try:
-                    outlet = Outlet.objects.get(id=outlet_id, tenant=tenant)
-                    context['outlet'] = outlet
-                except (Outlet.DoesNotExist, ValueError, TypeError):
-                    pass
+
+        outlet = self.get_outlet_for_request(self.request)
+        if outlet:
+            context['outlet'] = outlet
         
         return context
     
@@ -1367,19 +1353,10 @@ class ProductUnitViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def get_serializer_context(self):
         """Add outlet context for stock calculations"""
         context = super().get_serializer_context()
-        
-        # Check query params first, then headers (X-Outlet-ID)
-        outlet_id = self.request.query_params.get('outlet') or self.request.query_params.get('outlet_id')
-        if not outlet_id:
-            outlet_id = self.request.headers.get('X-Outlet-ID')
-        
-        if outlet_id:
-            try:
-                from apps.outlets.models import Outlet
-                outlet = Outlet.objects.get(id=outlet_id)
-                context['outlet'] = outlet
-            except Outlet.DoesNotExist:
-                pass
+
+        outlet = self.get_outlet_for_request(self.request)
+        if outlet:
+            context['outlet'] = outlet
         
         return context
     

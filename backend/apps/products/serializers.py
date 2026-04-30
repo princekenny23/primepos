@@ -137,15 +137,11 @@ class ProductSerializer(serializers.ModelSerializer):
         }
     
     def get_is_low_stock(self, obj):
-        """Check if product has low stock - outlet-scoped when outlet is in serializer context.
-
-        Uses the same outlet fallback chain as get_sellable_stock so the two
-        fields are always computed against the same outlet and can never disagree.
-        """
-        outlet = self.context.get('outlet') or getattr(obj, 'outlet', None)
+        """Check if product has low stock for the resolved request outlet only."""
+        outlet = self.context.get('outlet')
         if outlet:
             return obj.get_is_low_stock_for_outlet(outlet)
-        return obj.is_low_stock
+        return False
     
     def get_price(self, obj):
         """Get price from base unit (backward compatibility)"""
@@ -159,7 +155,7 @@ class ProductSerializer(serializers.ModelSerializer):
         """Get outlet sellable stock from non-expired batches only."""
         from apps.inventory.stock_helpers import get_sellable_stock
 
-        outlet = self.context.get('outlet') or getattr(obj, 'outlet', None)
+        outlet = self.context.get('outlet')
         if not outlet:
             return 0
 
