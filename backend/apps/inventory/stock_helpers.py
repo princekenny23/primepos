@@ -13,7 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 def get_sellable_stock(product, outlet):
-    """Return sellable stock from non-expired batches for a product at an outlet."""
+    """Return sellable stock for a product at an outlet.
+
+    Prefer non-expired batch quantities when batch records exist. For legacy or
+    non-expiry products that do not maintain batches, fall back to the
+    product-level stock projection for that outlet so POS surfaces real stock
+    instead of zero.
+    """
     today = timezone.now().date()
     batches = Batch.objects.filter(
         product=product,
@@ -21,7 +27,23 @@ def get_sellable_stock(product, outlet):
         expiry_date__gt=today,
         quantity__gt=0
     )
-    return sum(batch.quantity for batch in batches)
+    batch_total = sum(batch.quantity for batch in batches)
+
+    if batch_total > 0:
+        return batch_total
+
+    has_any_batches = Batch.objects.filter(product=product, outlet=outlet).exists()
+    if has_any_batches:
+        return 0
+
+    location_stock = LocationStock.objects.filter(product=product, outlet=outlet).values_list('quantity', flat=True).first()
+    if location_stock is not None:
+        return location_stock
+
+    if getattr(product, 'outlet_id', None) == getattr(outlet, 'id', None):
+        return int(getattr(product, 'stock', 0) or 0)
+
+    return 0
 
 
 def get_available_stock(unit, outlet):
