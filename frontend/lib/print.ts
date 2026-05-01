@@ -137,7 +137,11 @@ async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
       const response = await fetch(url, { ...init, headers })
       if (!response.ok) {
         const body = await response.text().catch(() => "")
-        console.error(`[Print Agent] ${path} failed:`, { status: response.status, body, url, headers })
+        // Proxy returning 503 on a cloud host is a soft/expected failure — don't log as error.
+        const isSoftFailure = url.startsWith("/") && response.status === 503
+        if (!isSoftFailure) {
+          console.error(`[Print Agent] ${path} failed:`, { status: response.status, body, url, headers })
+        }
         lastError = new Error(`Local Print Agent error (${response.status}): ${body || response.statusText}`)
         continue
       }
@@ -364,32 +368,38 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     payload?.sale?.outlet_id ??
     payload?.sale?.outlet
 
-  // Agent path: always enqueue in backend so connector claims and prints.
+  // Agent path: enqueue in backend so connector claims and prints.
+  // If the backend is unreachable (offline / 503), fall through to direct localhost agent.
   if (shouldQueueForLocalAgent) {
     if (!saleId) {
       throw new Error("Cannot queue print job: missing sale ID")
     }
 
-    const printerName = resolvedOutletId
-      ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
-      : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
+    try {
+      const printerName = resolvedOutletId
+        ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
+        : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
 
-    const resolvedDeviceId = resolvedOutletId ? await resolveDeviceIdForOutlet(resolvedOutletId) : ""
+      const resolvedDeviceId = resolvedOutletId ? await resolveDeviceIdForOutlet(resolvedOutletId) : ""
 
-    const queued: any = await api.post(`/sales/${saleId}/enqueue-print/`, {
-      channel: "agent",
-      printer_name: printerName || "",
-      device_id: resolvedDeviceId,
-      paper_width: "auto",
-    })
+      const queued: any = await api.post(`/sales/${saleId}/enqueue-print/`, {
+        channel: "agent",
+        printer_name: printerName || "",
+        device_id: resolvedDeviceId,
+        paper_width: "auto",
+      })
 
-    console.log("[Print] Enqueued print job:", {
-      saleId,
-      printJobId: queued?.print_job_id,
-      status: queued?.status,
-      receiptNumber: queued?.receipt_number,
-    })
-    return
+      console.log("[Print] Enqueued print job:", {
+        saleId,
+        printJobId: queued?.print_job_id,
+        status: queued?.status,
+        receiptNumber: queued?.receipt_number,
+      })
+      return
+    } catch (enqueueErr) {
+      // Backend is down or unreachable — fall through to direct localhost agent.
+      console.warn("[Print] Backend enqueue failed, falling back to direct local agent:", enqueueErr)
+    }
   }
 
   let printerName: string | null = null
