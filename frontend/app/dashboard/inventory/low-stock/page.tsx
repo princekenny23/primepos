@@ -49,8 +49,10 @@ export default function LowStockPage() {
       // Filter and transform items to show low stock details
       const lowStock = items
         .filter((p: any) => {
+          const sellableStock = Number(p.sellable_stock ?? 0)
+
           // Check product-level low stock
-          const productLow = p.lowStockThreshold && p.stock <= p.lowStockThreshold
+          const productLow = p.lowStockThreshold && sellableStock <= p.lowStockThreshold
           
           // Check variation-level low stock
           const variationLow = p.variations?.some((v: any) => 
@@ -74,7 +76,9 @@ export default function LowStockPage() {
             id: p.id,
             name: p.name,
             sku: p.sku || lowVariation?.sku || "N/A",
-            currentStock: lowVariation ? (lowVariation.total_stock || lowVariation.stock || 0) : (p.stock || 0),
+            currentStock: lowVariation
+              ? (lowVariation.total_stock || lowVariation.stock || 0)
+              : Number(p.sellable_stock ?? 0),
             minStock: lowVariation ? (lowVariation.low_stock_threshold || 0) : (p.lowStockThreshold || 0),
             category: p.category?.name || "General",
             cost: p.cost || p.cost_price || 0,

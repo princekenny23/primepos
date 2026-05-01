@@ -339,10 +339,17 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
  */
 export async function printReceipt(payload: ReceiptPayload, outletId?: number | string): Promise<void> {
   if (typeof window === "undefined") throw new Error("Printing must be initiated from the browser")
+
+  const saleId = String(payload?.sale?.id || "").trim()
+  // Offline sales have IDs generated locally (e.g. "offline-<uuid>") and have no backend record.
+  // Skip all backend API calls for them regardless of network state.
+  const isOfflineSale = saleId.startsWith("offline-") || saleId.startsWith("OFF-")
+
   const channel = getPrintChannelPreference()
   const useMobileFlow = shouldUseBluetoothUsbThermalPrinterPlus(channel)
   const isOfflineBrowser = typeof navigator !== "undefined" && navigator.onLine === false
-  const shouldUseDirectLocalAgent = !useMobileFlow && (isLocalhostBrowser() || isOfflineBrowser)
+  // Force local agent path for offline sales even when the browser reports online (backend may be 503).
+  const shouldUseDirectLocalAgent = !useMobileFlow && (isLocalhostBrowser() || isOfflineBrowser || isOfflineSale)
   const shouldQueueForLocalAgent = !useMobileFlow && !shouldUseDirectLocalAgent
 
   const resolvedOutletId =
@@ -350,8 +357,6 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     payload?.sale?.outlet?.id ??
     payload?.sale?.outlet_id ??
     payload?.sale?.outlet
-
-  const saleId = String(payload?.sale?.id || "").trim()
 
   // Agent path: always enqueue in backend so connector claims and prints.
   if (shouldQueueForLocalAgent) {
@@ -383,18 +388,31 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
 
   let printerName: string | null = null
   if (shouldUseDirectLocalAgent) {
-    printerName = resolvedOutletId
-      ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
-      : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
-
-    if (!printerName) {
-      const found = await scanPrinters(true)
-      if (found && found.length > 0) {
-        printerName = found[0]
-      }
+    // For offline sales skip backend printer lookup entirely — backend may be unreachable.
+    if (!isOfflineSale) {
+      printerName = resolvedOutletId
+        ? await getDefaultPrinterNameForOutlet(resolvedOutletId)
+        : (typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null)
     }
 
     if (!printerName) {
+      if (!isOfflineSale) {
+        // Backend is reachable; try scanning for registered printers.
+        const found = await scanPrinters(true)
+        if (found && found.length > 0) {
+          printerName = found[0]
+        }
+      } else {
+        // Offline sale — only read localStorage, never call backend.
+        try {
+          printerName = typeof window !== "undefined" ? localStorage.getItem("defaultPrinter") : null
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (!printerName && !isOfflineSale) {
       throw new Error(`[Print] No printer found. Check printer settings or ensure Local Print Agent is reachable at ${LOCAL_PRINT_AGENT_URL}`)
     }
   }
@@ -402,7 +420,8 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
   let receiptNumber = String(payload?.sale?.receipt_number || payload?.sale?.id || "")
   let contentBase64 = ""
 
-  if (saleId) {
+  // Offline sales have no backend record — skip ESC/POS API call and build receipt client-side.
+  if (saleId && !isOfflineSale) {
     const backendEscpos = await getBackendEscposPayload(saleId, null)
     if (backendEscpos?.contentBase64) {
       contentBase64 = backendEscpos.contentBase64

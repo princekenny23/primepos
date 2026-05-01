@@ -401,8 +401,16 @@ export class ApiClient {
           }
         }
         
-        // Log full error details for debugging
-        console.error("API Error:", {
+        // Log full error details for debugging. Expected business conflicts
+        // (such as protected references on delete) are warnings, not errors.
+        const isProtectedReferenceConflict =
+          response.status === 409 &&
+          (
+            errorData?.code === "protected_reference" ||
+            String(errorMessage).toLowerCase().includes("cannot delete product")
+          )
+
+        const logPayload = {
           status: response.status,
           statusText: response.statusText,
           endpoint: url,
@@ -410,7 +418,13 @@ export class ApiClient {
           error: errorMessage,
           errorData: errorData,
           // Don't log request body (may contain credentials)
-        })
+        }
+
+        if (isProtectedReferenceConflict) {
+          console.warn("API Business Conflict:", logPayload)
+        } else {
+          console.error("API Error:", logPayload)
+        }
 
         const apiError = new Error(errorMessage) as any
         apiError.status = response.status

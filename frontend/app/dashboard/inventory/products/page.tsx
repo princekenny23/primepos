@@ -57,7 +57,7 @@ import { useTenant } from "@/contexts/tenant-context"
 
 export default function ProductsPage() {
   const { t } = useI18n()
-  const { outlets } = useTenant()
+  const { outlets, currentOutlet: tenantOutlet } = useTenant()
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
@@ -111,9 +111,10 @@ export default function ProductsPage() {
   const [productToOrder, setProductToOrder] = useState<any>(null)
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { toast } = useToast()
+  const outlet = tenantOutlet || currentOutlet
   
   // Determine business type for conditional rendering
-  const outletSegment = getOutletBusinessRouteSegment(currentOutlet, currentBusiness)
+  const outletSegment = getOutletBusinessRouteSegment(outlet, currentBusiness)
   const isWholesaleRetail = outletSegment === "retail"
   const isBar = outletSegment === "bar"
   const isRestaurant = outletSegment === "restaurant"
@@ -191,7 +192,7 @@ export default function ProductsPage() {
     setIsLoading(true)
     try {
       const categoriesPromise = categoryService.list({
-        outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+        outlet: outlet?.id ? String(outlet.id) : undefined,
       })
       const allProducts: any[] = []
       let page = 1
@@ -201,7 +202,7 @@ export default function ProductsPage() {
         const response = await productService.list({
           is_active: true,
           page,
-          outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+          outlet: outlet?.id ? String(outlet.id) : undefined,
         })
         allProducts.push(...(response.results || []))
         next = response.next
@@ -221,23 +222,33 @@ export default function ProductsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, currentOutlet, toast])
+  }, [currentBusiness, outlet, toast])
 
   useEffect(() => {
     loadData()
   }, [loadData])
 
+  const getDisplayStock = (product: any) => {
+    const sellableStock = typeof product.sellable_stock === 'string'
+      ? parseFloat(product.sellable_stock)
+      : product.sellable_stock
+
+    if (sellableStock !== null && sellableStock !== undefined && !Number.isNaN(sellableStock)) {
+      return sellableStock
+    }
+
+    return 0
+  }
+
   const getProductStatus = (product: any) => {
+    const stock = getDisplayStock(product)
+
     // Check if backend already marked it as low stock
     if (product.is_low_stock) {
-      // Check if it's actually out of stock
-      const stock = typeof product.stock === 'string' ? parseFloat(product.stock) : (product.stock || 0)
       if (stock === 0) return "out-of-stock"
       return "low-stock"
     }
-    
-    // Check product-level stock
-    const stock = typeof product.stock === 'string' ? parseFloat(product.stock) : (product.stock || 0)
+
     const lowStockThreshold = typeof product.lowStockThreshold === 'string' 
       ? parseFloat(product.lowStockThreshold) 
       : (product.lowStockThreshold || 0)
@@ -433,18 +444,44 @@ export default function ProductsPage() {
 
     setDeletingProductId(productToDelete.id)
     try {
-      await productService.delete(productToDelete.id)
+      const response: any = await productService.delete(productToDelete.id)
+      const wasArchived = Boolean(response?.archived)
       toast({
-        title: "Product Deleted",
-        description: `${productToDelete.name} has been deleted successfully.`,
+        title: wasArchived ? "Product Archived" : "Product Deleted",
+        description: wasArchived
+          ? (response?.message || `${productToDelete.name} is linked to historical records and was archived.`)
+          : `${productToDelete.name} has been deleted successfully.`,
       })
       // Reload products after deletion
       await handleProductSaved()
     } catch (error: any) {
-      console.error("Failed to delete product:", error)
+      const blockedBy = Array.isArray(error?.data?.blocked_by) ? error.data.blocked_by : []
+      const rawMessage = String(error?.message || "")
+      const isProtectedReference =
+        error?.status === 409 ||
+        error?.data?.code === "protected_reference" ||
+        rawMessage.toLowerCase().includes("protected foreign keys") ||
+        rawMessage.includes("ProtectedError")
+
+      if (isProtectedReference) {
+        console.warn("Delete blocked by protected references:", {
+          productId: productToDelete.id,
+          productName: productToDelete.name,
+          blockedBy,
+        })
+      } else {
+        console.error("Failed to delete product:", error)
+      }
+
+      const protectedMessage = blockedBy.length > 0
+        ? `${productToDelete.name} cannot be deleted because it is linked to ${blockedBy.join(", ")}.`
+        : `${productToDelete.name} cannot be deleted because it is referenced by other records (for example delivery items).`
+
       toast({
-        title: "Delete Failed",
-        description: error.message || "Failed to delete product. Please try again.",
+        title: isProtectedReference ? "Delete Blocked" : "Delete Failed",
+        description: isProtectedReference
+          ? protectedMessage
+          : (error.message || "Failed to delete product. Please try again."),
         variant: "destructive",
       })
     } finally {
@@ -463,12 +500,15 @@ export default function ProductsPage() {
         .map((product) => String(product.id || ""))
         .filter(Boolean)
 
-      const response = await productService.bulkDelete(productIds)
+      const response: any = await productService.bulkDelete(productIds)
       const deletedCount = response?.deleted_count || 0
+      const archivedCount = response?.archived_count || 0
 
       toast({
-        title: "Products Deleted",
-        description: `${deletedCount} product${deletedCount !== 1 ? "s" : ""} deleted successfully.`,
+        title: archivedCount > 0 ? "Products Deleted / Archived" : "Products Deleted",
+        description: archivedCount > 0
+          ? `${deletedCount} deleted, ${archivedCount} archived due to historical links.`
+          : `${deletedCount} product${deletedCount !== 1 ? "s" : ""} deleted successfully.`,
       })
 
       await handleProductSaved()
@@ -504,7 +544,7 @@ export default function ProductsPage() {
             <div className="px-6 py-3 border-b border-gray-300 flex gap-3 justify-end">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" className="border-blue-600 text-blue-600 hover:bg-blue-50 hover:text-blue-700" aria-label="Open product actions">
+                  <Button variant="outline" size="icon" className="border-blue-900 text-blue-900 hover:bg-blue-50 hover:text-blue-900" aria-label="Open product actions">
                     <Menu className="h-4 w-4" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -711,14 +751,14 @@ export default function ProductsPage() {
                         <TableCell>
                           <span className={`px-2 py-1 rounded-full text-xs ${
                             businessFields.is_menu_item 
-                              ? "bg-blue-100 text-blue-800"
+                                ? "bg-blue-100 text-blue-900"
                               : "bg-gray-100 text-gray-800"
                           }`}>
                             {businessFields.is_menu_item ? "Yes" : "No"}
                           </span>
                         </TableCell>
                       )}
-                      <TableCell>{product.stock}</TableCell>
+                      <TableCell>{getDisplayStock(product)}</TableCell>
                       <TableCell>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -815,7 +855,7 @@ export default function ProductsPage() {
                       paginatedProducts.map((product) => {
                         const status = getProductStatus(product)
                         const categoryName = product.category?.name || (product.categoryId ? categories.find(c => c.id === product.categoryId)?.name : "N/A")
-                        const stock = typeof product.stock === 'string' ? parseFloat(product.stock) : (product.stock || 0)
+                        const stock = getDisplayStock(product)
                         const threshold = typeof product.lowStockThreshold === 'string' 
                           ? parseFloat(product.lowStockThreshold) 
                           : (product.lowStockThreshold || 0)

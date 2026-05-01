@@ -8,6 +8,7 @@ from .models import Product, Category, ProductUnit
 from .serializers import ProductSerializer, CategorySerializer, ProductUnitSerializer
 from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from decimal import Decimal
 import logging
 import pandas as pd
@@ -384,6 +385,14 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         # Save with both tenant and outlet
         product = serializer.save(tenant=tenant, outlet=outlet)
+
+        from apps.inventory.models import LocationStock
+        LocationStock.objects.update_or_create(
+            tenant=tenant,
+            product=product,
+            outlet=outlet,
+            defaults={'quantity': max(0, int(product.stock or 0))}
+        )
         
         # UNITS ONLY ARCHITECTURE - No variations
         # Units will be created separately via ProductUnitViewSet
@@ -476,6 +485,39 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 {'message': f'Product "{product_name}" has been deleted successfully.'},
                 status=status.HTTP_200_OK
             )
+        except ProtectedError as e:
+            blockers = sorted({obj.__class__.__name__ for obj in e.protected_objects})
+            if instance.is_active:
+                instance.is_active = False
+                instance.save(update_fields=['is_active', 'updated_at'])
+                logger.info(
+                    f"Hard delete blocked for product {product_name} (ID: {product_id}); archived instead due to protected references: {blockers}"
+                )
+                return Response(
+                    {
+                        'message': f'Product "{product_name}" is linked to historical records and was archived instead of deleted.',
+                        'archived': True,
+                        'code': 'protected_reference_archived',
+                        'product_id': product_id,
+                        'product_name': product_name,
+                        'blocked_by': blockers,
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            logger.warning(
+                f"Delete blocked for already archived product {product_name} (ID: {product_id}) due to protected references: {blockers}"
+            )
+            return Response(
+                {
+                    'error': f'Cannot delete product "{product_name}" because it is referenced by other records.',
+                    'code': 'protected_reference',
+                    'product_id': product_id,
+                    'product_name': product_name,
+                    'blocked_by': blockers,
+                },
+                status=status.HTTP_409_CONFLICT
+            )
         except Exception as e:
             logger.error(f"Error deleting product {product_id}: {str(e)}", exc_info=True)
             return Response(
@@ -528,34 +570,97 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Delete products
+        # Delete products (best-effort per product to avoid all-or-nothing failures)
         deleted_count = 0
         deleted_names = []
-        
-        try:
-            with transaction.atomic():
-                for product in products_to_delete:
-                    product_name = product.name
+        archived_count = 0
+        archived_products = []
+        protected_products = []
+        failed_products = []
+
+        for product in products_to_delete:
+            product_id = product.id
+            product_name = product.name
+            try:
+                with transaction.atomic():
                     product.delete()
-                    deleted_count += 1
-                    deleted_names.append(product_name)
-                    logger.info(f"Bulk deleted product: {product_name} (ID: {product.id}) by user: {user.email}")
-        except Exception as e:
-            logger.error(f"Error during bulk delete: {str(e)}", exc_info=True)
-            return Response(
-                {'error': f'Failed to delete products: {str(e)}'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+                deleted_count += 1
+                deleted_names.append(product_name)
+                logger.info(f"Bulk deleted product: {product_name} (ID: {product_id}) by user: {user.email}")
+            except ProtectedError as e:
+                blockers = sorted({obj.__class__.__name__ for obj in e.protected_objects})
+                if product.is_active:
+                    try:
+                        with transaction.atomic():
+                            product.is_active = False
+                            product.save(update_fields=['is_active', 'updated_at'])
+                        archived_count += 1
+                        archived_products.append({
+                            'id': product_id,
+                            'name': product_name,
+                            'blocked_by': blockers,
+                        })
+                        logger.info(
+                            f"Bulk hard delete blocked for product {product_name} (ID: {product_id}); archived instead due to protected references: {blockers}"
+                        )
+                    except Exception as archive_error:
+                        failed_products.append({
+                            'id': product_id,
+                            'name': product_name,
+                            'error': f"archive_failed: {str(archive_error)}",
+                        })
+                        logger.error(
+                            f"Bulk delete could not archive protected product {product_name} (ID: {product_id}): {str(archive_error)}",
+                            exc_info=True,
+                        )
+                else:
+                    protected_products.append({
+                        'id': product_id,
+                        'name': product_name,
+                        'blocked_by': blockers,
+                    })
+                    logger.warning(
+                        f"Bulk delete blocked for already archived product {product_name} (ID: {product_id}) due to protected references: {blockers}"
+                    )
+            except Exception as e:
+                failed_products.append({
+                    'id': product_id,
+                    'name': product_name,
+                    'error': str(e),
+                })
+                logger.error(
+                    f"Error deleting product {product_name} (ID: {product_id}) during bulk delete: {str(e)}",
+                    exc_info=True,
+                )
         
         response_data = {
-            'success': True,
+            'success': deleted_count > 0 or archived_count > 0,
             'deleted_count': deleted_count,
             'deleted_products': deleted_names,
         }
+
+        if archived_count:
+            response_data['archived_count'] = archived_count
+            response_data['archived_products'] = archived_products
         
         if products_not_found:
             response_data['not_found'] = list(products_not_found)
             response_data['warning'] = f'{len(products_not_found)} product(s) were not found or do not belong to your tenant.'
+
+        if protected_products:
+            response_data['protected_count'] = len(protected_products)
+            response_data['protected_products'] = protected_products
+
+        if failed_products:
+            response_data['failed_count'] = len(failed_products)
+            response_data['failed_products'] = failed_products
+
+        if protected_products or failed_products or archived_count:
+            response_data['warning'] = (
+                f"Deleted {deleted_count} product(s). "
+                f"Archived {archived_count} protected product(s). "
+                f"Skipped {len(protected_products)} protected and {len(failed_products)} failed product(s)."
+            )
         
         return Response(response_data, status=status.HTTP_200_OK)
     
@@ -1060,9 +1165,15 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                                 setattr(product, key, value)
                         product.save()
                     
-                    # Now process variations for this product
                     from apps.inventory.models import LocationStock
-                    from apps.outlets.models import Outlet
+                    LocationStock.objects.update_or_create(
+                        tenant=tenant,
+                        product=product,
+                        outlet=outlet,
+                        defaults={'quantity': max(0, int(product.stock or 0))}
+                    )
+
+                    # Now process variations for this product
                     
                     for var_idx, (row_idx, row) in enumerate(rows):
                         var_row_num = row_idx + 2

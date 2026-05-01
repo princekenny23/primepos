@@ -67,7 +67,6 @@ import {
   Table2, Armchair, List, AlertCircle, Check, Trash2,
   RotateCcw, Percent, Pencil,
   Wallet, ShieldAlert, XCircle, Zap, History, Tag, PauseCircle, Truck, Eye, EyeOff,
-  ChevronLeft, ChevronRight
 } from "lucide-react"
 import { CloseRegisterModal } from "@/components/modals/close-register-modal"
 import { PaymentPopup } from "@/components/pos/payment-popup"
@@ -143,10 +142,7 @@ export function BarPOS() {
   // Products
   const [products, setProducts] = useState<Product[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
-  const [isLoadingNextProductsPage, setIsLoadingNextProductsPage] = useState(false)
   const [productsError, setProductsError] = useState<string | null>(null)
-  const [productsPage, setProductsPage] = useState(1)
-  const [hasNextProductsPage, setHasNextProductsPage] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   const [searchResults, setSearchResults] = useState<Product[]>([])
@@ -262,52 +258,40 @@ export function BarPOS() {
 
   // ==================== Data Loading ====================
 
-  const loadProducts = useCallback(async (page: number = 1) => {
+  const loadProducts = useCallback(async (_legacyPageArg?: number) => {
     if (!currentBusiness) return
 
-    if (page <= 1) {
-      setIsLoadingProducts(true)
-    } else {
-      setIsLoadingNextProductsPage(true)
-    }
+    setIsLoadingProducts(true)
     setProductsError(null)
 
     try {
-      const response = await productService.list({
-        is_active: true,
-        page,
-        outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
-      })
-      const productsList = response.results || []
-      setProducts(productsList)
-      setProductsPage(page)
-      setHasNextProductsPage(Boolean(response.next))
+      const outletId = currentOutlet?.id ? String(currentOutlet.id) : undefined
+      const allProducts: Product[] = []
+      let page = 1
+      let hasNext = true
+
+      while (hasNext) {
+        const response: any = await productService.list({
+          is_active: true,
+          page,
+          outlet: outletId,
+          limit: 100,
+        })
+        const productsList = Array.isArray(response?.results) ? response.results : []
+        allProducts.push(...productsList)
+        hasNext = Boolean(response?.next)
+        page += 1
+      }
+
+      setProducts(allProducts)
     } catch (error: any) {
       console.error("Failed to load products:", error)
       setProductsError("Failed to load products.")
-      if (page <= 1) {
-        setProducts([])
-        setProductsPage(1)
-        setHasNextProductsPage(false)
-      }
+      setProducts([])
     } finally {
-      if (page <= 1) {
-        setIsLoadingProducts(false)
-      } else {
-        setIsLoadingNextProductsPage(false)
-      }
+      setIsLoadingProducts(false)
     }
   }, [currentBusiness, currentOutlet])
-
-  const handleNextProductsPage = useCallback(() => {
-    if (!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage) return
-    loadProducts(productsPage + 1)
-  }, [hasNextProductsPage, isLoadingNextProductsPage, isLoadingProducts, loadProducts, productsPage])
-
-  const handlePreviousProductsPage = useCallback(() => {
-    if (productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage) return
-    loadProducts(productsPage - 1)
-  }, [isLoadingNextProductsPage, isLoadingProducts, loadProducts, productsPage])
 
   const loadCategories = useCallback(async () => {
     setIsLoadingCategories(true)
@@ -1588,7 +1572,7 @@ export function BarPOS() {
                       <div className="flex flex-col items-center justify-center h-64">
                         <AlertCircle className="h-8 w-8 text-destructive mb-2" />
                         <p className="text-destructive mb-2">{productsError}</p>
-                        <Button variant="outline" onClick={() => loadProducts(1)}>Retry</Button>
+                        <Button variant="outline" onClick={() => { void loadProducts() }}>Retry</Button>
                       </div>
                     ) : filteredProducts.length === 0 ? (
                       <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
@@ -1631,32 +1615,6 @@ export function BarPOS() {
                       </div>
                     )}
                   </ScrollArea>
-                  <div className="absolute bottom-4 right-4 flex gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="shadow-lg"
-                      onClick={handlePreviousProductsPage}
-                      disabled={productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage}
-                      title={productsPage > 1 ? "Load previous products" : "Already first page"}
-                      aria-label="Previous products"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="shadow-lg"
-                      onClick={handleNextProductsPage}
-                      disabled={!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage}
-                      title={hasNextProductsPage ? "Load next products" : "No more products"}
-                      aria-label={isLoadingNextProductsPage ? "Loading products" : "Next products"}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
                 </div>
               </div>
             </div>

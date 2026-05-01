@@ -52,8 +52,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  ChevronLeft,
-  ChevronRight,
   History,
   Lock,
   PauseCircle,
@@ -141,10 +139,7 @@ export function RetailPOS() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [isLoadingProducts, setIsLoadingProducts] = useState(true)
-  const [isLoadingNextProductsPage, setIsLoadingNextProductsPage] = useState(false)
   const [productsError, setProductsError] = useState<string | null>(null)
-  const [productsPage, setProductsPage] = useState(1)
-  const [hasNextProductsPage, setHasNextProductsPage] = useState(false)
   const [showUnitSelector, setShowUnitSelector] = useState(false)
   const [selectedProductForUnit, setSelectedProductForUnit] = useState<any>(null)
   const [showUnitModal, setShowUnitModal] = useState(false)
@@ -244,63 +239,46 @@ export function RetailPOS() {
       .slice(0, 16) // Limit to 16 items for quick selection
   }, [products, selectedCategory])
 
-  const fetchProductsAndCategories = async (page: number = 1) => {
+  const fetchProductsAndCategories = async () => {
     if (!currentBusiness) {
       setIsLoadingProducts(false)
       return
     }
 
-    if (page <= 1) {
-      setIsLoadingProducts(true)
-    } else {
-      setIsLoadingNextProductsPage(true)
-    }
+    setIsLoadingProducts(true)
     setProductsError(null)
 
     try {
       const outletId = outlet?.id ? String(outlet.id) : undefined
-      const [productsData, categoriesData] = await Promise.all([
-        productService.list({ is_active: true, page, outlet: outletId, limit: 18 }),
-        page === 1
-          ? categoryService.list({ outlet: outletId })
-          : Promise.resolve(categories.filter((c) => c !== "all").map((name) => ({ name } as any))),
-      ])
-      setProducts(productsData.results || productsData)
-      setProductsPage(page)
-      setHasNextProductsPage(Boolean((productsData as any).next))
-      if (page === 1) {
-        setCategories(["all", ...(categoriesData.map((c: any) => c.name) || [])])
+      const categoriesPromise = categoryService.list({ outlet: outletId })
+
+      const allProducts: Product[] = []
+      let page = 1
+      let hasNext = true
+
+      while (hasNext) {
+        const productsData: any = await productService.list({ is_active: true, page, outlet: outletId, limit: 100 })
+        const pageItems = Array.isArray(productsData?.results) ? productsData.results : []
+        allProducts.push(...pageItems)
+        hasNext = Boolean(productsData?.next)
+        page += 1
       }
+
+      const categoriesData = await categoriesPromise
+      setProducts(allProducts)
+      setCategories(["all", ...(categoriesData.map((c: any) => c.name) || [])])
     } catch (error: any) {
       console.error("Failed to load products:", error)
       setProductsError("Failed to load products. Please refresh the page.")
-      if (page <= 1) {
-        setProducts([])
-        setCategories(["all"])
-        setProductsPage(1)
-        setHasNextProductsPage(false)
-      }
+      setProducts([])
+      setCategories(["all"])
     } finally {
-      if (page <= 1) {
-        setIsLoadingProducts(false)
-      } else {
-        setIsLoadingNextProductsPage(false)
-      }
+      setIsLoadingProducts(false)
     }
   }
 
-  const handleNextProductsPage = () => {
-    if (!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage) return
-    void fetchProductsAndCategories(productsPage + 1)
-  }
-
-  const handlePreviousProductsPage = () => {
-    if (productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage) return
-    void fetchProductsAndCategories(productsPage - 1)
-  }
-
   useEffect(() => {
-    void fetchProductsAndCategories(1)
+    void fetchProductsAndCategories()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBusiness, currentOutlet, tenantOutlet])
 
@@ -1433,32 +1411,6 @@ export function RetailPOS() {
                   ) => handleProductGridAdd(product as any, undefined, unit as any, quantity)}
                 />
               )}
-              <div className="absolute bottom-4 right-4 flex gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shadow-lg"
-                  onClick={handlePreviousProductsPage}
-                  disabled={productsPage <= 1 || isLoadingProducts || isLoadingNextProductsPage}
-                  title={productsPage > 1 ? "Load previous products" : "Already first page"}
-                  aria-label="Previous products"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shadow-lg"
-                  onClick={handleNextProductsPage}
-                  disabled={!hasNextProductsPage || isLoadingProducts || isLoadingNextProductsPage}
-                  title={hasNextProductsPage ? "Load next products" : "No more products"}
-                  aria-label={isLoadingNextProductsPage ? "Loading products" : "Next products"}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              </div>
             </div>
           </div>
 
@@ -1531,7 +1483,18 @@ export function RetailPOS() {
           {/* Cart Header */}
           <div className="p-2 border-b space-y-1.5">
             <div className="grid grid-cols-3 items-center">
-              <div className="font-semibold">Cart ({cartItemCount})</div>
+              <div className="flex items-center gap-2">
+                <div className="font-semibold">Cart ({cartItemCount})</div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => clearCart()}
+                  disabled={cartItemCount === 0}
+                >
+                  Clear
+                </Button>
+              </div>
               <div className="text-center">
                 {tillName && (
                   <span className="font-bold text-sm">

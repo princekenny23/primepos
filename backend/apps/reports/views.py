@@ -139,6 +139,10 @@ def products_report(request):
     outlet_id = get_outlet_id_from_request(request)
     if not outlet_id:
         return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
+
+    from apps.outlets.models import Outlet
+    from apps.inventory.stock_helpers import get_sellable_stock
+    outlet = Outlet.objects.filter(id=outlet_id, tenant=tenant).first()
     
     start_date = request.query_params.get('start_date')
     end_date = request.query_params.get('end_date')
@@ -199,7 +203,7 @@ def products_report(request):
             'category': p.category.name if p.category else 'Uncategorized',
             'total_sold': float(p.total_sold),
             'total_revenue': float(p.total_revenue_ann),
-            'current_stock': p.stock,
+            'current_stock': get_sellable_stock(p, outlet) if outlet else 0,
             'is_low_stock': p.is_low_stock,
         }
         for p in page_obj

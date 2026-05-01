@@ -383,8 +383,8 @@ export const productService = {
     }
   },
 
-  async delete(id: string): Promise<void> {
-    await api.delete(apiEndpoints.products.delete(id))
+  async delete(id: string): Promise<{ message?: string; archived?: boolean; code?: string } | null> {
+    return await api.delete<any>(apiEndpoints.products.delete(id))
   },
 
   async getCategories(filters?: CategoryFilters): Promise<Category[]> {
@@ -434,6 +434,8 @@ export const productService = {
     success: boolean
     deleted_count: number
     deleted_products: string[]
+    archived_count?: number
+    archived_products?: Array<{ id: number; name: string }>
     not_found?: number[]
     warning?: string
   }> {
