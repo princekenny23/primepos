@@ -366,6 +366,10 @@ export function SingleProductPOS() {
     setIsProcessingPayment(true)
     try {
       const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+      const supportedOfflineMethods = ["cash", "card", "mobile", "tab", "credit"] as const
+      const offlinePaymentMethod = supportedOfflineMethods.includes(paymentMethod as any)
+        ? (paymentMethod as (typeof supportedOfflineMethods)[number])
+        : "cash"
 
       const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
 
@@ -384,11 +388,11 @@ export function SingleProductPOS() {
             tax: 0,
             discount: 0,
             total: cartTotal,
-            payment_method: paymentMethod,
+            payment_method: offlinePaymentMethod,
             notes: "Offline sale completed from single product POS.",
           },
-          cashReceived: paymentMethod === "cash" ? Number(amount || cartTotal) : 0,
-          changeGiven: paymentMethod === "cash" ? Math.max(0, Number(amount || cartTotal) - cartTotal) : 0,
+          cashReceived: offlinePaymentMethod === "cash" ? Number(amount || cartTotal) : 0,
+          changeGiven: offlinePaymentMethod === "cash" ? Math.max(0, Number(amount || cartTotal) - cartTotal) : 0,
           customerName: selectedCustomer?.name || null,
           items: cart.map((item) => ({
             id: String(item.id),
