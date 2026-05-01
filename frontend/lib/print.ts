@@ -123,7 +123,13 @@ async function resolveDeviceIdForOutlet(outletId: number | string): Promise<stri
 
 async function agentFetch(path: string, init?: RequestInit): Promise<Response> {
   const headers = { ...buildAgentHeaders(), ...(init?.headers || {}) }
-  const targets = [`${LOCAL_PRINT_PROXY_BASE}${path}`, `${LOCAL_PRINT_AGENT_URL}${path}`]
+  // When the browser is offline the cloud proxy will always reject with
+  // ERR_INTERNET_DISCONNECTED before we ever reach the local agent.
+  // Skip it and go straight to the local agent URL in that case.
+  const isOffline = typeof navigator !== "undefined" && navigator.onLine === false
+  const targets = isOffline
+    ? [`${LOCAL_PRINT_AGENT_URL}${path}`]
+    : [`${LOCAL_PRINT_PROXY_BASE}${path}`, `${LOCAL_PRINT_AGENT_URL}${path}`]
   let lastError: Error | null = null
 
   for (const url of targets) {
