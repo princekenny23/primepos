@@ -370,10 +370,6 @@ export function SingleProductPOS() {
       const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
 
       if (isOfflineCheckout) {
-        if (paymentMethod !== "cash") {
-          throw new Error("Only cash payments can be completed fully offline.")
-        }
-
         const offlineSale = await completeOfflineCashSale({
           saleData: {
             outlet: String(currentOutlet.id),
@@ -388,11 +384,11 @@ export function SingleProductPOS() {
             tax: 0,
             discount: 0,
             total: cartTotal,
-            payment_method: "cash",
-            notes: "Offline cash sale completed from single product POS.",
+            payment_method: paymentMethod,
+            notes: "Offline sale completed from single product POS.",
           },
-          cashReceived: Number(amount || cartTotal),
-          changeGiven: Math.max(0, Number(amount || cartTotal) - cartTotal),
+          cashReceived: paymentMethod === "cash" ? Number(amount || cartTotal) : 0,
+          changeGiven: paymentMethod === "cash" ? Math.max(0, Number(amount || cartTotal) - cartTotal) : 0,
           customerName: selectedCustomer?.name || null,
           items: cart.map((item) => ({
             id: String(item.id),

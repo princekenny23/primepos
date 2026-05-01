@@ -2447,10 +2447,6 @@ export function RestaurantPOS() {
             setIsProcessing(true)
             try {
               if (isOfflineCheckout) {
-                if (paymentMethod !== "cash") {
-                  throw new Error("Only cash payments can be completed fully offline.")
-                }
-
                 const subtotal = Math.round(cartSubtotal * 100) / 100
                 const discount = Math.round(discountAmount * 100) / 100
                 const tax = 0
@@ -2473,11 +2469,11 @@ export function RestaurantPOS() {
                     tax,
                     discount,
                     total,
-                    payment_method: "cash",
-                    notes: "Offline cash sale completed from Restaurant POS.",
+                    payment_method: paymentMethod,
+                    notes: "Offline sale completed from Restaurant POS.",
                   },
-                  cashReceived: Number(amount || total),
-                  changeGiven: Number(change || 0),
+                  cashReceived: paymentMethod === "cash" ? Number(amount || total) : 0,
+                  changeGiven: paymentMethod === "cash" ? Number(change || 0) : 0,
                   customerName: selectedCustomer?.name || null,
                   items: cart.map((item, idx) => ({
                     id: String(item.id || `${item.productId}-${idx}`),

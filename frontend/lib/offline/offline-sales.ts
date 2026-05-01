@@ -23,7 +23,7 @@ export interface OfflineCompletedSale {
   business_name: string | null
   outlet_name: string | null
   cashier_name: string | null
-  payment_method: "cash"
+  payment_method: "cash" | "card" | "mobile" | "tab" | "credit"
   subtotal: number
   tax: number
   discount: number
@@ -166,7 +166,7 @@ export async function completeOfflineCashSale(input: {
     business_name: businessName,
     outlet_name: outletName,
     cashier_name: cashierName,
-    payment_method: "cash",
+    payment_method: (input.saleData.payment_method as "cash" | "card" | "mobile" | "tab" | "credit") || "cash",
     subtotal: Number(input.saleData.subtotal || 0),
     tax: Number(input.saleData.tax || 0),
     discount: Number(input.saleData.discount || 0),
