@@ -359,6 +359,144 @@ PrimePOS includes a distribution module for businesses that need vehicle, driver
 
 Use the delivery assignment screen, vehicles page, and active trip table.
 
+## Video Reel Requirements
+
+### Retail / Wholesale Marketing Reel
+
+**Goal**: Position PrimePOS as the fast, reliable POS for retail and wholesale businesses that need speed, inventory control, customer credit, and sales visibility.
+
+**Duration**: 25–30 seconds
+
+**Format**: social reel / short animation for LinkedIn, WhatsApp, Instagram, TikTok.
+
+**Storyboard**:
+1. **Intro problem shot (0-4s)**
+   - Visual: busy cashier, long queue, paper ledger, customer waiting.
+   - Text overlay: “Slow checkout. Stock guesswork. Lost sales.”
+   - Voiceover: “Retail and wholesale businesses lose time and money when the till, stockroom, and customer ledger are not connected.”
+
+2. **PrimePOS arrives (4-8s)**
+   - Visual: screen wipes to PrimePOS dashboard, fast checkout screen, inventory card.
+   - Text overlay: “One system for sales, stock, and customer credit.”
+   - Voiceover: “PrimePOS brings checkout, inventory, and customer accounts together in one smart system.”
+
+3. **Key benefit scenes (8-18s)**
+   - Scene A: fast scan checkout screen, totals updating instantly.
+   - Scene B: inventory stock levels dropping and low-stock alert popping up.
+   - Scene C: customer credit profile with outstanding balance and purchase history.
+   - Text bullets: “Fast checkout”, “Real-time stock”, “Customer credit control”, “Quotation-ready orders”.
+   - Voiceover: “Process sales quickly, track stock in real time, and keep customer accounts under control.”
+
+4. **Business impact (18-24s)**
+   - Visual: happy store owner checking a sales summary, chart rising, invoice ready.
+   - Text overlay: “Sell smarter. Manage better. Grow faster.”
+   - Voiceover: “From mini-market to wholesale house, PrimePOS helps you sell smarter and manage every transaction clearly.”
+
+5. **CTA / closing (24-30s)**
+   - Visual: logo, branded domain, button-style CTA.
+   - Text overlay: “Book a demo” / “Start your store today” / “primepos.africa”
+   - Voiceover: “PrimePOS. One system for retail and wholesale success.”
+
+**Animation & style**:
+- Use a clean brand palette with strong contrasts: teal/blue highlights, white interface cards, warm accent color for CTA.
+- Keep motion smooth: sliding screens, fast text reveals, inventory counters animating up/down.
+- Use vector-style icons for shopping cart, barcode, warehouse box, customer profile.
+- Add subtle product shots or simple retail storefront illustrations.
+
+**Screenshot / asset requirements**:
+- POS checkout screen with product search and payment buttons
+- Inventory dashboard with low-stock notification
+- Customer account/credit ledger view
+- Sales summary chart or daily totals card
+- Business owner / store front visual concept
+- PrimePOS logo and website URL
+
+**Smart production notes**:
+- Use concise text: 3–5 words per overlay block.
+- Keep pace quick but readable.
+- Use a modern audio track with steady energy and light percussion.
+- Include brand credibility line if possible: “Designed for African retail and wholesale teams.”
+
+### Bar / Lounge Marketing Reel
+
+**Goal**: Show how PrimePOS helps bars and lounges manage tabs, tables, fast service, and bar stock without losing money.
+
+**Duration**: 25–30 seconds
+
+**Format**: social reel / short animation for hospitality audiences.
+
+**Storyboard**:
+1. **Intro problem shot (0-4s)**
+   - Visual: bartender struggling with paper tabs, confused screen, queue at bar.
+   - Text overlay: “Tabs, orders, stock… all mixed up.”
+   - Voiceover: “Bar service can be fast, but tracking tabs, tables, and stock is still too slow.”
+
+2. **PrimePOS enters (4-8s)**
+   - Visual: clean bar POS interface appears, bartender tapping drink order.
+   - Text overlay: “Stay in control from bar to till.”
+   - Voiceover: “PrimePOS gives bartenders one interface to manage tabs, tables, and drink stock.”
+
+3. **Key benefit scenes (8-18s)**
+   - Scene A: open tab list with customer names and running totals.
+   - Scene B: bar table layout with active service status.
+   - Scene C: stock alert for drinks and mixers.
+   - Text bullets: “Open tabs”, “Table status”, “Faster billing”, “Drink stock visibility”.
+   - Voiceover: “Open tabs, close sales quickly, and keep drink stock visible so service stays smooth.”
+
+4. **Business impact (18-24s)**
+   - Visual: bartender smiling, happy guests, quick receipt print or mobile order success.
+   - Text overlay: “Faster service. Better control. Higher revenue.”
+   - Voiceover: “Serve more customers, reduce mistakes, and keep the bar moving all night.”
+
+5. **CTA / closing (24-30s)**
+   - Visual: PrimePOS logo, bar icon, website or booking CTA.
+   - Text overlay: “Book bar setup” / “See the bar POS in action” / “primepos.africa”
+   - Voiceover: “PrimePOS — built for bars and lounges that want fast, accurate service.”
+
+**Animation & style**:
+- Use darker accent tones with glowing highlights for a premium bar feel.
+- Animate tab cards, table tiles, and drink icons with fluid motion.
+- Include subtle neon glow or backlit bar imagery.
+- Use icons for drink glass, tab, table, and stock bottle.
+
+**Screenshot / asset requirements**:
+- Bar tab management screen with open tabs and totals
+- Bar table layout or active seat map
+- Drink item stock dashboard or low-stock alert
+- Checkout/billing summary for a bar sale
+- Bar scene or bartender illustration
+- PrimePOS bar-focused tagline and CTA
+
+**Smart production notes**:
+- Use short, service-oriented phrases.
+- Keep animation comfortable for hospitality viewers: clear, polished, fast enough for social.
+- Choose upbeat lounge-style music with energy but not too aggressive.
+- Show how the system makes the bartender’s job easier, not more complex.
+
+### Video Production Deliverables
+
+For both reels, deliver these assets:
+- Storyboard frames for each scene
+- Voiceover script and timing guide
+- On-screen text overlays and captions
+- Motion direction notes for animation transitions
+- Screenshot/asset list for UI and lifestyle visuals
+- Final CTA card with website and brand lockup
+- Suggested export formats: MP4 for social, 1080x1920 vertical, 30 fps
+
+### Recommended Messaging Summary
+
+For retail/wholesale:
+- “Fast checkout, real-time stock, customer credit control.”
+- “From mini-markets to distributors, one system keeps sales and stock synced.”
+- “PrimePOS helps you sell smarter and reduce stock loss.”
+
+For bar/lounges:
+- “Open tabs, manage tables, close bills faster.”
+- “One bar system for drink stock, service speed, and accurate tabs.”
+- “PrimePOS keeps your bar service smooth and your cash clear.”
+
+
 ## Management And Back Office Copy
 
 ### Headline

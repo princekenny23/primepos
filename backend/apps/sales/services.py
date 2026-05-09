@@ -503,6 +503,14 @@ class ReceiptService:
         # ESC/POS init
         payload = bytearray()
         payload.extend(b"\x1b@")  # initialize
+        
+        # Set print area width based on paper width
+        resolved_width = resolve_paper_width()
+        if resolved_width == '58':
+            payload.extend(b"\x1dW\xce\x01")  # GS W: set print area width to 462 dots (58mm)
+        elif resolved_width == '80':
+            payload.extend(b"\x1dW\x80\x02")  # GS W: set print area width to 640 dots (80mm)
+        
         currency = sale.tenant.currency if sale.tenant and sale.tenant.currency else "MWK"
         for line in ReceiptService._build_escpos_receipt_lines(
             sale=sale,
