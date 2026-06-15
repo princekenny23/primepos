@@ -181,55 +181,8 @@ export default function LoginPage() {
   ]
 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-gray-100">
-      {/* Real app shell — sidebar + topnav, non-interactive */}
-      <div className="absolute inset-0 pointer-events-none select-none">
-        {/* Sidebar — matches real: w-20 bg-blue-900 */}
-        <div className="absolute left-0 top-0 bottom-0 w-20 bg-blue-900 flex flex-col z-10">
-          {/* Logo */}
-          <div className="px-2 py-3 flex items-center justify-center">
-            <img src="/icon.jpg" alt="PrimePOS" className="h-10 w-10 rounded-md object-cover" />
-          </div>
-          {/* Nav items */}
-          <nav className="flex-1 p-2 space-y-1 overflow-hidden border-r border-blue-800">
-            {bgNavItems.map((item, i) => (
-              <div
-                key={i}
-                className={`flex flex-col items-center justify-center gap-1.5 px-2 py-3 rounded-lg min-h-[72px] ${
-                  i === 0 ? "bg-white text-blue-900" : "text-blue-100"
-                }`}
-              >
-                <item.icon className="h-5 w-5 flex-shrink-0" />
-                <span className="text-[10px] leading-tight text-center">{item.label}</span>
-              </div>
-            ))}
-          </nav>
-        </div>
-
-        {/* Topnav — matches real: bg-blue-900 text-white h-14 left-20 */}
-        <div className="absolute top-0 left-20 right-0 h-14 bg-blue-900 border-b border-blue-800 flex items-center px-6 gap-4 z-10">
-          <div className="text-sm font-medium text-white opacity-70">PrimePOS</div>
-          <div className="flex items-center gap-2 text-blue-200 text-sm opacity-70">
-            <Store className="h-4 w-4" />
-            <span>Main Outlet</span>
-          </div>
-          <div className="ml-auto flex items-center gap-3">
-            <div className="flex items-center gap-1.5 border border-blue-600 rounded-full px-3 py-1 text-xs text-white opacity-60">
-              <span className="h-2 w-2 rounded-full bg-green-400 inline-block" />
-              PA Connected
-            </div>
-            <Bell className="h-5 w-5 text-blue-200 opacity-60" />
-            <div className="h-8 w-8 rounded-full bg-blue-700 flex items-center justify-center opacity-70">
-              <User className="h-4 w-4 text-white" />
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Very subtle overlay so modal stands out */}
-      <div className="absolute inset-0 bg-white/20 backdrop-blur-[1px]" />
-
-      {/* Login modal */}
+    <div className="min-h-screen flex items-center justify-center relative overflow-hidden">
+      {/* Login modal (standalone) */}
       <div className="relative z-10 w-full max-w-md mx-auto px-4">
         <div className="rounded-2xl bg-blue-900 shadow-2xl border border-blue-800 overflow-hidden">
           {/* Header band */}
