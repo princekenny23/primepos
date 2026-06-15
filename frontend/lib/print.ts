@@ -168,13 +168,29 @@ function escposBase64ToPrintableText(contentBase64: string): string {
   }
 }
 
+async function getOutletPaperWidth(outletId?: number | string): Promise<string> {
+  try {
+    if (!outletId) return "80"
+    const response: any = await api.get(`/outlets/${outletId}/`)
+    const paperWidth = response?.settings?.paper_width
+    if (paperWidth === "58" || paperWidth === "80") {
+      return paperWidth
+    }
+    return "80"
+  } catch {
+    return "80"
+  }
+}
+
 async function getBackendEscposPayload(
   saleId: string,
-  printerName?: string | null
+  printerName?: string | null,
+  outletId?: number | string
 ): Promise<{ contentBase64: string; receiptNumber: string } | null> {
   try {
     const params = new URLSearchParams()
-    params.set("paper_width", "auto")
+    const paperWidth = await getOutletPaperWidth(outletId)
+    params.set("paper_width", paperWidth)
     if (printerName) params.set("printer_name", printerName)
     const response: any = await api.get(`/sales/${saleId}/escpos-receipt/?${params.toString()}`)
     if (!response?.content) return null
@@ -331,7 +347,9 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
   if (payload.tax > 0) lines.push(`Tax: ${payload.tax.toFixed(2)}`)
   if (payload.discount > 0) lines.push(`Discount: -${payload.discount.toFixed(2)}`)
   lines.push(`Total: ${payload.total.toFixed(2)}`)
-  lines.push("Thank you for your business!")
+  lines.push("-----------------------------")
+  lines.push("* Thank you for your business *")
+  lines.push("* Powered by PRIMEPOS *")
 
   return lines.join("\n")
 }
@@ -368,6 +386,8 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     payload?.sale?.outlet_id ??
     payload?.sale?.outlet
 
+  console.log("[Print] Resolved outlet ID:", resolvedOutletId, "from", { outletId, saleOutletId: payload?.sale?.outlet?.id, saleOutletId2: payload?.sale?.outlet_id, saleOutlet: payload?.sale?.outlet })
+
   // Agent path: enqueue in backend so connector claims and prints.
   // If the backend is unreachable (offline / 503), fall through to direct localhost agent.
   if (shouldQueueForLocalAgent) {
@@ -382,11 +402,12 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
 
       const resolvedDeviceId = resolvedOutletId ? await resolveDeviceIdForOutlet(resolvedOutletId) : ""
 
+      const paperWidth = await getOutletPaperWidth(resolvedOutletId)
       const queued: any = await api.post(`/sales/${saleId}/enqueue-print/`, {
         channel: "agent",
         printer_name: printerName || "",
         device_id: resolvedDeviceId,
-        paper_width: "auto",
+        paper_width: paperWidth,
       })
 
       console.log("[Print] Enqueued print job:", {
@@ -438,7 +459,7 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
 
   // Offline sales have no backend record — skip ESC/POS API call and build receipt client-side.
   if (saleId && !isOfflineSale) {
-    const backendEscpos = await getBackendEscposPayload(saleId, null)
+    const backendEscpos = await getBackendEscposPayload(saleId, null, resolvedOutletId)
     if (backendEscpos?.contentBase64) {
       contentBase64 = backendEscpos.contentBase64
       receiptNumber = backendEscpos.receiptNumber

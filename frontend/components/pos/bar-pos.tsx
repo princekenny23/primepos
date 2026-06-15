@@ -180,6 +180,7 @@ export function BarPOS() {
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [transactionLocked, setTransactionLocked] = useState(false)
   const [initiatedSaleId, setInitiatedSaleId] = useState("")
+  const [offlineCheckoutStarted, setOfflineCheckoutStarted] = useState(false)
   
   // Manager Actions Popup
   const [showManagerActions, setShowManagerActions] = useState(false)
@@ -829,15 +830,6 @@ export function BarPOS() {
       return
     }
 
-    if (typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine) {
-      setShowPaymentModal(true)
-      toast({
-        title: "Offline checkout",
-        description: "Cash sales can be completed offline and will sync automatically when internet returns.",
-      })
-      return
-    }
-
     try {
       const subtotal = Math.round(cartSubtotal * 100) / 100
       const discount = Math.round(discountAmount * 100) / 100
@@ -864,6 +856,9 @@ export function BarPOS() {
       })
 
       if (!("id" in initiated)) {
+        setOfflineCheckoutStarted(true)
+        setTransactionLocked(true)
+        setShowPaymentModal(true)
         toast({
           title: "Checkout queued offline",
           description: initiated.detail || "Transaction will sync when internet returns.",
@@ -887,6 +882,7 @@ export function BarPOS() {
     setShowPaymentModal(false)
 
     if (!transactionLocked || !initiatedSaleId) {
+      setOfflineCheckoutStarted(false)
       setCart([])
       setSaleDiscount(null)
       setSelectedCustomer(null)
@@ -1521,7 +1517,7 @@ export function BarPOS() {
               </div>
               <div className="flex-1 flex min-h-0 overflow-hidden">
                 {/* Category Sidebar - Fixed */}
-                <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2 flex flex-col gap-2">
+                <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2 flex flex-col gap-2 min-h-0">
                   <div className="mb-2">
                     <span className="text-xs font-medium">Categories</span>
                   </div>
@@ -1534,8 +1530,8 @@ export function BarPOS() {
                   ) : categoriesError ? (
                     <div className="text-xs text-destructive">{categoriesError}</div>
                   ) : (
-                    <div className="max-h-[22rem] overflow-y-auto">
-                      <div className="grid grid-cols-1 gap-2 justify-items-center">
+                    <div className="flex-1 min-h-0 overflow-y-auto">
+                      <div className="space-y-2">
                         <Button
                           key="all"
                           variant={selectedCategory === "all" ? "default" : "outline"}
@@ -1580,7 +1576,7 @@ export function BarPOS() {
                         <p>No products found</p>
                       </div>
                     ) : (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 gap-4 p-3">
                         {filteredProducts.map(product => (
                           <Card
                             key={product.id}
@@ -1656,7 +1652,7 @@ export function BarPOS() {
                     <p className="text-xs">Add tables in Bar Settings</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-5 gap-3">
                     {tables.map(table => (
                       <Card
                         key={table.id}
@@ -2341,7 +2337,7 @@ export function BarPOS() {
           if (currentTab) {
             handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "credit", amount, change)
           } else {
-            const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
+            const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && (!window.navigator.onLine || offlineCheckoutStarted)
 
             if (!isOfflineCheckout && !initiatedSaleId) {
               toast({ title: "Error", description: "No initiated transaction found. Click Payment again.", variant: "destructive" })
@@ -2409,6 +2405,7 @@ export function BarPOS() {
                 setCart([])
                 setSaleDiscount(null)
                 setSelectedCustomer(null)
+                setOfflineCheckoutStarted(false)
                 setTransactionLocked(false)
                 setInitiatedSaleId("")
                 setIsDeliveryRequired(false)

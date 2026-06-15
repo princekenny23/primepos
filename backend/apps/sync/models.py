@@ -4,9 +4,12 @@ from django.db import models
 
 class ProcessedClientEvent(models.Model):
     STATUS_CHOICES = [
-        ("accepted", "Accepted"),
+        ("pending", "Pending Review"),
+        ("approved", "Approved"),
+        ("applied", "Applied"),
         ("duplicate", "Duplicate"),
         ("rejected", "Rejected"),
+        ("deleted", "Deleted"),
     ]
 
     tenant = models.ForeignKey("tenants.Tenant", on_delete=models.CASCADE, related_name="processed_sync_events")
@@ -15,9 +18,16 @@ class ProcessedClientEvent(models.Model):
 
     client_event_id = models.CharField(max_length=128)
     event_type = models.CharField(max_length=120)
+    # original incoming payload (immutable) and optional edited payload by admin
+    original_payload = models.JSONField(default=dict, blank=True)
+    edited_payload = models.JSONField(default=dict, blank=True)
     payload = models.JSONField(default=dict, blank=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="accepted")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     detail = models.TextField(blank=True)
+    # admin edits / soft-delete
+    edited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="edited_sync_events")
+    edited_at = models.DateTimeField(null=True, blank=True)
+    marked_for_deletion = models.BooleanField(default=False)
     retry_count = models.IntegerField(default=0)
     last_error = models.TextField(blank=True)
 

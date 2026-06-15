@@ -28,6 +28,7 @@ export interface BusinessSettings {
   timezone?: string
   taxId?: string
   language?: string
+  paper_width?: string
 }
 
 export interface Outlet {

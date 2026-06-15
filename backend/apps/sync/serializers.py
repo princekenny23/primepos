@@ -33,6 +33,11 @@ class AdminSyncEventSerializer(serializers.ModelSerializer):
             "event_type",
             "status",
             "detail",
+            "original_payload",
+            "edited_payload",
+            "edited_by",
+            "edited_at",
+            "marked_for_deletion",
             "retry_count",
             "last_error",
             "created_at",
@@ -46,6 +51,12 @@ class AdminSyncEventSerializer(serializers.ModelSerializer):
     def get_outlet_name(self, obj):
         outlet = getattr(obj, "outlet", None)
         return outlet.name if outlet else None
+
+    def get_edited_by(self, obj):
+        user = getattr(obj, "edited_by", None)
+        if not user:
+            return None
+        return {"id": user.id, "username": getattr(user, "username", None), "email": getattr(user, "email", None)}
 
 
 class AdminSyncRequeueSerializer(serializers.Serializer):

@@ -121,6 +121,8 @@ export function generateHTMLReceipt(data: ReceiptData): string {
         .total-row { display: flex; justify-content: space-between; margin: 8px 0; }
         .total-amount { font-size: 18px; }
         .footer { text-align: center; margin-top: 20px; font-size: 12px; }
+        .footer strong { display: block; margin: 4px 0; font-weight: bold; }
+        .thank-you-line { letter-spacing: 0.5px; }
         .conversion-note { color: #666; font-size: 0.9em; }
       </style>
     </head>
@@ -172,8 +174,8 @@ export function generateHTMLReceipt(data: ReceiptData): string {
         ${
           data.tax
             ? `
-        <div class="total-row">
-          <span>Tax:</span>
+        <div class="total-row" style="font-weight: bold;">
+          <span>Total VAT:</span>
           <span>MWK ${data.tax.toFixed(2)}</span>
         </div>
         `
@@ -189,7 +191,7 @@ export function generateHTMLReceipt(data: ReceiptData): string {
         `
             : ""
         }
-        <div class="total-row total-amount">
+        <div class="total-row total-amount" style="font-weight: bold;">
           <span>TOTAL:</span>
           <span>MWK ${data.total.toFixed(2)}</span>
         </div>
@@ -204,9 +206,9 @@ export function generateHTMLReceipt(data: ReceiptData): string {
       </table>
 
       <div class="footer">
-        <p>Thank you for your purchase!</p>
+        <strong class="thank-you-line">* Thank you for your business *</strong>
+        <strong>Powered by PrimePOS</strong>
         ${data.notes ? `<p>${data.notes}</p>` : ""}
-        <p>PrimePOS - Professional Retail System</p>
       </div>
     </body>
     </html>
@@ -268,7 +270,7 @@ export function generateTextReceipt(data: ReceiptData): string {
   lines.push(`Subtotal:          ${data.subtotal.toFixed(2).padStart(10)} MWK`)
 
   if (data.tax) {
-    lines.push(`Tax:               ${data.tax.toFixed(2).padStart(10)} MWK`)
+    lines.push(`Total VAT:         ${data.tax.toFixed(2).padStart(10)} MWK`)
   }
 
   if (data.discount) {
@@ -282,7 +284,8 @@ export function generateTextReceipt(data: ReceiptData): string {
 
   lines.push(`Payment Method: ${data.paymentMethod.toUpperCase()}`)
   lines.push("")
-  lines.push("Thank you for your purchase!")
+  lines.push("* Thank you for your business *")
+  lines.push("* Powered by PRIMEPOS *")
   if (data.notes) lines.push(data.notes)
   lines.push("")
 

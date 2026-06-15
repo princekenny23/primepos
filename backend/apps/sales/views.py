@@ -1721,31 +1721,23 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             return Response({"detail": "You do not have permission to view this sale's receipt."}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            if requested_width in ('58', '58mm', '80', '80mm', 'auto') or printer_name:
-                normalized = 'auto'
-                if requested_width in ('58', '58mm'):
-                    normalized = '58'
-                elif requested_width in ('80', '80mm'):
-                    normalized = '80'
+            # Normalize requested paper width: accept '58', '58mm', '80', '80mm', or 'auto'
+            normalized = 'auto'
+            if requested_width in ('58', '58mm'):
+                normalized = '58'
+            elif requested_width in ('80', '80mm'):
+                normalized = '80'
 
-                content = ReceiptService._generate_escpos_receipt(
-                    sale,
-                    paper_width=normalized,
-                    printer_name=printer_name,
-                )
-                return Response({
-                    'receipt_number': sale.receipt_number,
-                    'format': 'escpos',
-                    'content': content,
-                    'paper_width': normalized,
-                })
-
-            receipt = ReceiptService.generate_receipt(sale, format='escpos', user=request.user)
+            content = ReceiptService._generate_escpos_receipt(
+                sale,
+                paper_width=normalized,
+                printer_name=printer_name,
+            )
             return Response({
-                'receipt_number': receipt.receipt_number,
-                'format': receipt.format,
-                'content': receipt.content,
-                'paper_width': 'auto',
+                'receipt_number': sale.receipt_number,
+                'format': 'escpos',
+                'content': content,
+                'paper_width': normalized,
             })
         except Exception as e:
             logger = logging.getLogger(__name__)

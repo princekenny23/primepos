@@ -16,13 +16,14 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { RefreshCw, RotateCw, Search, ShieldAlert } from "lucide-react"
-import { syncAdminService, type SyncHealthMetrics, type SyncRejectedEvent } from "@/lib/services/syncAdminService"
+import { syncAdminService, type SyncEvent, type SyncHealthMetrics } from "@/lib/services/syncAdminService"
 
 export default function AdminSyncMonitorPage() {
   const [isLoading, setIsLoading] = useState(true)
-  const [isRequeuing, setIsRequeuing] = useState(false)
+  const [isBatching, setIsBatching] = useState(false)
   const [metrics, setMetrics] = useState<SyncHealthMetrics | null>(null)
-  const [events, setEvents] = useState<SyncRejectedEvent[]>([])
+  const [events, setEvents] = useState<SyncEvent[]>([])
+  const [statusFilter, setStatusFilter] = useState<"pending" | "rejected">("rejected")
   const [search, setSearch] = useState("")
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [tenantInput, setTenantInput] = useState("")
@@ -31,26 +32,23 @@ export default function AdminSyncMonitorPage() {
   const [pageSize, setPageSize] = useState(50)
   const [totalCount, setTotalCount] = useState(0)
 
-  const loadData = useCallback(async (options?: { pageOverride?: number; pageSizeOverride?: number; tenantOverride?: string }) => {
+  const loadData = useCallback(async (options?: { pageOverride?: number; pageSizeOverride?: number; tenantOverride?: string; statusOverride?: "pending" | "rejected" }) => {
     const nextPage = options?.pageOverride ?? page
     const nextPageSize = options?.pageSizeOverride ?? pageSize
     const nextTenant = options?.tenantOverride ?? tenantFilter
+    const nextStatus = options?.statusOverride ?? statusFilter
     const offset = (nextPage - 1) * nextPageSize
 
     setIsLoading(true)
     try {
-      const [healthResponse, rejectedResponse] = await Promise.all([
-        syncAdminService.getHealth(nextTenant || undefined),
-        syncAdminService.getRejectedEvents({
-          tenantId: nextTenant || undefined,
-          limit: nextPageSize,
-          offset,
-        }),
-      ])
+      const healthResponse = await syncAdminService.getHealth(nextTenant || undefined)
+      const eventResponse = nextStatus === "pending"
+        ? await syncAdminService.getPendingEvents({ tenantId: nextTenant || undefined, limit: nextPageSize, offset })
+        : await syncAdminService.getRejectedEvents({ tenantId: nextTenant || undefined, limit: nextPageSize, offset })
 
       setMetrics(healthResponse.metrics)
-      setEvents(Array.isArray(rejectedResponse.results) ? rejectedResponse.results : [])
-      setTotalCount(Number(rejectedResponse.count || 0))
+      setEvents(Array.isArray(eventResponse.results) ? eventResponse.results : [])
+      setTotalCount(Number(eventResponse.count || 0))
     } catch (error) {
       console.error("Failed to load sync monitor data:", error)
       setMetrics(null)
@@ -59,7 +57,7 @@ export default function AdminSyncMonitorPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [page, pageSize, tenantFilter])
+  }, [page, pageSize, tenantFilter, statusFilter])
 
   useEffect(() => {
     loadData()
@@ -97,17 +95,23 @@ export default function AdminSyncMonitorPage() {
     setSelectedIds((prev) => Array.from(new Set([...prev, ...filteredIds])))
   }
 
-  const handleRequeue = async () => {
+  const handleAction = async (action: "requeue" | "apply" | "delete") => {
     if (selectedIds.length === 0) return
-    setIsRequeuing(true)
+    setIsBatching(true)
     try {
-      await syncAdminService.requeueEvents(selectedIds)
+      if (action === "requeue") {
+        await syncAdminService.requeueEvents(selectedIds)
+      } else if (action === "apply") {
+        await syncAdminService.applyEvents(selectedIds)
+      } else {
+        await syncAdminService.deleteEvents(selectedIds)
+      }
       setSelectedIds([])
-      await loadData()
+      await loadData({ pageOverride: 1 })
     } catch (error) {
-      console.error("Failed to requeue events:", error)
+      console.error(`Failed to ${action} events:`, error)
     } finally {
-      setIsRequeuing(false)
+      setIsBatching(false)
     }
   }
 
@@ -119,6 +123,11 @@ export default function AdminSyncMonitorPage() {
   const pageEnd = Math.min(page * pageSize, totalCount)
   const canPrev = page > 1
   const canNext = page < totalPages
+  const selectedCount = selectedIds.length
+  const remainingCount = Math.max(0, totalCount - selectedCount)
+  const canApply = statusFilter === "pending" && selectedCount > 0
+  const canRequeue = statusFilter === "rejected" && selectedCount > 0
+  const canDelete = selectedCount > 0
 
   const applyTenantFilter = async () => {
     const nextTenant = tenantInput.trim()
@@ -164,16 +173,16 @@ export default function AdminSyncMonitorPage() {
       >
         <div className="grid gap-4 md:grid-cols-4 mb-4">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Accepted</CardTitle></CardHeader>
-            <CardContent className="text-2xl font-semibold">{metrics?.accepted_events ?? 0}</CardContent>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">Offline Events</CardTitle></CardHeader>
+            <CardContent className="text-2xl font-semibold">{metrics?.total_offline ?? 0}</CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">Pending Review</CardTitle></CardHeader>
+            <CardContent className="text-2xl font-semibold text-orange-700">{metrics?.pending_events ?? 0}</CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">Rejected</CardTitle></CardHeader>
             <CardContent className="text-2xl font-semibold text-red-700">{metrics?.rejected_events ?? 0}</CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Duplicates</CardTitle></CardHeader>
-            <CardContent className="text-2xl font-semibold">{metrics?.duplicate_events ?? 0}</CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">Latest Cursor</CardTitle></CardHeader>
@@ -184,10 +193,36 @@ export default function AdminSyncMonitorPage() {
         <Card>
           <CardHeader>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2">
-                <ShieldAlert className="h-4 w-4 text-red-700" />
-                Rejected Sync Events
-              </CardTitle>
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-red-700" />
+                    Sync Events Monitor
+                  </CardTitle>
+                  <div className="flex items-center gap-1">
+                    {[
+                      { value: "pending", label: "Pending" },
+                      { value: "rejected", label: "Rejected" },
+                    ].map((option) => (
+                      <Button
+                        key={option.value}
+                        size="sm"
+                        variant={statusFilter === option.value ? "default" : "outline"}
+                        onClick={() => {
+                          setStatusFilter(option.value as "pending" | "rejected")
+                          setPage(1)
+                          void loadData({ pageOverride: 1, statusOverride: option.value as "pending" | "rejected" })
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  Selected: {selectedCount} • Remaining: {remainingCount} • Status: {statusFilter}
+                </div>
+              </div>
               <div className="flex items-center gap-2">
                 <Input
                   value={tenantInput}
@@ -206,7 +241,7 @@ export default function AdminSyncMonitorPage() {
                   <Input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search rejected events"
+                    placeholder="Search events"
                     className="pl-8 w-[260px]"
                   />
                 </div>
@@ -214,9 +249,19 @@ export default function AdminSyncMonitorPage() {
                   <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
                   Refresh
                 </Button>
-                <Button onClick={handleRequeue} disabled={isRequeuing || selectedIds.length === 0}>
-                  <RotateCw className={`h-4 w-4 mr-2 ${isRequeuing ? "animate-spin" : ""}`} />
-                  Requeue Selected ({selectedIds.length})
+                {statusFilter === "rejected" ? (
+                  <Button onClick={() => void handleAction("requeue")} disabled={isBatching || selectedCount === 0}>
+                    <RotateCw className={`h-4 w-4 mr-2 ${isBatching ? "animate-spin" : ""}`} />
+                    Requeue Selected ({selectedCount})
+                  </Button>
+                ) : (
+                  <Button onClick={() => void handleAction("apply")} disabled={isBatching || selectedCount === 0}>
+                    <RotateCw className={`h-4 w-4 mr-2 ${isBatching ? "animate-spin" : ""}`} />
+                    Apply Selected ({selectedCount})
+                  </Button>
+                )}
+                <Button variant="destructive" onClick={() => void handleAction("delete")} disabled={isBatching || !canDelete}>
+                  Delete Selected ({selectedCount})
                 </Button>
               </div>
             </div>

@@ -15,6 +15,7 @@ from .serializers import (
     SyncPushBatchSerializer,
 )
 from apps.tenants.permissions import IsSaaSAdmin
+from django.utils import timezone
 
 
 class SyncBaseView(APIView):
@@ -107,11 +108,11 @@ class SyncPushBatchView(SyncBaseView):
         if not tenant_id:
             return Response({"detail": "User must have a tenant."}, status=status.HTTP_400_BAD_REQUEST)
 
-        accepted = 0
+        created_count = 0
         conflicts = 0
         rejected = 0
-
         results = []
+
         for event in events:
             client_event_id = str(event.get("client_event_id", "") or "")
             event_tenant_id = str(event.get("tenant_id", "") or "")
@@ -120,24 +121,12 @@ class SyncPushBatchView(SyncBaseView):
 
             if event_tenant_id != tenant_id:
                 rejected += 1
-                results.append(
-                    {
-                        "client_event_id": client_event_id,
-                        "status": "rejected",
-                        "detail": "Tenant mismatch in sync event.",
-                    }
-                )
+                results.append({"client_event_id": client_event_id, "status": "rejected", "detail": "Tenant mismatch in sync event."})
                 continue
 
             if event_user_id and event_user_id != user_id and not getattr(request.user, "is_saas_admin", False):
                 rejected += 1
-                results.append(
-                    {
-                        "client_event_id": client_event_id,
-                        "status": "rejected",
-                        "detail": "User mismatch in sync event.",
-                    }
-                )
+                results.append({"client_event_id": client_event_id, "status": "rejected", "detail": "User mismatch in sync event."})
                 continue
 
             outlet_obj = None
@@ -145,40 +134,26 @@ class SyncPushBatchView(SyncBaseView):
                 outlet_obj = Outlet.objects.filter(id=event_outlet_id, tenant_id=tenant_id).first()
                 if not outlet_obj:
                     rejected += 1
-                    results.append(
-                        {
-                            "client_event_id": client_event_id,
-                            "status": "rejected",
-                            "detail": "Invalid outlet for tenant.",
-                        }
-                    )
+                    results.append({"client_event_id": client_event_id, "status": "rejected", "detail": "Invalid outlet for tenant."})
                     continue
 
             payload = event.get("payload") or {}
 
-            try:
-                processor_result = process_supported_event(
-                    user=request.user,
-                    tenant_id=str(tenant_id),
-                    outlet_id=str(event_outlet_id or ""),
-                    event_type=event.get("event_type", "unknown"),
-                    payload=payload,
-                )
+            existing = ProcessedClientEvent.objects.filter(tenant_id=tenant_id, client_event_id=client_event_id).first()
+            if existing:
+                conflicts += 1
+                results.append({"client_event_id": client_event_id, "status": "duplicate", "detail": existing.detail or "Duplicate client_event_id."})
+                continue
 
-                processed_status = "accepted"
-                processed_detail = "Event accepted and stored for Phase 2 processing."
-                operation = "accepted"
+            processor_result = process_supported_event(
+                user=request.user,
+                tenant_id=tenant_id,
+                outlet_id=event_outlet_id,
+                event_type=event.get("event_type", "unknown"),
+                payload=payload,
+            )
 
-                if processor_result.get("handled"):
-                    if processor_result.get("status") == "accepted":
-                        processed_status = "accepted"
-                        processed_detail = str(processor_result.get("detail") or "Event applied.")
-                        operation = "applied"
-                    elif processor_result.get("status") == "rejected":
-                        processed_status = "rejected"
-                        processed_detail = str(processor_result.get("detail") or "Event rejected by mapped processor.")
-                        operation = "rejected"
-
+            if not processor_result.get("handled"):
                 created = ProcessedClientEvent.objects.create(
                     tenant_id=tenant_id,
                     outlet=outlet_obj,
@@ -186,68 +161,64 @@ class SyncPushBatchView(SyncBaseView):
                     client_event_id=client_event_id,
                     event_type=event.get("event_type", "unknown"),
                     payload=payload,
-                    status=processed_status,
-                    detail=processed_detail,
+                    original_payload=payload,
+                    status="pending",
+                    detail="Ingested and pending admin review.",
                 )
                 SyncChangeLog.objects.create(
                     tenant_id=tenant_id,
                     outlet=outlet_obj,
                     entity_type="sync_event",
                     entity_id=client_event_id,
-                    operation=operation,
-                    payload={
-                        "event_type": created.event_type,
-                        "processed_event_id": created.id,
-                        "status": processed_status,
-                        "processor": {
-                            "handled": bool(processor_result.get("handled")),
-                            "status": processor_result.get("status"),
-                            "status_code": processor_result.get("status_code"),
-                        },
-                    },
+                    operation="ingested_pending",
+                    payload={"processed_event_id": created.id, "event_type": created.event_type},
                 )
-                if processed_status == "accepted":
-                    accepted += 1
-                    results.append(
-                        {
-                            "client_event_id": client_event_id,
-                            "status": "accepted",
-                            "detail": processed_detail,
-                        }
-                    )
-                else:
-                    rejected += 1
-                    results.append(
-                        {
-                            "client_event_id": client_event_id,
-                            "status": "rejected",
-                            "detail": processed_detail,
-                        }
-                    )
-            except IntegrityError:
-                existing = ProcessedClientEvent.objects.filter(
-                    tenant_id=tenant_id,
-                    client_event_id=client_event_id,
-                ).first()
-                conflicts += 1
-                results.append(
-                    {
-                        "client_event_id": client_event_id,
-                        "status": "duplicate",
-                        "detail": existing.detail if existing else "Duplicate client_event_id.",
-                    }
-                )
+                created_count += 1
+                results.append({"client_event_id": client_event_id, "status": "pending", "detail": "Event stored for admin review."})
+                continue
 
-        return Response(
-            {
-                "phase": getattr(settings, "OFFLINE_MODE_PHASE", 0),
-                "accepted": accepted,
-                "conflicts": conflicts,
-                "rejected": rejected,
-                "results": results,
-            },
-            status=status.HTTP_202_ACCEPTED,
-        )
+            event_status = processor_result.get("status")
+            event_detail = str(processor_result.get("detail") or "Event processed.")
+
+            if event_status == "accepted":
+                created = ProcessedClientEvent.objects.create(
+                    tenant_id=tenant_id,
+                    outlet=outlet_obj,
+                    user=request.user,
+                    client_event_id=client_event_id,
+                    event_type=event.get("event_type", "unknown"),
+                    payload=payload,
+                    original_payload=payload,
+                    status="applied",
+                    detail=event_detail,
+                )
+                SyncChangeLog.objects.create(
+                    tenant_id=tenant_id,
+                    outlet=outlet_obj,
+                    entity_type="sync_event",
+                    entity_id=client_event_id,
+                    operation="sync_applied",
+                    payload={"processed_event_id": created.id, "event_type": created.event_type},
+                )
+                created_count += 1
+                results.append({"client_event_id": client_event_id, "status": "accepted", "detail": event_detail})
+                continue
+
+            rejected += 1
+            ProcessedClientEvent.objects.create(
+                tenant_id=tenant_id,
+                outlet=outlet_obj,
+                user=request.user,
+                client_event_id=client_event_id,
+                event_type=event.get("event_type", "unknown"),
+                payload=payload,
+                original_payload=payload,
+                status="rejected",
+                detail=event_detail,
+            )
+            results.append({"client_event_id": client_event_id, "status": "rejected", "detail": event_detail})
+
+        return Response({"phase": getattr(settings, "OFFLINE_MODE_PHASE", 0), "created": created_count, "conflicts": conflicts, "rejected": rejected, "results": results}, status=status.HTTP_202_ACCEPTED)
 
 
 class SyncPullChangesView(SyncBaseView):
@@ -330,11 +301,18 @@ class AdminSyncHealthView(APIView):
         }
 
         latest_cursor = int(change_qs.order_by("-id").values_list("id", flat=True).first() or 0)
+        total_offline = base_qs.count()
 
         return Response(
             {
                 "tenant_id": tenant_id,
                 "metrics": {
+                    "total_offline": total_offline,
+                    "pending_events": int(status_counts.get("pending", 0)),
+                    "approved_events": int(status_counts.get("approved", 0)),
+                    "applied_events": int(status_counts.get("applied", 0)),
+                    "deleted_events": int(status_counts.get("deleted", 0)),
+                    "failed_events": int(status_counts.get("failed", 0)),
                     "accepted_events": int(status_counts.get("accepted", 0)),
                     "duplicate_events": int(status_counts.get("duplicate", 0)),
                     "rejected_events": int(status_counts.get("rejected", 0)),
@@ -464,3 +442,136 @@ class AdminSyncRequeueView(APIView):
                 "results": results,
             }
         )
+
+
+class AdminPendingEventsView(APIView):
+    permission_classes = [IsAuthenticated, IsSaaSAdmin]
+
+    def get(self, request):
+        tenant_id = request.query_params.get("tenant_id")
+        limit_raw = request.query_params.get("limit")
+        offset_raw = request.query_params.get("offset")
+        try:
+            limit = max(1, min(int(limit_raw or 100), 500))
+        except ValueError:
+            limit = 100
+        try:
+            offset = max(0, int(offset_raw or 0))
+        except ValueError:
+            offset = 0
+
+        qs = ProcessedClientEvent.objects.select_related("tenant", "outlet").filter(status="pending").order_by("-created_at")
+        if tenant_id:
+            qs = qs.filter(tenant_id=tenant_id)
+
+        total = qs.count()
+        events = qs[offset : offset + limit]
+        serializer = AdminSyncEventSerializer(events, many=True)
+        return Response({"count": total, "limit": limit, "offset": offset, "has_next": (offset + limit) < total, "results": serializer.data})
+
+
+class AdminEventDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsSaaSAdmin]
+
+    def patch(self, request, event_id):
+        try:
+            event = ProcessedClientEvent.objects.get(id=event_id)
+        except ProcessedClientEvent.DoesNotExist:
+            return Response({"detail": "Event not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        data = request.data
+        changed = False
+        if "edited_payload" in data:
+            event.edited_payload = data.get("edited_payload") or {}
+            event.payload = event.edited_payload or event.payload
+            changed = True
+        if "marked_for_deletion" in data:
+            event.marked_for_deletion = bool(data.get("marked_for_deletion"))
+            if event.marked_for_deletion:
+                event.status = "deleted"
+            changed = True
+
+        if changed:
+            event.edited_by = request.user
+            event.edited_at = timezone.now()
+            event.save()
+            SyncChangeLog.objects.create(
+                tenant_id=event.tenant_id,
+                outlet_id=event.outlet_id,
+                entity_type="sync_event",
+                entity_id=event.client_event_id,
+                operation="admin_edited",
+                payload={"processed_event_id": event.id, "marked_for_deletion": event.marked_for_deletion},
+            )
+
+        serializer = AdminSyncEventSerializer(event)
+        return Response(serializer.data)
+
+
+class AdminBatchApplyView(APIView):
+    permission_classes = [IsAuthenticated, IsSaaSAdmin]
+
+    def post(self, request):
+        event_ids = request.data.get("event_ids") or []
+        if not isinstance(event_ids, (list, tuple)):
+            return Response({"detail": "event_ids must be a list."}, status=status.HTTP_400_BAD_REQUEST)
+
+        events = ProcessedClientEvent.objects.filter(id__in=event_ids).select_related("tenant", "outlet")
+        results = []
+        applied = 0
+        failed = 0
+
+        for event in events:
+            if event.marked_for_deletion:
+                event.status = "deleted"
+                event.detail = "Deleted by admin before apply."
+                event.save(update_fields=["status", "detail", "processed_at"])
+                SyncChangeLog.objects.create(tenant_id=event.tenant_id, outlet_id=event.outlet_id, entity_type="sync_event", entity_id=event.client_event_id, operation="admin_deleted", payload={"processed_event_id": event.id})
+                results.append({"event_id": event.id, "status": "deleted"})
+                continue
+
+            payload = event.edited_payload or event.original_payload or event.payload or {}
+            processor_result = process_supported_event(user=request.user, tenant_id=str(event.tenant_id), outlet_id=str(event.outlet_id or ""), event_type=event.event_type, payload=payload)
+
+            if processor_result.get("status") == "accepted":
+                event.status = "applied"
+                event.detail = str(processor_result.get("detail") or "Applied by admin batch.")
+                event.last_error = ""
+                event.retry_count = int(event.retry_count or 0) + 1
+                event.save(update_fields=["status", "detail", "last_error", "retry_count", "processed_at"])
+                SyncChangeLog.objects.create(tenant_id=event.tenant_id, outlet_id=event.outlet_id, entity_type="sync_event", entity_id=event.client_event_id, operation="admin_applied", payload={"processed_event_id": event.id, "status": event.status})
+                applied += 1
+                results.append({"event_id": event.id, "status": "applied", "detail": event.detail})
+            else:
+                event.status = "rejected"
+                event.retry_count = int(event.retry_count or 0) + 1
+                event.last_error = str(processor_result.get("detail") or "Apply failed")
+                event.detail = event.last_error
+                event.save(update_fields=["status", "detail", "last_error", "retry_count", "processed_at"])
+                SyncChangeLog.objects.create(tenant_id=event.tenant_id, outlet_id=event.outlet_id, entity_type="sync_event", entity_id=event.client_event_id, operation="admin_apply_failed", payload={"processed_event_id": event.id, "last_error": event.last_error})
+                failed += 1
+                results.append({"event_id": event.id, "status": "rejected", "detail": event.detail})
+
+        return Response({"requested": len(event_ids), "applied": applied, "failed": failed, "results": results})
+
+
+class AdminBatchDeleteView(APIView):
+    permission_classes = [IsAuthenticated, IsSaaSAdmin]
+
+    def post(self, request):
+        event_ids = request.data.get("event_ids") or []
+        if not isinstance(event_ids, (list, tuple)):
+            return Response({"detail": "event_ids must be a list."}, status=status.HTTP_400_BAD_REQUEST)
+
+        events = ProcessedClientEvent.objects.filter(id__in=event_ids)
+        deleted = 0
+        results = []
+        for event in events:
+            event.marked_for_deletion = True
+            event.status = "deleted"
+            event.save(update_fields=["marked_for_deletion", "status", "processed_at"])
+            SyncChangeLog.objects.create(tenant_id=event.tenant_id, outlet_id=event.outlet_id, entity_type="sync_event", entity_id=event.client_event_id, operation="admin_deleted", payload={"processed_event_id": event.id})
+            deleted += 1
+            results.append({"event_id": event.id, "status": "deleted"})
+
+        return Response({"requested": len(event_ids), "deleted": deleted, "results": results})

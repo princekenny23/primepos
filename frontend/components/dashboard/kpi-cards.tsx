@@ -64,10 +64,7 @@ function KPICard({ title, value, change, changeLabel, icon, trend, business, col
 interface KPICardsProps {
   data: {
     sales: { value: number; change: number }
-    customers: { value: number; change: number }
-    products: { value: number; change: number }
     expenses: { value: number; change: number }
-    profit: { value: number; change: number }
     lowStockItems: { value: number; change: number }
     outstandingCredit: { value: number; change: number }
     returns: { value: number; change: number }
@@ -103,26 +100,7 @@ export function KPICards({ data, business }: KPICardsProps) {
         business={business}
         colorVariant="amber"
       />
-      <KPICard
-        title="Profit"
-        value={formatCurrency(data.profit.value, business)}
-        change={data.profit.change}
-        changeLabel="vs previous period"
-        icon={<ArrowUpRight className="h-3.5 w-3.5" />}
-        trend={data.profit.change >= 0 ? "up" : "down"}
-        business={business}
-        colorVariant="green"
-      />
-      <KPICard
-        title="Customers"
-        value={data.customers.value.toLocaleString('en-US')}
-        change={data.customers.change}
-        changeLabel="total"
-        icon={<Users className="h-3.5 w-3.5" />}
-        trend={data.customers.change >= 0 ? "up" : "down"}
-        business={business}
-        colorVariant="indigo"
-      />
+   
       <KPICard
         title="Outstanding Credit"
         value={formatCurrency(data.outstandingCredit.value, business)}
@@ -132,15 +110,7 @@ export function KPICards({ data, business }: KPICardsProps) {
         business={business}
         colorVariant="orange"
       />
-      <KPICard
-        title="Total Products"
-        value={data.products.value.toLocaleString('en-US')}
-        change={data.products.change}
-        changeLabel="total"
-        icon={<Users className="h-3.5 w-3.5" />}
-        business={business}
-        colorVariant="slate"
-      />
+    
     </div>
   )
 }

@@ -90,8 +90,9 @@ export function ReceiptPreview({ cart, subtotal, discount, tax, total, outletNam
               <span>MWK {total.toFixed(2)}</span>
             </div>
 
-            <div className="text-center text-xs text-muted-foreground pt-4 border-t">
-              <p>Thank you for your purchase!</p>
+            <div className="text-center text-xs text-muted-foreground pt-4 border-t space-y-1">
+              <p className="font-bold">* Thank you for your business *</p>
+              <p className="font-bold">* Powered by PrimePOS *</p>
             </div>
           </div>
         </ScrollArea>

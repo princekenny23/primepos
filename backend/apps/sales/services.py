@@ -333,14 +333,18 @@ class ReceiptService:
         totals_data = [
             ['Subtotal:', f"{currency} {sale.subtotal:,.2f}"],
         ]
+        total_row_index = 1
         
         if sale.tax and sale.tax > 0:
-            totals_data.append(['Tax:', f"{currency} {sale.tax:,.2f}"])
+            totals_data.append(['Total VAT:', f"{currency} {sale.tax:,.2f}"])
+            total_row_index += 1
         
         if sale.discount and sale.discount > 0:
             totals_data.append(['Discount:', f"-{currency} {sale.discount:,.2f}"])
+            total_row_index += 1
         
         totals_data.append(['TOTAL:', f"{currency} {sale.total:,.2f}"])
+        total_row_index += 1
         totals_data.append(['Payment Method:', sale.get_payment_method_display()])
         
         if sale.cash_received:
@@ -351,26 +355,48 @@ class ReceiptService:
         
         totals_table = Table(totals_data, colWidths=[80*mm, 80*mm])
         totals_table.setStyle(TableStyle([
-            ('FONTSIZE', (0, 0), (-1, -2), 9),
-            ('FONTSIZE', (0, -2), (-1, -1), 10),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('FONTSIZE', (0, total_row_index), (-1, total_row_index), 12),
+            ('FONTNAME', (0, total_row_index), (-1, total_row_index), 'Helvetica-Bold'),
+            ('TEXTCOLOR', (0, total_row_index), (-1, total_row_index), colors.HexColor('#1e3a8a')),
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('TEXTCOLOR', (0, -2), (-1, -1), colors.HexColor('#1e3a8a')),
-            ('FONTNAME', (0, -2), (-1, -2), 'Helvetica-Bold'),
-            ('LINEABOVE', (0, -2), (-1, -2), 2, colors.HexColor('#1e3a8a')),
+            ('LINEABOVE', (0, total_row_index), (-1, total_row_index), 1, colors.HexColor('#1e3a8a')),
             ('PADDING', (0, 0), (-1, -1), 4),
         ]))
         elements.append(totals_table)
         elements.append(Spacer(1, 20))
+
+        dotted_line = Table([['']], colWidths=[160*mm])
+        dotted_line.setStyle(TableStyle([
+            ('LINEABOVE', (0, 0), (-1, -1), 0.5, colors.grey, (1, 2)),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 2),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ]))
+        elements.append(dotted_line)
+        elements.append(Spacer(1, 8))
         
         # Footer
+        footer_header = ParagraphStyle(
+            'footer_header',
+            parent=styles['Heading3'],
+            fontSize=10,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor('#1e3a8a'),
+        )
         footer_style = ParagraphStyle(
             'footer',
             parent=styles['Normal'],
-            fontSize=9,
+            fontSize=10,
             alignment=TA_CENTER,
-            textColor=colors.grey,
+            textColor=colors.HexColor('#4b5563'),
+            fontName='Helvetica-Bold',
+            leading=12,
+            spaceAfter=2,
         )
+        elements.append(Paragraph('Footer', footer_header))
         elements.append(Paragraph('Thank you for your business!', footer_style))
         elements.append(Paragraph('Powered by PRIMEPOS +265 997575865', footer_style))
         
@@ -393,24 +419,24 @@ class ReceiptService:
             if value is None:
                 return ''
             raw = str(value).strip().lower()
-            if raw in ('58', '58mm'):
-                return '58'
             if raw in ('80', '80mm'):
                 return '80'
+            if raw in ('58', '58mm'):
+                return '58'
             return ''
 
         def detect_width_from_text(text: str) -> str:
             if not text:
                 return ''
             lowered = text.lower()
-            if any(token in lowered for token in ('58mm', '58 mm', '2inch', '2 inch', '2"')):
-                return '58'
             if any(token in lowered for token in ('80mm', '80 mm', '3inch', '3 inch', '3"')):
                 return '80'
-            if re.search(r'(^|\D)58(\D|$)', lowered):
+            if any(token in lowered for token in ('58mm', '58 mm', '2.25inch', '2.28 inch')):
                 return '58'
             if re.search(r'(^|\D)80(\D|$)', lowered):
                 return '80'
+            if re.search(r'(^|\D)58(\D|$)', lowered):
+                return '58'
             return ''
 
         def resolve_paper_width() -> str:
@@ -437,10 +463,21 @@ class ReceiptService:
                 if normalized:
                     return normalized
 
-            # Safe fallback: 58mm template fits both 58mm and 80mm printers.
-            return '58'
+            # Safe fallback: always use 80mm.
+            return '80'
 
-        width = 32 if resolve_paper_width() == '58' else 48
+        # Determine effective paper width and character columns
+        resolved = resolve_paper_width()
+        # Map logical paper width to character columns used for wrapping
+        if resolved == '58':
+            width = 32
+            # For 58mm, typical printable dots ~ 464 (203dpi * 58mm ≈ 464)
+            gs_w_command = b"\x1dW\xd0\x01"
+        else:
+            # default to 80mm
+            width = 48
+            # For 80mm, printable dots ~ 640 (203dpi * 80mm = 640)
+            gs_w_command = b"\x1dW\x80\x02"
 
         def wrap_text(text: str, max_width: int) -> List[str]:
             text = (text or '').strip()
@@ -503,13 +540,11 @@ class ReceiptService:
         # ESC/POS init
         payload = bytearray()
         payload.extend(b"\x1b@")  # initialize
-        
-        # Set print area width based on paper width
-        resolved_width = resolve_paper_width()
-        if resolved_width == '58':
-            payload.extend(b"\x1dW\xce\x01")  # GS W: set print area width to 462 dots (58mm)
-        elif resolved_width == '80':
-            payload.extend(b"\x1dW\x80\x02")  # GS W: set print area width to 640 dots (80mm)
+        try:
+            payload.extend(gs_w_command)  # GS W: set print area width to printer-specific dots
+        except Exception:
+            # Fallback: do nothing if command fails
+            pass
         
         currency = sale.tenant.currency if sale.tenant and sale.tenant.currency else "MWK"
         for line in ReceiptService._build_escpos_receipt_lines(
@@ -521,10 +556,13 @@ class ReceiptService:
         ):
             payload.extend(b(line))
 
-        # Paper cut (may not be supported by all printers)
+        # Paper cut - add spacing and use full cut command for better compatibility
         try:
-            payload.extend(b("\x1dV\x00"))
-        except Exception:
+            payload.extend(b("\n"))  # Extra newline for cut positioning
+            payload.extend(b("\n"))  # Extra newline for cut positioning
+            payload.extend(b("\x1dV\x01"))  # ESC/POS full cut command
+        except Exception as e:
+            logger.warning(f"Failed to add cut command: {e}")
             pass
 
         # Return base64-encoded bytes so they can safely be stored/transferred as text
@@ -553,6 +591,10 @@ class ReceiptService:
             return user.email
 
         return ""
+
+    @staticmethod
+    def _escpos_bold(text: str) -> str:
+        return "\x1bE\x01" + text + "\x1bE\x00"
 
     @staticmethod
     def _build_escpos_receipt_lines(sale: Sale, width: int, currency: str, wrap_text, align_lr) -> List[str]:
@@ -603,10 +645,12 @@ class ReceiptService:
         lines.append("-" * width)
         lines.extend(align_lr("Subtotal:", f"{currency} {sale.subtotal:,.2f}", width))
         if sale.tax and sale.tax > 0:
-            lines.extend(align_lr("Tax:", f"{currency} {sale.tax:,.2f}", width))
+            for line in align_lr("Total VAT:", f"{currency} {sale.tax:,.2f}", width):
+                lines.append(ReceiptService._escpos_bold(line))
         if sale.discount and sale.discount > 0:
             lines.extend(align_lr("Discount:", f"-{currency} {sale.discount:,.2f}", width))
-        lines.extend(align_lr("Total:", f"{currency} {sale.total:,.2f}", width))
+        for line in align_lr("Total:", f"{currency} {sale.total:,.2f}", width):
+            lines.append(ReceiptService._escpos_bold(line))
         lines.extend(align_lr("Payment:", sale.get_payment_method_display(), width))
 
         lines.append("")

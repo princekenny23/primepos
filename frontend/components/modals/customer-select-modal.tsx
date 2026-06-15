@@ -111,7 +111,7 @@ export function CustomerSelectModal({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
@@ -143,7 +143,7 @@ export function CustomerSelectModal({
             </Button>
           </div>
 
-          <ScrollArea className="flex-1 min-h-0 mt-4">
+          <ScrollArea className="flex-1 min-h-0 mt-4 overflow-hidden">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <p className="text-muted-foreground">{t("common.messages.loading")}</p>

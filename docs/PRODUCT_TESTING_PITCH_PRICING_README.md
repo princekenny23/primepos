@@ -33,12 +33,6 @@ PrimePOS delivers a full business operations stack for SMEs with one shared code
 - Basic storefront event capture and analytics endpoint
 - Dashboard management for storefront settings and sites list
 
-### Delivery modal and delivery-fee status (important)
-- There is currently no separate delivery modal component in storefront checkout.
-- Delivery details are captured inline in checkout (address, landmark, delivery instructions).
-- Delivery zones and fee model fields exist on backend but are not yet wired into checkout pricing logic.
-- Result: storefront checkout is functional for order capture, but delivery-fee automation is still a pending commercial feature.
-
 
 ## 3. Codebase Scope Map
 ### Backend domains (apps)
@@ -88,7 +82,6 @@ Short answer: Yes.
 5. Storefront catalog add/remove product actions
 6. WhatsApp order creation and tracking loop
 7. Role permissions for non-admin users
-8. Delivery detail capture quality (address/landmark/instructions) and operator workflow
 
 
 ## 5. Is It Ready for Money (Paid Use)?
@@ -106,7 +99,6 @@ The project docs already identify critical post-launch hardening items. Examples
 - API abuse protection and tighter security controls
 - Unified exception handling and stronger observability
 - Async task offloading for heavy operations
-- Delivery-fee and delivery-zone automation in storefront checkout
 
 Reference:
 - [README.md](README.md)

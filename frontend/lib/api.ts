@@ -876,6 +876,9 @@ export const apiEndpoints = {
     analytics: "/admin/analytics/",
     syncHealth: "/admin/sync/health/",
     syncRejectedEvents: "/admin/sync/rejected-events/",
+    syncPendingEvents: "/admin/sync/pending/",
+    syncBatchApply: "/admin/sync/batch-apply/",
+    syncBatchDelete: "/admin/sync/batch-delete/",
     syncRequeue: "/admin/sync/requeue/",
   },
   // Activity Logs

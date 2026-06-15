@@ -240,7 +240,7 @@ export default function LoginPage() {
               className="h-14 w-14 rounded-xl mx-auto mb-4 object-cover shadow-md ring-2 ring-white/20"
             />
             <h1 className="text-2xl font-bold text-white">Welcome to PrimePOS</h1>
-            <p className="text-blue-200 text-sm mt-1">Smart tools for smart businesses</p>
+            <p className="text-blue-200 text-sm mt-1">POWERING SMART WHOLESALE & RETAIL BUSINESSES </p>
           </div>
 
           {/* Form area */}

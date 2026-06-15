@@ -135,6 +135,7 @@ export function RetailPOS() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [showDiscount, setShowDiscount] = useState(false)
   const [showCloseRegister, setShowCloseRegister] = useState(false)
+  const [offlineCheckoutStarted, setOfflineCheckoutStarted] = useState(false)
   // Receipt preview in POS has been removed; printing is handled automatically
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<string[]>([])
@@ -595,15 +596,6 @@ export function RetailPOS() {
       return
     }
 
-    if (typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine) {
-      setShowPaymentMethod(true)
-      toast({
-        title: "Offline checkout",
-        description: "Cash sales can be completed offline and will sync automatically when internet returns.",
-      })
-      return
-    }
-
     try {
       const subtotal = Math.round(cartSubtotal * 100) / 100
       const discount = Math.round(discountAmount * 100) / 100
@@ -630,6 +622,9 @@ export function RetailPOS() {
       })
 
       if (!("id" in initiated)) {
+        setOfflineCheckoutStarted(true)
+        setTransactionLocked(true)
+        setShowPaymentMethod(true)
         toast({
           title: "Checkout queued offline",
           description: initiated.detail || "Transaction will sync when internet returns.",
@@ -746,7 +741,7 @@ export function RetailPOS() {
       const paymentTax = 0 // TODO: Calculate tax if needed
       const paymentTotal = Math.round((paymentSubtotal - paymentDiscount + paymentTax) * 100) / 100
 
-      const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
+      const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && (!window.navigator.onLine || offlineCheckoutStarted)
 
       if (isOfflineCheckout) {
         const offlineSale = await completeOfflineCashSale({
@@ -794,6 +789,7 @@ export function RetailPOS() {
         setIsDeliveryRequired(false)
         setTransactionLocked(false)
         setInitiatedSaleId("")
+        setOfflineCheckoutStarted(false)
 
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("sale-completed", {
@@ -997,6 +993,7 @@ export function RetailPOS() {
     setShowPaymentMethod(false)
 
     if (!transactionLocked || !initiatedSaleId) {
+      setOfflineCheckoutStarted(false)
       clearCart()
       setSaleDiscount(null)
       setSelectedCustomer(null)
@@ -1292,8 +1289,8 @@ export function RetailPOS() {
                         key={product.id}
                         className="w-full px-4 py-3 hover:bg-accent border-b last:border-b-0 transition-colors"
                         onMouseDown={(e) => {
-                          e.preventDefault()
                           if (!hasUnits) {
+                            e.preventDefault()
                             handleAddToCart(product)
                             setSearchTerm("")
                             setShowSearchDropdown(false)
@@ -1356,12 +1353,12 @@ export function RetailPOS() {
           <div className="flex-1 flex min-h-0 overflow-hidden">
             {/* Category Filter - Fixed Sidebar */}
             {categories.length > 1 && (
-              <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2">
+              <div className="w-36 border-r bg-gray-200 flex-shrink-0 p-2 flex flex-col gap-2 min-h-0">
                 <div className="mb-2">
                   <span className="text-xs font-medium">Categories</span>
                 </div>
-                <div className="max-h-[22rem] overflow-y-auto">
-                  <div className="grid grid-cols-1 gap-2 justify-items-center">
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  <div className="space-y-2">
                   <Button
                     key="all"
                     variant={selectedCategory === "all" ? "default" : "outline"}

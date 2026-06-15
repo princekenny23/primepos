@@ -55,6 +55,7 @@ export function SingleProductPOS() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [showCustomerSelect, setShowCustomerSelect] = useState(false)
   const [showPaymentMethod, setShowPaymentMethod] = useState(false)
+  const [offlineCheckoutStarted, setOfflineCheckoutStarted] = useState(false)
   const [isDeliveryRequired, setIsDeliveryRequired] = useState(false)
   const [transactionLocked, setTransactionLocked] = useState(false)
   const [initiatedSaleId, setInitiatedSaleId] = useState("")
@@ -226,15 +227,6 @@ export function SingleProductPOS() {
       return
     }
 
-    if (typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine) {
-      setShowPaymentMethod(true)
-      toast({
-        title: "Offline checkout",
-        description: "Cash sales can be completed offline and will sync automatically when internet returns.",
-      })
-      return
-    }
-
     void (async () => {
       try {
         const paymentTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -256,6 +248,9 @@ export function SingleProductPOS() {
         })
 
         if (!("id" in initiated)) {
+          setOfflineCheckoutStarted(true)
+          setTransactionLocked(true)
+          setShowPaymentMethod(true)
           toast({
             title: "Checkout queued offline",
             description: initiated.detail || "Transaction will sync when internet returns.",
@@ -371,7 +366,7 @@ export function SingleProductPOS() {
         ? (paymentMethod as (typeof supportedOfflineMethods)[number])
         : "cash"
 
-      const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && !window.navigator.onLine
+      const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && (!window.navigator.onLine || offlineCheckoutStarted)
 
       if (isOfflineCheckout) {
         const offlineSale = await completeOfflineCashSale({
@@ -417,6 +412,7 @@ export function SingleProductPOS() {
         setSelectedCustomer(null)
         setTransactionLocked(false)
         setInitiatedSaleId("")
+        setOfflineCheckoutStarted(false)
 
         try {
           await printReceipt({

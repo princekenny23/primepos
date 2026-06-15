@@ -1,6 +1,12 @@
 import { api, apiEndpoints } from "@/lib/api"
 
 export interface SyncHealthMetrics {
+  total_offline: number
+  pending_events: number
+  approved_events: number
+  applied_events: number
+  deleted_events: number
+  failed_events: number
   accepted_events: number
   duplicate_events: number
   rejected_events: number
@@ -8,7 +14,7 @@ export interface SyncHealthMetrics {
   latest_cursor: number
 }
 
-export interface SyncRejectedEvent {
+export interface SyncEvent {
   id: number
   tenant_id: number
   tenant_name?: string | null
@@ -25,12 +31,12 @@ export interface SyncRejectedEvent {
   processed_at: string
 }
 
-export interface SyncRejectedEventsResponse {
+export interface SyncEventsResponse {
   count: number
   limit: number
   offset: number
   has_next: boolean
-  results: SyncRejectedEvent[]
+  results: SyncEvent[]
 }
 
 export const syncAdminService = {
@@ -47,7 +53,32 @@ export const syncAdminService = {
     queryParams.set("limit", String(limit))
     queryParams.set("offset", String(offset))
     if (tenantId) queryParams.set("tenant_id", tenantId)
-    return api.get<SyncRejectedEventsResponse>(`${apiEndpoints.admin.syncRejectedEvents}?${queryParams.toString()}`)
+    return api.get<SyncEventsResponse>(`${apiEndpoints.admin.syncRejectedEvents}?${queryParams.toString()}`)
+  },
+
+  async getPendingEvents(options?: { tenantId?: string; limit?: number; offset?: number }) {
+    const tenantId = options?.tenantId
+    const limit = options?.limit ?? 100
+    const offset = options?.offset ?? 0
+    const queryParams = new URLSearchParams()
+    queryParams.set("limit", String(limit))
+    queryParams.set("offset", String(offset))
+    if (tenantId) queryParams.set("tenant_id", tenantId)
+    return api.get<SyncEventsResponse>(`${apiEndpoints.admin.syncPendingEvents}?${queryParams.toString()}`)
+  },
+
+  async applyEvents(eventIds: number[]) {
+    return api.post<{ requested: number; applied: number; failed: number; results: any[] }>(
+      apiEndpoints.admin.syncBatchApply,
+      { event_ids: eventIds }
+    )
+  },
+
+  async deleteEvents(eventIds: number[]) {
+    return api.post<{ requested: number; deleted: number; results: any[] }>(
+      apiEndpoints.admin.syncBatchDelete,
+      { event_ids: eventIds }
+    )
   },
 
   async requeueEvents(eventIds: number[]) {

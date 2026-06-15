@@ -4,15 +4,16 @@ import { useEffect, useMemo, useState } from "react"
 import { api, apiEndpoints } from "@/lib/api"
 import { scanPrinters as scanAvailablePrinters } from "@/lib/print"
 import { useBusinessStore } from "@/stores/businessStore"
+import { outletService } from "@/lib/services/outletService"
+import { BusinessSettings } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/components/ui/use-toast"
 
-const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
 const PA_HEARTBEAT_WINDOW_MS = 90_000
-type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
 
 type WizardStep = 1 | 2 | 3
 
@@ -61,10 +62,18 @@ async function resolveActiveConnectorForOutlet(outletId: number): Promise<{ pk: 
 }
 
 async function enqueueBackendTestPrint(outletId: number, printerIdentifier: string, deviceId: string): Promise<void> {
-  const payload = {
+  const payload: any = {
     outlet_id: outletId,
     printer_identifier: printerIdentifier,
     device_id: deviceId,
+  }
+  // Include paper width if available in current outlet settings
+  try {
+    const outletDetails: any = await api.get(`/outlets/${outletId}/`)
+    const pw = outletDetails?.settings?.paper_width
+    if (pw) payload.paper_width = pw
+  } catch {
+    // ignore
   }
   await api.post("/print-jobs/test-print/", payload)
 }
@@ -72,7 +81,6 @@ async function enqueueBackendTestPrint(outletId: number, printerIdentifier: stri
 export function PrinterSettings() {
   const { toast } = useToast()
   const [hostMode, setHostMode] = useState<"unknown" | "local" | "cloud">("unknown")
-  const [printChannel, setPrintChannel] = useState<PrintChannel>("auto")
   const [connected, setConnected] = useState(false)
   const [step, setStep] = useState<WizardStep>(1)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -81,7 +89,6 @@ export function PrinterSettings() {
   const [printers, setPrinters] = useState<string[]>([])
   const [selectedPrinter, setSelectedPrinter] = useState<string>("")
   const [isScanning, setIsScanning] = useState(false)
-  const [manualPrinter, setManualPrinter] = useState("")
   const [pairedDevicePk, setPairedDevicePk] = useState<string>("")
   const [isAutoPairing, setIsAutoPairing] = useState(false)
   const [pairingCode, setPairingCode] = useState("")
@@ -92,6 +99,7 @@ export function PrinterSettings() {
   const [rawPrinters, setRawPrinters] = useState<any>(null)
   const [extraPrinters, setExtraPrinters] = useState<string[]>([])
   const [lastAssignedOutletName, setLastAssignedOutletName] = useState("")
+  const [selectedPaperWidth, setSelectedPaperWidth] = useState<string>("80")
   const mergedPrinters = useMemo(
     () => Array.from(new Set([...(printers || []), ...extraPrinters])),
     [printers, extraPrinters]
@@ -103,7 +111,8 @@ export function PrinterSettings() {
     setExtraPrinters((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]))
   }
 
-  const { currentOutlet, outlets, setCurrentOutlet } = useBusinessStore()
+  const { currentOutlet: currentOutletRaw, outlets, setCurrentOutlet } = useBusinessStore()
+  const currentOutlet = currentOutletRaw as any
   const activeOutlets = useMemo(
     () => (outlets || []).filter((o) => o.isActive !== false),
     [outlets]
@@ -112,26 +121,6 @@ export function PrinterSettings() {
   useEffect(() => {
     setHostMode(isLocalhostBrowser() ? "local" : "cloud")
   }, [])
-
-  useEffect(() => {
-    try {
-      const saved = String(localStorage.getItem(PRINT_CHANNEL_STORAGE_KEY) || "auto").toLowerCase()
-      if (saved === "agent" || saved === "bluetooth_usb_thermal_printer_plus" || saved === "auto") {
-        setPrintChannel(saved)
-      }
-    } catch {
-      // ignore localStorage failures
-    }
-  }, [])
-
-  const savePrintChannel = (next: PrintChannel) => {
-    setPrintChannel(next)
-    try {
-      localStorage.setItem(PRINT_CHANNEL_STORAGE_KEY, next)
-    } catch {
-      // ignore localStorage failures
-    }
-  }
 
   useEffect(() => {
     const pingLocal = async () => {
@@ -370,7 +359,21 @@ export function PrinterSettings() {
 
     try {
       if (isLocalhostBrowser()) {
-        const contentBase64 = btoa(`PRIMEPOS TEST PRINT\n${new Date().toLocaleString()}\n\n`)
+        const escposBytes = new Uint8Array([
+          0x1b, 0x40, // Initialize printer
+          ...(selectedPaperWidth === '58' ? [0x1d, 0x57, 0xd0, 0x01] : [0x1d, 0x57, 0x80, 0x02]),
+        ])
+        const text = `PRIMEPOS TEST PRINT\n${new Date().toLocaleString()}\n\n`
+        const encoder = new TextEncoder()
+        const textBytes = encoder.encode(text)
+        const cutBytes = new Uint8Array([0x1d, 0x56, 0x01])
+
+        const payloadBytes = new Uint8Array(escposBytes.length + textBytes.length + cutBytes.length)
+        payloadBytes.set(escposBytes, 0)
+        payloadBytes.set(textBytes, escposBytes.length)
+        payloadBytes.set(cutBytes, escposBytes.length + textBytes.length)
+
+        const contentBase64 = btoa(String.fromCharCode(...payloadBytes))
         await localAgentFetch("/print", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -396,34 +399,24 @@ export function PrinterSettings() {
       const text = `PRIMEPOS BLUETOOTH-USB THERMAL PRINTER+ TEST\n${new Date().toLocaleString()}\n\n`
       const navAny = navigator as Navigator & { share?: (data: ShareData) => Promise<void> }
       if (typeof navAny.share === "function") {
-        await navAny.share({
-          title: "PrimePOS Receipt Test",
-          text,
-        })
+        await navAny.share({ title: "PrimePOS Receipt Test", text })
         return
       }
 
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text)
+        toast({ title: "Bluetooth test copied", description: "Receipt text copied to clipboard." })
         return
       }
 
       throw new Error("Share is not available on this device/browser.")
     } catch (err: any) {
       toast({
-        title: "Bluetooth-USB Thermal Printer+ test failed",
-        description: err?.message || "Could not open share. Make sure Bluetooth-USB Thermal Printer+ is installed.",
+        title: "Bluetooth printer test failed",
+        description: err?.message || "Could not open share. Make sure Bluetooth printer support is enabled.",
         variant: "destructive",
       })
     }
-  }
-
-  const addManualPrinter = () => {
-    if (!manualPrinter) return
-    const normalized = manualPrinter.trim()
-    const merged = Array.from(new Set([...extraPrinters, normalized]))
-    setExtraPrinters(merged)
-    setManualPrinter("")
   }
 
   const getOutletStorageKey = (outletId?: number | string | null) =>
@@ -462,6 +455,17 @@ export function PrinterSettings() {
 
   useEffect(() => {
     loadDefaultPrinter()
+  }, [currentOutlet])
+
+  useEffect(() => {
+    // Initialize paper width from current outlet settings
+    try {
+      const pw = (currentOutlet?.settings as BusinessSettings)?.paper_width
+      if (pw === '58' || pw === '80') setSelectedPaperWidth(pw)
+      else setSelectedPaperWidth('80')
+    } catch {
+      setSelectedPaperWidth('80')
+    }
   }, [currentOutlet])
 
   useEffect(() => {
@@ -616,9 +620,10 @@ export function PrinterSettings() {
       }
       rememberPrinterName(selectedPrinter)
 
-      const connectorPk = pairedDevicePk || (await resolveActiveConnectorForOutlet(outletId))?.pk || ""
+      const connectorPk = pairedDevicePk || (hostMode === "cloud" ? (await resolveActiveConnectorForOutlet(outletId))?.pk || "" : "")
+      const shouldAssignCloud = hostMode === "cloud" && Boolean(connectorPk)
 
-      if (connectorPk) {
+      if (shouldAssignCloud) {
         try {
           const cloudPrinters: any = await api.get(`/cloud-printers/?outlet=${outletId}&device=${connectorPk}`)
           const list = Array.isArray(cloudPrinters) ? cloudPrinters : (cloudPrinters.results || [])
@@ -647,7 +652,7 @@ export function PrinterSettings() {
         } catch (assignmentErr: any) {
           toast({ title: "Device assignment warning", description: assignmentErr?.message || "Printer saved, but device assignment failed.", variant: "destructive" })
         }
-      } else {
+      } else if (hostMode === "cloud") {
         toast({ title: "Pairing missing", description: "Printer saved for outlet, but connector is not paired yet.", variant: "destructive" })
       }
 
@@ -656,6 +661,31 @@ export function PrinterSettings() {
     } catch (err: any) {
       console.error("Error saving printer", err)
       toast({ title: "Save failed", description: err?.message || "Failed to save printer settings." })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const savePaperWidth = async () => {
+    if (!currentOutlet) {
+      toast({ title: "No outlet", description: "Please select an outlet before saving paper width." })
+      return
+    }
+
+    try {
+      setIsSaving(true)
+      const outletId = String(currentOutlet.id)
+      const currentSettings = (currentOutlet.settings || {}) as BusinessSettings
+      const updatedSettings: BusinessSettings = {
+        ...currentSettings,
+        paper_width: selectedPaperWidth === '58' ? '58' : '80',
+      }
+      const updatedOutlet = await outletService.update(outletId, { name: currentOutlet.name, settings: updatedSettings })
+      setCurrentOutlet(String(updatedOutlet.id)) // Update the store with the outlet ID
+      toast({ title: "Paper width saved", description: "Printer paper width updated successfully." })
+    } catch (err: any) {
+      console.error("Error saving paper width", err)
+      toast({ title: "Save failed", description: err?.message || "Failed to save paper width." })
     } finally {
       setIsSaving(false)
     }
@@ -807,45 +837,84 @@ export function PrinterSettings() {
         </div>
 
         <div className="rounded border p-3 space-y-3">
-          <div className="font-medium">Step 4: Assign printer to outlet</div>
-          <p className="text-xs text-muted-foreground">
-            Save selected printer as default for this outlet. Then repeat for next outlet.
-          </p>
-          <div className="flex gap-2">
-            <Button onClick={saveSelection} disabled={!connected || !selectedPrinter || isSaving}>
-              {isSaving ? "Saving..." : "Assign to This Outlet"}
-            </Button>
-            <Button variant="outline" onClick={moveToNextOutlet} disabled={activeOutlets.length <= 1}>
-              Configure Next Outlet
-            </Button>
-          </div>
-          {lastAssignedOutletName && (
-            <div className="text-xs text-muted-foreground">
-              Last assigned outlet: {lastAssignedOutletName}
+          <div className="rounded border p-3 space-y-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="font-medium">Step 3: Configure printer</div>
+                <p className="text-xs text-muted-foreground">
+                  Assign the selected printer, set the receipt width, and verify the print connection.
+                </p>
+              </div>
+              <div className="text-xs text-muted-foreground">Step progress: {step}/3</div>
             </div>
-          )}
-        </div>
 
-        <div className="rounded border p-3 text-sm space-y-3">
-          <div className="font-medium">Optional: print mode and tests</div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant={printChannel === "auto" ? "default" : "outline"} onClick={() => savePrintChannel("auto")}>Auto</Button>
-            <Button variant={printChannel === "agent" ? "default" : "outline"} onClick={() => savePrintChannel("agent")}>Agent Only</Button>
-            <Button variant={printChannel === "bluetooth_usb_thermal_printer_plus" ? "default" : "outline"} onClick={() => savePrintChannel("bluetooth_usb_thermal_printer_plus")}>Bluetooth-USB Thermal Printer+</Button>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={testPrint} disabled={!selectedPrinter || !connected}>Test Agent Print</Button>
-            <Button variant="outline" onClick={testBluetoothUsbThermalPrinterPlus}>Test Bluetooth-USB Thermal Printer+</Button>
-          </div>
-          <div className="text-xs text-muted-foreground">Test Agent Print now enqueues a backend print job for the connector to claim.</div>
-          <div className="text-xs text-muted-foreground">Step progress: {step}/3</div>
-        </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-4">
+                <div className="rounded border p-3 space-y-3">
+                  <div className="font-medium">Assign printer to outlet</div>
+                  <p className="text-xs text-muted-foreground">
+                    Save the selected printer as the default for this outlet.
+                  </p>
+                  <div className="space-y-2">
+                    <div className="text-sm">Selected printer</div>
+                    <div className="rounded border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                      {selectedPrinter || "No printer selected"}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={saveSelection} disabled={!connected || !selectedPrinter || isSaving}>
+                      {isSaving ? "Saving..." : "Assign to This Outlet"}
+                    </Button>
+                    <Button variant="outline" onClick={moveToNextOutlet} disabled={activeOutlets.length <= 1}>
+                      Configure Next Outlet
+                    </Button>
+                  </div>
+                  {lastAssignedOutletName && (
+                    <div className="text-xs text-muted-foreground">
+                      Last assigned outlet: {lastAssignedOutletName}
+                    </div>
+                  )}
+                </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="manual-printer">Add Manual Printer (IP or name)</Label>
-          <div className="flex gap-2">
-            <Input id="manual-printer" value={manualPrinter} onChange={(e) => setManualPrinter(e.target.value)} />
-            <Button onClick={addManualPrinter}>Add</Button>
+                <div className="rounded border p-3 space-y-3">
+                  <div className="font-medium">Printing test</div>
+                  <p className="text-xs text-muted-foreground">
+                    Verify the selected printer is reachable and prints a receipt correctly.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={testPrint} disabled={!selectedPrinter || !connected}>
+                      Test Agent Print
+                    </Button>
+                    <Button variant="outline" onClick={testBluetoothUsbThermalPrinterPlus}>
+                      Test Bluetooth Printer
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded border p-3 space-y-4">
+                <div className="space-y-2">
+                  <div className="font-medium">Printer Paper Width</div>
+                  <p className="text-xs text-muted-foreground">Choose the receipt paper width for this outlet.</p>
+                  <Label>Paper Width</Label>
+                  <Select onValueChange={(v) => setSelectedPaperWidth(v)} value={selectedPaperWidth}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select width" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="80">80mm (3.15 inches)</SelectItem>
+                      <SelectItem value="58">58mm (2.28 inches)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={savePaperWidth} disabled={isSaving} className="w-full">
+                  {isSaving ? "Saving..." : "Save Paper Width"}
+                </Button>
+                <div className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">
+                  Use 80mm paper for full-width receipts. Select 58mm only if your printer uses narrow thermal rolls.
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </CardContent>

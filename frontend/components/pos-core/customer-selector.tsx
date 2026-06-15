@@ -79,7 +79,7 @@ export function CustomerSelector({
 
           {/* Search Results */}
           {searchTerm && (
-            <ScrollArea className="h-48 border rounded p-2">
+            <ScrollArea className="max-h-56 border rounded p-2">
               {isSearching ? (
                 <div className="flex items-center justify-center h-full">
                   <Loader2 className="h-4 w-4 animate-spin" />
