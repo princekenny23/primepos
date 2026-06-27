@@ -27,6 +27,10 @@ export interface Shift {
   startTime: string // ISO timestamp
   endTime?: string // ISO timestamp
   closingCashBalance?: number
+  totalSales?: number
+  cashTotal?: number
+  systemTotal?: number
+  difference?: number
 }
 
 interface ShiftContextType {
@@ -91,6 +95,11 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
                 status: active.status,
                 startTime: active.startTime,
                 endTime: active.endTime,
+                closingCashBalance: active.closingCashBalance,
+                totalSales: active.totalSales,
+                cashTotal: active.cashTotal,
+                systemTotal: active.systemTotal,
+                difference: active.difference,
               }
               setActiveShiftState(contextShift)
             } else {

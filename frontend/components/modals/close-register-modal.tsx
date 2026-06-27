@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
 import { 
@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog"
 import { useShift } from "@/contexts/shift-context"
 import { useBusinessStore } from "@/stores/businessStore"
+import { shiftService, Shift as ShiftType } from "@/lib/services/shiftService"
 import { getOutletDashboardRoute } from "@/lib/utils/outlet-settings"
 import { cn } from "@/lib/utils"
 
@@ -36,6 +37,9 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
   const router = useRouter()
   const { activeShift, closeShift } = useShift()
   const { currentBusiness, currentOutlet } = useBusinessStore()
+  const currencySymbol = currentBusiness?.currencySymbol || "MWK"
+  const [freshShift, setFreshShift] = useState<ShiftType | null>(null)
+  const [isRefreshingShift, setIsRefreshingShift] = useState(false)
   const [closingCash, setClosingCash] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string>("")
@@ -43,6 +47,37 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
   if (!activeShift) {
     return null
   }
+
+  const shift = freshShift || activeShift
+
+  useEffect(() => {
+    if (!open || !activeShift || !currentOutlet?.id) {
+      return
+    }
+
+    let isCancelled = false
+
+    const loadShiftSummary = async () => {
+      setIsRefreshingShift(true)
+      try {
+        const refreshedShift = await shiftService.getActive(currentOutlet.id, activeShift.tillId)
+        if (!isCancelled && refreshedShift) {
+          setFreshShift(refreshedShift)
+        }
+      } catch (err) {
+        console.error("Failed to refresh shift summary:", err)
+      } finally {
+        if (!isCancelled) {
+          setIsRefreshingShift(false)
+        }
+      }
+    }
+
+    loadShiftSummary()
+    return () => {
+      isCancelled = true
+    }
+  }, [open, activeShift, currentOutlet?.id])
 
   const formatCurrency = (value: string): string => {
     const numericValue = value.replace(/[^\d.]/g, "")
@@ -130,7 +165,7 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
         <DialogHeader>
           <DialogTitle>Close Register</DialogTitle>
           <DialogDescription>
-            Enter the closing cash balance to end your shift
+            Review your shift summary and enter the drawer cash total to close the shift.
           </DialogDescription>
         </DialogHeader>
 
@@ -146,28 +181,15 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
                 {hours}h {minutes}m
               </span>
             </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground flex items-center gap-2">
-                <DollarSign className="h-4 w-4" />
-                Opening Cash
-              </span>
-              <span className="font-medium">
-                MWK {(activeShift.openingCashBalance || 0).toFixed(2)}
-              </span>
-            </div>
-            {activeShift.floatingCash > 0 && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Floating Cash</span>
-                <span className="font-medium">
-                  MWK {activeShift.floatingCash.toFixed(2)}
-                </span>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl bg-background p-3 border">
+                <p className="text-muted-foreground">Opening Cash</p>
+                <p className="mt-1 text-base font-semibold">{currencySymbol} {(shift.openingCashBalance || 0).toFixed(2)}</p>
               </div>
-            )}
-            <div className="flex items-center justify-between text-sm pt-2 border-t">
-              <span className="text-muted-foreground">Total Available</span>
-              <span className="font-semibold">
-                MWK {((activeShift.openingCashBalance || 0) + (activeShift.floatingCash || 0)).toFixed(2)}
-              </span>
+              <div className="rounded-xl bg-background p-3 border">
+                <p className="text-muted-foreground">Total Sales</p>
+                <p className="mt-1 text-base font-semibold">{currencySymbol} {(shift.totalSales ?? shift.systemTotal ?? 0).toFixed(2)}</p>
+              </div>
             </div>
           </div>
 
@@ -175,30 +197,24 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
           <div className="space-y-2">
             <Label htmlFor="closingCash" className="flex items-center gap-2">
               <Calculator className="h-4 w-4" />
-              Closing Cash Balance <span className="text-destructive">*</span>
+              Closing Cash
             </Label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">MWK</span>
-              <Input
-                id="closingCash"
-                type="text"
-                inputMode="decimal"
-                value={closingCash}
-                onChange={handleCashChange}
-                placeholder="0.00"
-                className={cn(error && "border-destructive", "pl-12")}
-                autoFocus
-              />
-            </div>
+            <Input
+              id="closingCash"
+              type="text"
+              inputMode="decimal"
+              value={closingCash}
+              onChange={handleCashChange}
+              placeholder="0.00"
+              className={cn(error && "border-destructive")}
+              autoFocus
+            />
             {error && (
               <p className="text-sm text-destructive flex items-center gap-1">
                 <AlertCircle className="h-3.5 w-3.5" />
                 {error}
               </p>
             )}
-            <p className="text-xs text-muted-foreground">
-              Enter the total amount of cash in the drawer at the end of the shift
-            </p>
           </div>
 
           {/* Cash Difference */}

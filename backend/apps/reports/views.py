@@ -291,9 +291,7 @@ def profit_loss_report(request):
         tenant=tenant,
         outlet_id=outlet_id,
         is_void=False,
-    ).filter(
-        Q(status='completed') |
-        Q(status='pending', payment_method__in=['tab', 'credit'])
+        status='completed',
     )
     
     if start_date:
