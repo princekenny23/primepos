@@ -827,9 +827,22 @@ def inventory_valuation_report(request):
         returns = movement_qty(period_movement_totals, product.id, 'return')
         damage = movement_qty(period_movement_totals, product.id, 'damage')
         expiry = movement_qty(period_movement_totals, product.id, 'expiry')
+
+        period_net_movement = (
+            received + transferred_in + returns + adjusted
+            - sold - transferred_out - damage - expiry
+        )
         
-        # Closing stock from physical sellable inventory (avoid negative ledger-only stock values)
-        current_stock = get_sellable_stock(product, outlet)
+        # Closing stock should prefer physical sellable inventory when it exists,
+        # but fall back to the ledger-derived balance when no physical stock is recorded.
+        physical_stock = max(0, get_sellable_stock(product, outlet))
+        ledger_stock = max(0, opening_stock + period_net_movement)
+        current_stock = physical_stock if physical_stock > 0 else ledger_stock
+
+        if opening_stock == 0 and physical_stock > 0:
+            opening_stock = max(0, physical_stock - period_net_movement)
+        elif opening_stock == 0 and ledger_stock > 0:
+            opening_stock = max(0, ledger_stock - period_net_movement)
         
         # Get stock take data if available
         counted_qty = 0

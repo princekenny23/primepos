@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
-from apps.inventory.models import StockMovement, StockTake, StockTakeItem
+from apps.inventory.models import Batch, StockMovement, StockTake, StockTakeItem
 from apps.outlets.models import Outlet, Till
 from apps.products.models import Category, Product
 from apps.shifts.models import Shift
@@ -145,6 +145,39 @@ class ReportingLogicTestCase(TestCase):
         self.assertEqual(item["counted_qty"], 0)
         self.assertEqual(item["discrepancy"], -12)
         self.assertEqual(item["discrepancy_value"], -120.0)
+
+    def test_inventory_valuation_uses_sellable_stock_for_stock_qty(self):
+        today = timezone.now().date()
+        start_date = today - timedelta(days=7)
+        end_date = today
+
+        Batch.objects.create(
+            tenant=self.tenant,
+            outlet=self.outlet,
+            product=self.product,
+            batch_number="BATCH-001",
+            expiry_date=today + timedelta(days=30),
+            quantity=5,
+            cost_price=Decimal("8.00"),
+        )
+
+        self._create_movement("sale", 10, 2)
+
+        response = self.client.get(
+            "/api/v1/reports/inventory-valuation/",
+            {
+                "outlet": self.outlet.id,
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["items"][0]
+        self.assertEqual(item["stock_qty"], 5)
+        self.assertEqual(item["stock_value"], 50.0)
+        self.assertEqual(item["open_qty"], 15)
+        self.assertEqual(item["open_value"], 150.0)
 
     def test_reports_reject_outlet_from_another_tenant(self):
         response = self.client.get(
