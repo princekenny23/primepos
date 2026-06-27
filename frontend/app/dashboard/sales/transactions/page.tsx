@@ -40,6 +40,7 @@ import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { useToast } from "@/components/ui/use-toast"
 import { format } from "date-fns"
 import { useRouter } from "next/navigation"
+import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
 import { RefundReturnModal } from "@/components/modals/refund-return-modal"
 import { useI18n } from "@/contexts/i18n-context"
@@ -100,6 +101,8 @@ export default function TransactionsPage() {
   const [isLoadingSaleDetails, setIsLoadingSaleDetails] = useState(false)
   const [showRefundReturn, setShowRefundReturn] = useState(false)
   const [refundReceiptNumber, setRefundReceiptNumber] = useState("")
+  const [showAssignCustomerModal, setShowAssignCustomerModal] = useState(false)
+  const [assignSale, setAssignSale] = useState<SaleDetail | null>(null)
 
   const enrichSale = useCallback((sale: any): SaleDetail => {
     const saleDetail: SaleDetail = { ...sale, _raw: sale._raw || sale }
@@ -376,6 +379,41 @@ export default function TransactionsPage() {
     }
   }
 
+  const openAssignCustomerModal = (sale: SaleDetail) => {
+    setAssignSale(sale)
+    setShowAssignCustomerModal(true)
+  }
+
+  const handleAssignCustomer = async (customer: any) => {
+    if (!assignSale) return
+
+    try {
+      setIsLoadingSaleDetails(true)
+      const outletId =
+        assignSale.outlet?.id ||
+        assignSale._raw?.outlet_detail?.id ||
+        assignSale._raw?.outlet ||
+        assignSale._raw?.outlet_id ||
+        outlet?.id ||
+        null
+
+      const { api, apiEndpoints } = await import("@/lib/api")
+      await api.patch(apiEndpoints.sales.update(assignSale.id), {
+        customer: customer.id,
+        outlet: outletId,
+      })
+
+      setShowAssignCustomerModal(false)
+      setAssignSale(null)
+      loadTransactions()
+    } catch (error: any) {
+      console.error("Failed to assign customer:", error)
+      toast({ title: "Error", description: error.message || "Failed to assign customer", variant: "destructive" })
+    } finally {
+      setIsLoadingSaleDetails(false)
+    }
+  }
+
   const handleRefundReturn = (sale: SaleDetail) => {
     const receipt = sale._raw?.receipt_number || sale.receipt_number || ""
     setRefundReceiptNumber(String(receipt || ""))
@@ -556,6 +594,11 @@ export default function TransactionsPage() {
                             <DropdownMenuItem onClick={() => handleRefundReturn(sale)}>
                               Refund / Return
                             </DropdownMenuItem>
+                            {!sale.customer?.id && (
+                              <DropdownMenuItem onClick={() => openAssignCustomerModal(sale)}>
+                                Assign Customer
+                              </DropdownMenuItem>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -609,6 +652,13 @@ export default function TransactionsPage() {
           }}
         />
       )}
+
+      <CustomerSelectModal
+        open={showAssignCustomerModal}
+        onOpenChange={setShowAssignCustomerModal}
+        onSelect={handleAssignCustomer}
+        selectedCustomer={assignSale?.customer || null}
+      />
 
       <RefundReturnModal
         open={showRefundReturn}
