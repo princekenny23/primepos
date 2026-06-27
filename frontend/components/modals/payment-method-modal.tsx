@@ -17,7 +17,16 @@ import { CreditCard, Smartphone, Wallet, Receipt } from "lucide-react"
 import type { Customer } from "@/lib/services/customerService"
 import { useI18n } from "@/contexts/i18n-context"
 
-type PaymentMethod = "cash" | "card" | "mobile" | "tab"
+type PaymentMethod =
+  | "cash"
+  | "card"
+  | "mobile"
+  | "airtel"
+  | "tnm"
+  | "first_capital_bank"
+  | "national_bank"
+  | "standard_bank"
+  | "tab"
 
 interface PaymentMethodModalProps {
   open: boolean
@@ -162,18 +171,42 @@ export function PaymentMethodModal({
               <Button
                 variant="outline"
                 className="h-20 flex flex-col items-center justify-center gap-2"
-                onClick={() => handleMethodSelect("card")}
+                onClick={() => handleMethodSelect("airtel")}
               >
-                <CreditCard className="h-6 w-6" />
-                <span className="text-sm font-medium">Card</span>
+                <Smartphone className="h-6 w-6" />
+                <span className="text-sm font-medium">Airtel</span>
               </Button>
               <Button
                 variant="outline"
                 className="h-20 flex flex-col items-center justify-center gap-2"
-                onClick={() => handleMethodSelect("mobile")}
+                onClick={() => handleMethodSelect("tnm")}
               >
                 <Smartphone className="h-6 w-6" />
-                <span className="text-sm font-medium">Mobile</span>
+                <span className="text-sm font-medium">TNM</span>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex flex-col items-center justify-center gap-2"
+                onClick={() => handleMethodSelect("first_capital_bank")}
+              >
+                <CreditCard className="h-6 w-6" />
+                <span className="text-sm font-medium">First Capital Bank</span>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex flex-col items-center justify-center gap-2"
+                onClick={() => handleMethodSelect("national_bank")}
+              >
+                <CreditCard className="h-6 w-6" />
+                <span className="text-sm font-medium">National Bank</span>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex flex-col items-center justify-center gap-2"
+                onClick={() => handleMethodSelect("standard_bank")}
+              >
+                <CreditCard className="h-6 w-6" />
+                <span className="text-sm font-medium">Standard Bank</span>
               </Button>
               <Button
                 variant="outline"

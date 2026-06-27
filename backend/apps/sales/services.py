@@ -157,9 +157,16 @@ class ReceiptService:
                     receipt = Receipt.objects.create(**create_kwargs)
                 else:
                     raise
+            
+            # For PDF receipts, also store encoded bytes in content field as fallback
+            # in case file storage becomes inaccessible later (e.g., Cloudinary 401)
+            if format == 'pdf' and pdf_bytes and not receipt.content:
+                receipt.content = ReceiptService._encode_pdf_content(pdf_bytes)
+                receipt.save(update_fields=['content'])
 
             logger.info(f"Receipt generated for sale {sale.id}: {receipt.id} format={format} by user={getattr(user, 'id', None)}")
             return receipt
+
             
         except Exception as e:
             logger.error(f"Error generating receipt for sale {sale.id}: {str(e)}", exc_info=True)
@@ -369,7 +376,7 @@ class ReceiptService:
 
         dotted_line = Table([['']], colWidths=[160*mm])
         dotted_line.setStyle(TableStyle([
-            ('LINEABOVE', (0, 0), (-1, -1), 0.5, colors.grey, (1, 2)),
+            ('LINEABOVE', (0, 0), (-1, -1), 0.5, colors.grey, 1),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
             ('RIGHTPADDING', (0, 0), (-1, -1), 0),
             ('TOPPADDING', (0, 0), (-1, -1), 2),
@@ -745,6 +752,12 @@ class ReceiptService:
                     new_receipt = Receipt.objects.create(**create_kwargs)
                 else:
                     raise
+            
+            # For PDF receipts, also store encoded bytes in content field as fallback
+            # in case file storage becomes inaccessible later
+            if format == 'pdf' and pdf_bytes and not new_receipt.content:
+                new_receipt.content = ReceiptService._encode_pdf_content(pdf_bytes)
+                new_receipt.save(update_fields=['content'])
 
             # Mark old as voided and not current only after new receipt exists
             old.voided = True

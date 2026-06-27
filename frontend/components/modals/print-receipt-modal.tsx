@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Printer, Download } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import { downloadReceiptForSale, printReceiptForSale } from "@/lib/utils/receipt-actions"
 
 interface CartItem {
   id: string
@@ -26,31 +27,66 @@ interface PrintReceiptModalProps {
   onOpenChange: (open: boolean) => void
   cart: CartItem[]
   total: number
+  saleId?: string
+  receiptData?: {
+    cart: Array<{ name: string; price: number; quantity: number; total: number; sku?: string }>
+    subtotal: number
+    discount: number
+    tax: number
+    total: number
+    sale: any
+  }
+  outletId?: number | string
 }
 
-export function PrintReceiptModal({ open, onOpenChange, cart, total }: PrintReceiptModalProps) {
+export function PrintReceiptModal({ open, onOpenChange, cart, total, saleId, receiptData, outletId }: PrintReceiptModalProps) {
   const { toast } = useToast()
 
-  const handlePrint = () => {
-    // In production, this would trigger print dialog
-    toast({
-      title: "Printing Receipt",
-      description: "Receipt is being sent to printer...",
-    })
-    setTimeout(() => {
+  const handlePrint = async () => {
+    try {
+      if (receiptData) {
+        await printReceiptForSale({ ...receiptData, outletId })
+      }
+      toast({
+        title: "Receipt sent",
+        description: "The receipt was sent to the configured printer.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Print failed",
+        description: error?.message || "Unable to print receipt.",
+        variant: "destructive",
+      })
+    } finally {
       onOpenChange(false)
-    }, 1000)
+    }
   }
 
-  const handleDownload = () => {
-    // In production, this would download PDF
-    toast({
-      title: "Downloading Receipt",
-      description: "Receipt PDF is being generated...",
-    })
-    setTimeout(() => {
+  const handleDownload = async () => {
+    if (!saleId) {
+      toast({
+        title: "Download unavailable",
+        description: "Receipt download is not available for this sale yet.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      await downloadReceiptForSale(saleId)
+      toast({
+        title: "Receipt downloaded",
+        description: "The receipt file has been downloaded.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Download failed",
+        description: error?.message || "Unable to download receipt.",
+        variant: "destructive",
+      })
+    } finally {
       onOpenChange(false)
-    }, 1000)
+    }
   }
 
   return (

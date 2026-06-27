@@ -18,6 +18,11 @@ class Sale(models.Model):
         ('cash', 'Cash'),
         ('card', 'Card'),
         ('mobile', 'Mobile Money'),
+        ('airtel', 'Airtel Money'),
+        ('tnm', 'TNM Money'),
+        ('first_capital_bank', 'First Capital Bank'),
+        ('national_bank', 'National Bank'),
+        ('standard_bank', 'Standard Bank'),
         ('tab', 'Tab'),
         ('credit', 'Credit'),
     ]

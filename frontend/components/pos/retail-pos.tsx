@@ -35,6 +35,9 @@ import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 import { PaymentMethodModal } from "@/components/modals/payment-method-modal"
 import { PaymentPopup } from "@/components/pos/payment-popup"
 import { RefundReturnModal } from "@/components/modals/refund-return-modal"
+import { ReceiptPostSaleModal } from "@/components/modals/receipt-post-sale-modal"
+import { PrintReceiptModal } from "@/components/modals/print-receipt-modal"
+import { downloadReceiptForSale, printReceiptForSale } from "@/lib/utils/receipt-actions"
 import {
   Dialog,
   DialogContent,
@@ -153,6 +156,11 @@ export function RetailPOS() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   const [showQuickSelectDropdown, setShowQuickSelectDropdown] = useState(false)
   const [showPaymentMethod, setShowPaymentMethod] = useState(false)
+  const [showReceiptPrompt, setShowReceiptPrompt] = useState(false)
+  const [showManualReceiptDialog, setShowManualReceiptDialog] = useState(false)
+  const [postSaleReceiptData, setPostSaleReceiptData] = useState<any>(null)
+  const [postSaleOutletId, setPostSaleOutletId] = useState<number | string | undefined>(undefined)
+  const [postSaleReceiptSaleId, setPostSaleReceiptSaleId] = useState<string | undefined>(undefined)
   const [showRefundReturn, setShowRefundReturn] = useState(false)
   const [showSaleDiscount, setShowSaleDiscount] = useState(false)
   const [saleDiscount, setSaleDiscount] = useState<SaleDiscount | null>(null)
@@ -717,7 +725,7 @@ export function RetailPOS() {
     }
   }
 
-  const handlePaymentConfirm = async (method: "cash" | "card" | "mobile" | "tab", amount?: number, change?: number) => {
+  const handlePaymentConfirm = async (method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab", amount?: number, change?: number) => {
     paymentCloseByConfirmRef.current = true
     setShowPaymentMethod(false)
     
@@ -763,7 +771,7 @@ export function RetailPOS() {
             discount_type: saleDiscount?.type,
             discount_reason: saleDiscount?.reason,
             total: paymentTotal,
-            payment_method: method as "cash" | "card" | "mobile" | "tab" | "credit",
+            payment_method: method as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit",
             notes: "Offline sale completed from POS pay screen.",
           },
           cashReceived: method === "cash" ? Number(amount || paymentTotal) : 0,
@@ -891,28 +899,24 @@ export function RetailPOS() {
         total: it.total || (it.quantity || 0) * (it.price || 0),
       }))
 
-      // Do not show receipt preview in the POS terminal; printing is handled automatically
+      setPostSaleReceiptData({
+        cart: receiptCartItems,
+        subtotal: fullSale.subtotal ?? paymentSubtotal,
+        discount: fullSale.discount ?? paymentDiscount,
+        tax: fullSale.tax ?? paymentTax,
+        total: fullSale.total ?? paymentTotal,
+        sale: fullSale,
+      })
+      setPostSaleOutletId(typeof currentOutlet!.id === 'string' ? parseInt(String(currentOutlet!.id), 10) : currentOutlet!.id)
+      setPostSaleReceiptSaleId(String(fullSale?.id || sale.id))
 
-      // Clear cart and discount
       clearCart()
       setSelectedCustomer(null)
       setSaleDiscount(null)
       setIsDeliveryRequired(false)
       setTransactionLocked(false)
       setInitiatedSaleId("")
-
-  // Receipt preview removed: we no longer open a preview modal in the POS terminal
-      // Attempt to auto-print (non-blocking). Uses the Local Print Agent and saved default printer.
-      ;(async () => {
-        try {
-          const outletId = typeof currentOutlet!.id === 'string' ? parseInt(String(currentOutlet!.id), 10) : currentOutlet!.id
-          await printReceipt({ cart: receiptCartItems, subtotal: fullSale.subtotal ?? paymentSubtotal, discount: fullSale.discount ?? paymentDiscount, tax: fullSale.tax ?? paymentTax, total: fullSale.total ?? paymentTotal, sale: fullSale }, outletId)
-        } catch (err: any) {
-          // Non-blocking failure - inform user but don't interrupt flow
-          console.error("Auto-print failed:", err)
-          toast({ title: "Print failed", description: err?.message || "Unable to print receipt. Check printer settings.", variant: "destructive" })
-        }
-      })()
+      setShowReceiptPrompt(true)
     } catch (error: any) {
       console.error("Checkout error:", error)
       toast({
@@ -924,6 +928,30 @@ export function RetailPOS() {
       setIsProcessingPayment(false)
       setIsDeliveryRequired(false)
     }
+  }
+
+  const handleAutoPrintReceipt = async () => {
+    try {
+      if (postSaleReceiptData) {
+        await printReceiptForSale({ ...postSaleReceiptData, outletId: postSaleOutletId })
+      }
+      toast({ title: "Receipt sent", description: "The receipt was sent to the configured printer." })
+    } catch (err: any) {
+      toast({ title: "Print failed", description: err?.message || "Unable to print receipt.", variant: "destructive" })
+    } finally {
+      setShowReceiptPrompt(false)
+      setShowManualReceiptDialog(false)
+    }
+  }
+
+  const handleManualReceiptSelection = () => {
+    setShowReceiptPrompt(false)
+    setShowManualReceiptDialog(true)
+  }
+
+  const handleSkipReceipt = () => {
+    setShowReceiptPrompt(false)
+    setShowManualReceiptDialog(false)
   }
 
   const handleReturn = () => {
@@ -1912,6 +1940,46 @@ export function RetailPOS() {
         customer={selectedCustomer}
         items={cart}
         onConfirm={handlePaymentConfirm}
+      />
+
+      <ReceiptPostSaleModal
+        open={showReceiptPrompt}
+        onOpenChange={(open) => {
+          setShowReceiptPrompt(open)
+          if (!open) {
+            setPostSaleReceiptData(null)
+            setPostSaleOutletId(undefined)
+            setPostSaleReceiptSaleId(undefined)
+          }
+        }}
+        total={postSaleReceiptData?.total}
+        onAutoPrint={handleAutoPrintReceipt}
+        onManualReceipt={handleManualReceiptSelection}
+        onSkip={handleSkipReceipt}
+      />
+
+      <PrintReceiptModal
+        open={showManualReceiptDialog}
+        onOpenChange={(open) => {
+          setShowManualReceiptDialog(open)
+          if (!open) {
+            setPostSaleReceiptData(null)
+            setPostSaleOutletId(undefined)
+            setPostSaleReceiptSaleId(undefined)
+          }
+        }}
+        cart={(postSaleReceiptData?.cart || []).map((item: any) => ({
+          id: item.id || `${item.name}-${item.quantity}`,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+          discount: item.discount || 0,
+          total: item.total || item.price * item.quantity,
+        }))}
+        total={postSaleReceiptData?.total || 0}
+        saleId={postSaleReceiptSaleId}
+        receiptData={postSaleReceiptData}
+        outletId={postSaleOutletId}
       />
 
       {/* Add/Edit Product Modal used when barcode lookup returns no result */}

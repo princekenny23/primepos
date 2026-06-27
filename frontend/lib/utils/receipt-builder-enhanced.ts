@@ -28,7 +28,7 @@ export interface ReceiptData {
   tax?: number
   discount?: number
   total: number
-  paymentMethod: "cash" | "card" | "mobile" | "tab"
+  paymentMethod: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab"
   businessName?: string
   phone?: string
   address?: string

@@ -22,7 +22,7 @@ interface SalePayload {
   discount_type?: string
   discount_reason?: string
   total: number
-  payment_method: 'cash' | 'card' | 'mobile'
+  payment_method: 'cash' | 'card' | 'mobile' | 'airtel' | 'tnm' | 'first_capital_bank' | 'national_bank' | 'standard_bank'
   notes?: string
   table_id?: string | number
   guests?: number

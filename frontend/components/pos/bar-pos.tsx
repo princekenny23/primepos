@@ -233,7 +233,7 @@ export function BarPOS() {
 
   // Close tab form
   const [closeTabForm, setCloseTabForm] = useState({
-    payment_method: "cash" as "cash" | "card" | "mobile" | "credit",
+    payment_method: "cash" as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit",
     cash_received: "",
     notes: "",
   })
@@ -1117,7 +1117,7 @@ export function BarPOS() {
 
   // Close tab with payment data from PaymentMethodModal
   const handleCloseTabWithPayment = async (
-    method: "cash" | "card" | "mobile" | "credit",
+    method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit",
     amount?: number,
     change?: number
   ) => {
@@ -2335,7 +2335,7 @@ export function BarPOS() {
         onConfirm={async (method, amount, change) => {
           const paymentMethod = method === "tab" ? "credit" : method
           if (currentTab) {
-            handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "credit", amount, change)
+            handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit", amount, change)
           } else {
             const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && (!window.navigator.onLine || offlineCheckoutStarted)
 
@@ -2414,7 +2414,7 @@ export function BarPOS() {
               }
 
               const sale = await saleService.finalizePayment(initiatedSaleId, {
-                payment_method: paymentMethod as "cash" | "card" | "mobile" | "tab" | "credit",
+                payment_method: paymentMethod as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit",
                 cash_received: amount,
                 change,
               })

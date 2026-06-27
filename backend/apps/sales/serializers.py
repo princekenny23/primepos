@@ -266,7 +266,11 @@ class SaleSerializer(serializers.ModelSerializer):
 
         # Ensure payment_method is valid
         if 'payment_method' in attrs:
-            valid_methods = ['cash', 'card', 'mobile', 'tab', 'credit']
+            valid_methods = [
+                'cash', 'card', 'mobile', 'airtel', 'tnm',
+                'first_capital_bank', 'national_bank', 'standard_bank',
+                'tab', 'credit'
+            ]
             if attrs['payment_method'] not in valid_methods:
                 raise serializers.ValidationError({
                     "payment_method": f"Invalid payment method. Must be one of: {', '.join(valid_methods)}"

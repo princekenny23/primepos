@@ -1137,7 +1137,11 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             return Response({"detail": "Sale already finalized."}, status=status.HTTP_400_BAD_REQUEST)
 
         payment_method = str(request.data.get("payment_method") or sale.payment_method or "cash").strip().lower()
-        if payment_method not in ['cash', 'card', 'mobile', 'tab', 'credit']:
+        if payment_method not in [
+            'cash', 'card', 'mobile', 'airtel', 'tnm',
+            'first_capital_bank', 'national_bank', 'standard_bank',
+            'tab', 'credit'
+        ]:
             return Response({"detail": "Invalid payment_method."}, status=status.HTTP_400_BAD_REQUEST)
 
         # Deduct stock only once, at finalization time.
@@ -1164,13 +1168,15 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     )
 
         sale.payment_method = payment_method
-        if payment_method in ['cash', 'card', 'mobile']:
+        if payment_method in ['cash', 'card', 'mobile', 'airtel', 'tnm',
+                              'first_capital_bank', 'national_bank', 'standard_bank']:
             sale.status = 'completed'
             sale.payment_status = 'paid'
             sale.amount_paid = sale.total
             sale.cash_amount = Decimal('0')
             sale.card_amount = Decimal('0')
             sale.mobile_amount = Decimal('0')
+            sale.bank_transfer_amount = Decimal('0')
             if payment_method == 'cash':
                 sale.cash_amount = sale.total
                 cash_received = request.data.get('cash_received')
@@ -1182,8 +1188,10 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         pass
             elif payment_method == 'card':
                 sale.card_amount = sale.total
-            elif payment_method == 'mobile':
+            elif payment_method in ['mobile', 'airtel', 'tnm']:
                 sale.mobile_amount = sale.total
+            elif payment_method in ['first_capital_bank', 'national_bank', 'standard_bank']:
+                sale.bank_transfer_amount = sale.total
         elif payment_method in ['tab', 'credit']:
             sale.status = 'pending'
             sale.payment_status = 'unpaid'
@@ -2141,16 +2149,26 @@ class ReceiptViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
 
         from django.http import HttpResponse, FileResponse
         from apps.sales.services import ReceiptService
+        import logging
 
-        # If PDF file exists, serve it
+        logger = logging.getLogger(__name__)
+
+        # If PDF file exists, try to serve it. If storage fails, fall back to embedded content.
         if receipt.pdf_file:
-            receipt.increment_access()
-            return FileResponse(
-                receipt.pdf_file.open('rb'),
-                as_attachment=True,
-                filename=f"receipt_{receipt.receipt_number}.pdf",
-                content_type='application/pdf'
-            )
+            try:
+                receipt.increment_access()
+                return FileResponse(
+                    receipt.pdf_file.open('rb'),
+                    as_attachment=True,
+                    filename=f"receipt_{receipt.receipt_number}.pdf",
+                    content_type='application/pdf'
+                )
+            except Exception as storage_error:
+                logger.warning(
+                    f"Failed to open receipt {receipt.id} PDF file from storage: {str(storage_error)}. Falling back to embedded content.",
+                    exc_info=True
+                )
+                # Fall through to the content-based fallback below
 
         # Fallback for environments without configured file storage:
         # serve PDF bytes embedded in receipt.content.

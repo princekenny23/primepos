@@ -27,6 +27,8 @@ import { useToast } from "@/components/ui/use-toast"
 import { tabService, type CloseTabData, type Tab, type TabListItem } from "@/lib/services/barTabService"
 import { useBusinessStore } from "@/stores/businessStore"
 
+type CloseTabPaymentMethod = "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit"
+
 interface CloseTabModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -40,7 +42,7 @@ export function CloseTabModal({ open, onOpenChange, tab, onTabClosed }: CloseTab
   const [isProcessing, setIsProcessing] = useState(false)
   const [isLoadingTab, setIsLoadingTab] = useState(false)
   const [tabDetails, setTabDetails] = useState<Tab | null>(null)
-  const [paymentMethod, setPaymentMethod] = useState<string>("cash")
+  const [paymentMethod, setPaymentMethod] = useState<CloseTabPaymentMethod>("cash")
   const [amount, setAmount] = useState<string>("")
   const [notes, setNotes] = useState("")
 
@@ -231,11 +233,14 @@ export function CloseTabModal({ open, onOpenChange, tab, onTabClosed }: CloseTab
           </div>
 
           {/* Payment */}
-          <Tabs value={paymentMethod} onValueChange={setPaymentMethod}>
-            <TabsList className="grid w-full grid-cols-4">
+          <Tabs value={paymentMethod} onValueChange={(value) => setPaymentMethod(value as CloseTabPaymentMethod)}>
+            <TabsList className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
               <TabsTrigger value="cash">Cash</TabsTrigger>
-              <TabsTrigger value="card">Card</TabsTrigger>
-              <TabsTrigger value="mobile">Mobile</TabsTrigger>
+              <TabsTrigger value="airtel">Airtel</TabsTrigger>
+              <TabsTrigger value="tnm">TNM</TabsTrigger>
+              <TabsTrigger value="first_capital_bank">First Capital</TabsTrigger>
+              <TabsTrigger value="national_bank">National Bank</TabsTrigger>
+              <TabsTrigger value="standard_bank">Standard Bank</TabsTrigger>
               <TabsTrigger value="credit">Credit</TabsTrigger>
             </TabsList>
 
@@ -256,15 +261,33 @@ export function CloseTabModal({ open, onOpenChange, tab, onTabClosed }: CloseTab
               )}
             </TabsContent>
 
-            <TabsContent value="card" className="space-y-2 mt-4">
+            <TabsContent value="airtel" className="space-y-2 mt-4">
               <p className="text-sm text-muted-foreground">
-                Process card payment through your card reader
+                Record this tab as paid via Airtel Money.
               </p>
             </TabsContent>
 
-            <TabsContent value="mobile" className="space-y-2 mt-4">
+            <TabsContent value="tnm" className="space-y-2 mt-4">
               <p className="text-sm text-muted-foreground">
-                Record this tab as paid via mobile money.
+                Record this tab as paid via TNM Money.
+              </p>
+            </TabsContent>
+
+            <TabsContent value="first_capital_bank" className="space-y-2 mt-4">
+              <p className="text-sm text-muted-foreground">
+                Record this tab as paid via First Capital Bank.
+              </p>
+            </TabsContent>
+
+            <TabsContent value="national_bank" className="space-y-2 mt-4">
+              <p className="text-sm text-muted-foreground">
+                Record this tab as paid via National Bank.
+              </p>
+            </TabsContent>
+
+            <TabsContent value="standard_bank" className="space-y-2 mt-4">
+              <p className="text-sm text-muted-foreground">
+                Record this tab as paid via Standard Bank.
               </p>
             </TabsContent>
 

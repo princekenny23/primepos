@@ -143,7 +143,7 @@ export interface AddItemData {
 // ==================== Close Tab ====================
 
 export interface CloseTabData {
-  payment_method: "cash" | "card" | "mobile" | "credit"
+  payment_method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit"
   discount?: number
   discount_type?: "percentage" | "fixed"
   discount_reason?: string

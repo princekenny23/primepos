@@ -32,7 +32,7 @@ interface PaymentPopupProps {
   tax?: number;
   customer?: { name?: string; phone?: string } | null;
   items?: CartItem[];
-  onConfirm: (method: "cash" | "card" | "mobile" | "tab", amount?: number, change?: number) => Promise<void> | void;
+  onConfirm: (method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab", amount?: number, change?: number) => Promise<void> | void;
 }
 
 const NUMPAD = [
@@ -81,7 +81,7 @@ export function PaymentPopup({
   const change = Math.max(0, received - total);
 
   const handleConfirm = () => {
-    onConfirm(selectedMethod as "cash" | "card" | "mobile" | "tab", received || undefined, change);
+    onConfirm(selectedMethod as "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab", received || undefined, change);
     setSelectedMethod('cash');
     setReceivedAmount('');
   };
@@ -205,7 +205,12 @@ export function PaymentPopup({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="tab">Tab/Credit</SelectItem>
+                <SelectItem value="airtel">Airtel Money</SelectItem>
+                <SelectItem value="tnm">TNM Money</SelectItem>
+                <SelectItem value="first_capital_bank">First Capital Bank</SelectItem>
+                <SelectItem value="national_bank">National Bank</SelectItem>
+                <SelectItem value="standard_bank">Standard Bank</SelectItem>
+                <SelectItem value="tab">Tab/Credit</SelectItem>
                 </SelectContent>
               </Select>
             </div>

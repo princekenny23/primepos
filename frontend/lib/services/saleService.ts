@@ -45,7 +45,7 @@ export interface CreateSaleData {
   discount_type?: "percentage" | "amount"
   discount_reason?: string
   total: number
-  payment_method: "cash" | "card" | "mobile" | "tab" | "credit"
+  payment_method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit"
   notes?: string
   // Restaurant-specific fields
   table_id?: string
@@ -70,7 +70,7 @@ export interface VoidSaleData {
   tax?: number
   discount?: number
   total?: number
-  payment_method?: "cash" | "card" | "mobile" | "tab" | "credit"
+  payment_method?: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit"
   notes?: string
   reason?: string
 }
@@ -323,7 +323,7 @@ export const saleService = {
   async finalizePayment(
     id: string,
     payload: {
-      payment_method: "cash" | "card" | "mobile" | "tab" | "credit"
+      payment_method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit"
       cash_received?: number
       change?: number
     }

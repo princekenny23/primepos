@@ -213,6 +213,18 @@ export interface Category {
   createdAt: string
 }
 
+export type PaymentMethod =
+  | "cash"
+  | "card"
+  | "mobile"
+  | "tab"
+  | "credit"
+  | "airtel"
+  | "tnm"
+  | "first_capital_bank"
+  | "national_bank"
+  | "standard_bank"
+
 export interface Sale {
   id: string
   businessId: string
@@ -225,7 +237,7 @@ export interface Sale {
   discount?: number
   discountType?: "percentage" | "amount"
   discountReason?: string
-  paymentMethod: "cash" | "card" | "mobile" | "tab"
+  paymentMethod: PaymentMethod
   status: "completed" | "pending" | "refunded"
   createdAt: string
   _raw?: any
