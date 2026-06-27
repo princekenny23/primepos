@@ -14,6 +14,8 @@ from apps.sales.models import Sale, SaleItem
 from apps.products.models import Product, Category
 from apps.customers.models import Customer
 from apps.inventory.models import StockMovement, StockTake, StockTakeItem
+from apps.inventory.stock_helpers import get_sellable_stock
+from apps.outlets.models import Outlet
 from apps.shifts.models import Shift
 from apps.expenses.models import Expense
 import pandas as pd
@@ -706,6 +708,10 @@ def inventory_valuation_report(request):
     outlet_id = get_outlet_id_from_request(request)
     if not outlet_id:
         return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
+
+    outlet = Outlet.objects.filter(id=outlet_id, tenant=tenant).first()
+    if not outlet:
+        return Response({"detail": "Outlet is required. Please specify X-Outlet-ID header or ?outlet=id query parameter."}, status=400)
     
     # Date filters
     start_date = request.query_params.get('start_date')
@@ -822,11 +828,8 @@ def inventory_valuation_report(request):
         damage = movement_qty(period_movement_totals, product.id, 'damage')
         expiry = movement_qty(period_movement_totals, product.id, 'expiry')
         
-        # Closing stock from opening + in-period net movements.
-        current_stock = (
-            opening_stock + received + transferred_in + returns + adjusted
-            - sold - transferred_out - damage - expiry
-        )
+        # Closing stock from physical sellable inventory (avoid negative ledger-only stock values)
+        current_stock = get_sellable_stock(product, outlet)
         
         # Get stock take data if available
         counted_qty = 0
