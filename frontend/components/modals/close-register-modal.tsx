@@ -43,11 +43,6 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
   const [closingCash, setClosingCash] = useState<string>("")
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string>("")
-
-  if (!activeShift) {
-    return null
-  }
-
   const shift = freshShift || activeShift
 
   useEffect(() => {
@@ -100,7 +95,7 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
   }
 
   const calculateDifference = (): number => {
-    const opening = activeShift.openingCashBalance || 0
+    const opening = shift?.openingCashBalance || 0
     const closing = parseFloat(closingCash) || 0
     return closing - opening
   }
@@ -146,9 +141,9 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
   }
 
   const shiftDuration = (() => {
-    if (!activeShift.startTime) return 0
+    if (!shift?.startTime) return 0
     try {
-      const startDate = new Date(activeShift.startTime)
+      const startDate = new Date(shift.startTime)
       if (isNaN(startDate.getTime())) return 0
       return Math.round((new Date().getTime() - startDate.getTime()) / (1000 * 60))
     } catch {
@@ -158,6 +153,10 @@ export function CloseRegisterModal({ open, onOpenChange }: CloseRegisterModalPro
 
   const hours = Math.floor(shiftDuration / 60)
   const minutes = shiftDuration % 60
+
+  if (!shift) {
+    return null
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
