@@ -11,7 +11,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { User, UserPlus, Search, Mail, Phone } from "lucide-react"
 import { useState, useEffect, useCallback } from "react"
 import { useToast } from "@/components/ui/use-toast"
@@ -143,7 +142,7 @@ export function CustomerSelectModal({
             </Button>
           </div>
 
-          <ScrollArea className="flex-1 min-h-0 mt-4 overflow-hidden">
+          <div className="flex-1 min-h-0 mt-4 overflow-y-auto pr-2">
             {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <p className="text-muted-foreground">{t("common.messages.loading")}</p>
@@ -162,7 +161,7 @@ export function CustomerSelectModal({
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 pr-4">
+              <div className="space-y-2 pr-2">
                 {filteredCustomers.map((customer) => (
                   <button
                     key={customer.id}
@@ -209,7 +208,7 @@ export function CustomerSelectModal({
                 ))}
               </div>
             )}
-          </ScrollArea>
+          </div>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

@@ -51,12 +51,12 @@ export function CustomerSelector({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md max-h-[85vh] overflow-hidden">
         <DialogHeader>
           <DialogTitle>Select Customer</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto pr-2">
           {/* Search Input */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -79,38 +79,40 @@ export function CustomerSelector({
 
           {/* Search Results */}
           {searchTerm && (
-            <ScrollArea className="max-h-56 border rounded p-2">
-              {isSearching ? (
-                <div className="flex items-center justify-center h-full">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                </div>
-              ) : searchResults.length > 0 ? (
-                <div className="space-y-1">
-                  {searchResults.map((customer) => (
-                    <Button
-                      key={customer.id}
-                      variant="ghost"
-                      className="w-full justify-start text-left"
-                      onClick={() => {
-                        onSelect(customer)
-                        onOpenChange(false)
-                      }}
-                    >
-                      <div>
-                        <div className="font-medium text-sm">{customer.name}</div>
-                        {customer.phone && (
-                          <div className="text-xs text-muted-foreground">{customer.phone}</div>
-                        )}
-                      </div>
-                    </Button>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground text-center py-4">
-                  No customers found
-                </div>
-              )}
-            </ScrollArea>
+            <div className="max-h-[40vh] min-h-[12rem] border rounded p-2 overflow-hidden">
+              <ScrollArea className="h-full">
+                {isSearching ? (
+                  <div className="flex items-center justify-center h-full min-h-[8rem]">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  </div>
+                ) : searchResults.length > 0 ? (
+                  <div className="space-y-1">
+                    {searchResults.map((customer) => (
+                      <Button
+                        key={customer.id}
+                        variant="ghost"
+                        className="w-full justify-start text-left"
+                        onClick={() => {
+                          onSelect(customer)
+                          onOpenChange(false)
+                        }}
+                      >
+                        <div>
+                          <div className="font-medium text-sm">{customer.name}</div>
+                          {customer.phone && (
+                            <div className="text-xs text-muted-foreground">{customer.phone}</div>
+                          )}
+                        </div>
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground text-center py-4">
+                    No customers found
+                  </div>
+                )}
+              </ScrollArea>
+            </div>
           )}
 
           {/* Add New Customer Button */}
