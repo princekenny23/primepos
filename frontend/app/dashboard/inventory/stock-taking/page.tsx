@@ -89,6 +89,7 @@ const normalizeValue = (value: unknown) =>
   String(value ?? "")
     .trim()
     .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value
@@ -182,6 +183,77 @@ function parseImportRows(file: File): Promise<ImportedStockTakeRow[]> {
     reader.onerror = () => reject(new Error("Failed to read selected file."))
     reader.readAsArrayBuffer(file)
   })
+}
+
+function calculateSimilarity(left: string, right: string): number {
+  if (!left || !right) return 0
+  if (left === right) return 1
+
+  const maxLength = Math.max(left.length, right.length)
+  if (maxLength === 0) return 1
+
+  const leftChars = left.split("")
+  const rightChars = right.split("")
+  const dp = Array.from({ length: leftChars.length + 1 }, () => new Array(rightChars.length + 1).fill(0))
+
+  for (let i = 0; i <= leftChars.length; i += 1) dp[i][0] = i
+  for (let j = 0; j <= rightChars.length; j += 1) dp[0][j] = j
+
+  for (let i = 1; i <= leftChars.length; i += 1) {
+    for (let j = 1; j <= rightChars.length; j += 1) {
+      const cost = leftChars[i - 1] === rightChars[j - 1] ? 0 : 1
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      )
+    }
+  }
+
+  return 1 - dp[leftChars.length][rightChars.length] / maxLength
+}
+
+function findBestStockTakeItem(row: ImportedStockTakeRow, stockTakeItems: any[]) {
+  const rowBarcode = normalizeValue(row.barcode)
+  const rowSku = normalizeValue(row.sku)
+  const rowName = normalizeValue(row.productName)
+
+  const exactBarcodeCandidates = rowBarcode
+    ? stockTakeItems.filter((item) => normalizeValue(item.product?.barcode || item.barcode || "") === rowBarcode)
+    : []
+  if (exactBarcodeCandidates.length === 1) return exactBarcodeCandidates[0]
+  if (exactBarcodeCandidates.length > 1) return null
+
+  const exactSkuCandidates = rowSku
+    ? stockTakeItems.filter((item) => normalizeValue(item.product?.sku || item.sku || "") === rowSku)
+    : []
+  if (exactSkuCandidates.length === 1) return exactSkuCandidates[0]
+  if (exactSkuCandidates.length > 1) return null
+
+  const exactNameCandidates = rowName
+    ? stockTakeItems.filter((item) => normalizeValue(item.product?.name || item.product_name || "") === rowName)
+    : []
+  if (exactNameCandidates.length === 1) return exactNameCandidates[0]
+  if (exactNameCandidates.length > 1) return null
+
+  if (!rowName || rowName.length < 4) return null
+
+  let bestCandidate: any = null
+  let bestScore = 0
+
+  for (const item of stockTakeItems) {
+    const candidateName = normalizeValue(item.product?.name || item.product_name || "")
+    if (!candidateName) continue
+
+    const score = calculateSimilarity(rowName, candidateName)
+    if (score > bestScore) {
+      bestScore = score
+      bestCandidate = item
+    }
+  }
+
+  if (bestCandidate && bestScore >= 0.95) return bestCandidate
+  return null
 }
 
 export default function StockTakingHistoryPage() {
@@ -346,48 +418,19 @@ export default function StockTakingHistoryPage() {
       const stockTakeId = String(createdStockTake.id)
       const stockTakeItems = await inventoryService.getStockTakeItems(stockTakeId)
 
-      const byName = new Map<string, any[]>()
-      const bySku = new Map<string, any[]>()
-      const byBarcode = new Map<string, any[]>()
-
-      stockTakeItems.forEach((item: any) => {
-        const product = item.product || {}
-        const productName = normalizeValue(product.name || item.product_name || "")
-        const sku = normalizeValue(product.sku || "")
-        const barcode = normalizeValue(product.barcode || "")
-
-        if (productName) {
-          byName.set(productName, [...(byName.get(productName) || []), item])
-        }
-        if (sku) {
-          bySku.set(sku, [...(bySku.get(sku) || []), item])
-        }
-        if (barcode) {
-          byBarcode.set(barcode, [...(byBarcode.get(barcode) || []), item])
-        }
-      })
-
       const matchedCounts = new Map<string, number>()
+      const unmatchedNames: string[] = []
       let unmatchedRows = 0
 
       for (const row of importedRows) {
-        let candidates: any[] | undefined
-
-        const barcodeKey = normalizeValue(row.barcode)
-        const skuKey = normalizeValue(row.sku)
-        const nameKey = normalizeValue(row.productName)
-
-        if (barcodeKey) candidates = byBarcode.get(barcodeKey)
-        if ((!candidates || candidates.length !== 1) && skuKey) candidates = bySku.get(skuKey)
-        if ((!candidates || candidates.length !== 1) && nameKey) candidates = byName.get(nameKey)
-
-        if (!candidates || candidates.length !== 1) {
+        const matchedItem = findBestStockTakeItem(row, stockTakeItems)
+        if (!matchedItem) {
           unmatchedRows += 1
+          unmatchedNames.push(row.productName)
           continue
         }
 
-        const item = candidates[0]
-        const itemId = String(item.id)
+        const itemId = String(matchedItem.id)
         const existing = matchedCounts.get(itemId) || 0
         matchedCounts.set(itemId, existing + row.countedQuantity)
       }
@@ -404,14 +447,19 @@ export default function StockTakingHistoryPage() {
       setShowImportModal(false)
       setImportFile(null)
 
+      const remainingCount = unmatchedRows
+      const unmatchedPreview = unmatchedNames.slice(0, 5).join(", ")
       toast({
         title: "Import completed",
-        description: `Imported ${updates.length} product(s).${
+        description: `Imported ${matchedCounts.size} product(s).${
           unmatchedRows ? ` ${unmatchedRows} row(s) were not matched.` : ""
-        }`,
+        }${unmatchedPreview ? ` Unmatched: ${unmatchedPreview}${unmatchedNames.length > 5 ? "..." : ""}` : ""}`,
       })
 
-      router.push(`/dashboard/inventory/stock-taking/${stockTakeId}`)
+      const nextPath = remainingCount > 0
+        ? `/dashboard/inventory/stock-taking/${stockTakeId}?focus=remaining`
+        : `/dashboard/inventory/stock-taking/${stockTakeId}`
+      router.push(nextPath)
     } catch (error: any) {
       console.error("Failed to import stock takes:", error)
       toast({

@@ -76,6 +76,8 @@ export default function StockValuationReportPage() {
     return { start: startOfMonth(now), end: endOfMonth(now) }
   })
   const [report, setReport] = useState<InventoryValuationReport | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 10
 
   const formatCurrency = useCallback(
     (value: number) => {
@@ -134,9 +136,23 @@ export default function StockValuationReportPage() {
     loadReportData()
   }, [loadReportData])
 
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [dateRange.start, dateRange.end, currentOutlet?.id])
+
   const startDate = format(dateRange.start, "yyyy-MM-dd")
   const endDate = format(dateRange.end, "yyyy-MM-dd")
   const headerRangeLabel = `${format(dateRange.start, "MMM dd, yyyy")} - ${format(dateRange.end, "MMM dd, yyyy")}`
+  const totalItems = report?.items?.length || 0
+  const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage))
+  const paginatedItems = (report?.items || []).slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  )
+
+  useEffect(() => {
+    setCurrentPage((prev) => Math.min(prev, totalPages))
+  }, [totalPages])
 
   const handleExportXlsx = async () => {
     try {
@@ -310,6 +326,11 @@ export default function StockValuationReportPage() {
               {report?.item_count ?? 0} items • Period {startDate} to {endDate}
               {report?.stock_take_date ? ` • Last stock take: ${report.stock_take_date}` : ""}
             </p>
+            {totalItems > 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Showing {Math.min(itemsPerPage, totalItems)} items per page • Page {currentPage} of {totalPages}
+              </p>
+            ) : null}
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <Table>
@@ -343,7 +364,7 @@ export default function StockValuationReportPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {(report?.items || []).map((item) => (
+                {paginatedItems.map((item) => (
                   <TableRow
                     key={item.id}
                     className={
@@ -443,6 +464,33 @@ export default function StockValuationReportPage() {
                 ) : null}
               </TableBody>
             </Table>
+
+            {totalItems > 0 ? (
+              <div className="mt-4 flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems} items
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-muted-foreground">Page {currentPage} of {totalPages}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </PageLayout>

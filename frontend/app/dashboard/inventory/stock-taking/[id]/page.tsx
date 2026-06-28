@@ -41,7 +41,7 @@ import {
 } from "@/components/ui/popover"
 import { ClipboardCheck, Search, Save, ArrowLeft, CheckCircle2 } from "lucide-react"
 import { useState, useEffect, useMemo } from "react"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { inventoryService } from "@/lib/services/inventoryService"
 import { useToast } from "@/components/ui/use-toast"
@@ -61,6 +61,7 @@ interface StockTakingItem {
 export default function StockTakingDetailPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const stockTakeId = params.id as string
   const { toast } = useToast()
 
@@ -73,12 +74,27 @@ export default function StockTakingDetailPage() {
   const [stockTake, setStockTake] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [searchPage, setSearchPage] = useState(1)
+  const itemsPerPage = 10
   const [isCompleting, setIsCompleting] = useState(false)
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false)
   useEffect(() => {
     loadStockTakeData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stockTakeId])
+
+  useEffect(() => {
+    if (searchParams?.get("focus") === "remaining") {
+      setSearchFilter("remaining")
+      setSearchOpen(true)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    setCurrentPage(1)
+    setSearchPage(1)
+  }, [items.length, searchTerm, searchFilter])
 
   const loadStockTakeData = async (showLoading = true) => {
     if (showLoading) setIsLoading(true)
@@ -175,6 +191,11 @@ export default function StockTakingDetailPage() {
     })
   }, [items, searchTerm, searchFilter])
 
+  const paginatedSearchableItems = useMemo(() => {
+    const startIndex = (searchPage - 1) * itemsPerPage
+    return searchableItems.slice(startIndex, startIndex + itemsPerPage)
+  }, [searchableItems, searchPage, itemsPerPage])
+
   // Filter items for stock count table (only counted items with countedQty > 0)
   const countedItems = useMemo(() => {
     const filtered = items
@@ -199,6 +220,14 @@ export default function StockTakingDetailPage() {
     
     return filtered
   }, [items])
+
+  const paginatedCountedItems = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage
+    return countedItems.slice(startIndex, startIndex + itemsPerPage)
+  }, [countedItems, currentPage, itemsPerPage])
+
+  const totalCountedPages = Math.max(1, Math.ceil(countedItems.length / itemsPerPage))
+  const totalSearchPages = Math.max(1, Math.ceil(searchableItems.length / itemsPerPage))
 
   const handleCountChange = async (itemId: string, value: string) => {
     const numValue = parseInt(value) || 0
@@ -410,6 +439,16 @@ export default function StockTakingDetailPage() {
         </Card>
 
 
+        {searchFilter === "remaining" && hasUncountedItems && (
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="pt-6">
+              <p className="text-sm text-amber-800">
+                {items.filter((item) => !item.isCounted).length} item(s) are still uncounted. Use the search box below to enter the remaining counts manually.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Search Bar with Dropdown */}
         <Card>
           <CardHeader>
@@ -471,13 +510,13 @@ export default function StockTakingDetailPage() {
                   
                   {/* Scrollable Items List */}
                   <div className="max-h-60 overflow-y-auto overflow-x-hidden">
-                    {searchableItems.length === 0 ? (
+                    {paginatedSearchableItems.length === 0 ? (
                       <div className="p-4 text-center text-sm text-muted-foreground">
                         No items found
                       </div>
                     ) : (
                       <div className="divide-y">
-                        {searchableItems.map((item) => (
+                        {paginatedSearchableItems.map((item) => (
                           <div
                             key={item.id}
                             onClick={() => handleItemClick(item)}
@@ -506,6 +545,29 @@ export default function StockTakingDetailPage() {
                       </div>
                     )}
                   </div>
+                  {searchableItems.length > itemsPerPage && (
+                    <div className="flex items-center justify-between border-t p-2 text-sm text-muted-foreground">
+                      <span>Page {searchPage} of {totalSearchPages}</span>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSearchPage((prev) => Math.max(1, prev - 1))}
+                          disabled={searchPage === 1}
+                        >
+                          Prev
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSearchPage((prev) => Math.min(totalSearchPages, prev + 1))}
+                          disabled={searchPage === totalSearchPages}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </PopoverContent>
               </Popover>
             </div>
@@ -539,7 +601,7 @@ export default function StockTakingDetailPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {countedItems.map((item) => (
+                  {paginatedCountedItems.map((item) => (
                     <TableRow key={item.id}>
                       <TableCell className="font-mono text-sm">{item.barcode || "N/A"}</TableCell>
                       <TableCell className="font-medium">{item.product_name}</TableCell>
@@ -572,6 +634,29 @@ export default function StockTakingDetailPage() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+            {countedItems.length > itemsPerPage && (
+              <div className="mt-4 flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
+                <span>Page {currentPage} of {totalCountedPages}</span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Prev
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.min(totalCountedPages, prev + 1))}
+                    disabled={currentPage === totalCountedPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
