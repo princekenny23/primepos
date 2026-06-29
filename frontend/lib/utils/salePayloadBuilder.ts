@@ -22,7 +22,7 @@ interface SalePayload {
   discount_type?: string
   discount_reason?: string
   total: number
-  payment_method: 'cash' | 'card' | 'mobile' | 'airtel' | 'tnm' | 'first_capital_bank' | 'national_bank' | 'standard_bank'
+  payment_method: 'cash' | 'card' | 'mobile' | 'other' | 'airtel' | 'tnm' | 'first_capital_bank' | 'national_bank' | 'standard_bank'
   notes?: string
   table_id?: string | number
   guests?: number
@@ -39,7 +39,7 @@ export function buildSalePayload(options: {
   discount: number
   discountType?: string
   discountReason?: string
-  paymentMethod?: 'cash' | 'card' | 'mobile'
+  paymentMethod?: 'cash' | 'card' | 'mobile' | 'other'
   table?: any
   notes?: string
   guests?: number

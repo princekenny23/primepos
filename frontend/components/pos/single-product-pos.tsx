@@ -361,7 +361,7 @@ export function SingleProductPOS() {
     setIsProcessingPayment(true)
     try {
       const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
-      const supportedOfflineMethods = ["cash", "card", "mobile", "airtel", "tnm", "first_capital_bank", "national_bank", "standard_bank", "tab", "credit"] as const
+      const supportedOfflineMethods = ["cash", "card", "mobile", "other", "airtel", "tnm", "first_capital_bank", "national_bank", "standard_bank", "tab", "credit"] as const
       const offlinePaymentMethod = supportedOfflineMethods.includes(paymentMethod as any)
         ? (paymentMethod as (typeof supportedOfflineMethods)[number])
         : "cash"

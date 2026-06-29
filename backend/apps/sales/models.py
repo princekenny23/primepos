@@ -23,6 +23,7 @@ class Sale(models.Model):
         ('first_capital_bank', 'First Capital Bank'),
         ('national_bank', 'National Bank'),
         ('standard_bank', 'Standard Bank'),
+        ('other', 'Other'),
         ('tab', 'Tab'),
         ('credit', 'Credit'),
     ]

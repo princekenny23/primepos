@@ -23,7 +23,7 @@ export interface OfflineCompletedSale {
   business_name: string | null
   outlet_name: string | null
   cashier_name: string | null
-  payment_method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit"
+  payment_method: "cash" | "card" | "mobile" | "other" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit"
   subtotal: number
   tax: number
   discount: number

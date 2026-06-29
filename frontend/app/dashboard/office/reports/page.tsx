@@ -30,14 +30,6 @@ const reportCards: ReportNavCard[] = [
     href: "/dashboard/office/reports/sales",
   },
   {
-    id: "cashup",
-    title: "Cashup Report",
-    description: "Shift cash reconciliation summary",
-    icon: ClipboardList,
-    href: "/dashboard/office/reports/cashup",
-  },
- 
-  {
     id: "inventory",
     title: "Stock Valuation Report",
     description: "Stock valuation summary and item-level detail",

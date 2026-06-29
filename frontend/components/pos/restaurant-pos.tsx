@@ -1053,7 +1053,7 @@ export function RestaurantPOS() {
 
   // Close tab with payment data from PaymentMethodModal
   const handleCloseTabWithPayment = async (
-    method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit",
+    method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit" | "other",
     amount?: number,
     change?: number
   ) => {

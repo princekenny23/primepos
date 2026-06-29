@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
@@ -156,6 +157,10 @@ export function RetailPOS() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   const [showQuickSelectDropdown, setShowQuickSelectDropdown] = useState(false)
   const [showPaymentMethod, setShowPaymentMethod] = useState(false)
+  const [showOtherPaymentMethodDialog, setShowOtherPaymentMethodDialog] = useState(false)
+  const [pendingOtherPaymentAmount, setPendingOtherPaymentAmount] = useState<number | undefined>(undefined)
+  const [pendingOtherPaymentChange, setPendingOtherPaymentChange] = useState<number | undefined>(undefined)
+  const [pendingOtherPaymentMethodName, setPendingOtherPaymentMethodName] = useState("")
   const [showReceiptPrompt, setShowReceiptPrompt] = useState(false)
   const [showManualReceiptDialog, setShowManualReceiptDialog] = useState(false)
   const [postSaleReceiptData, setPostSaleReceiptData] = useState<any>(null)
@@ -725,10 +730,32 @@ export function RetailPOS() {
     }
   }
 
-  const handlePaymentConfirm = async (method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab", amount?: number, change?: number) => {
+  const handlePaymentConfirm = async (
+    method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other",
+    amount?: number,
+    change?: number,
+  ) => {
+    if (method === "other") {
+      setPendingOtherPaymentAmount(amount)
+      setPendingOtherPaymentChange(change)
+      setPendingOtherPaymentMethodName("")
+      setShowPaymentMethod(false)
+      setShowOtherPaymentMethodDialog(true)
+      return
+    }
+
+    await handleFinalizeSale(method, amount, change)
+  }
+
+  const handleFinalizeSale = async (
+    method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other",
+    amount?: number,
+    change?: number,
+    otherPaymentMethodName?: string,
+  ) => {
     paymentCloseByConfirmRef.current = true
-    setShowPaymentMethod(false)
-    
+    setShowOtherPaymentMethodDialog(false)
+
     // Re-validate (shouldn't happen, but safety check)
     if (!currentOutlet || !activeShift) {
       toast({
@@ -739,7 +766,7 @@ export function RetailPOS() {
       setIsProcessingPayment(false)
       return
     }
-    
+
     setIsProcessingPayment(true)
 
     try {
@@ -868,6 +895,7 @@ export function RetailPOS() {
         payment_method: method,
         cash_received: amount,
         change,
+        other_payment_method_name: otherPaymentMethodName,
       })
       // Fetch canonical sale from backend to ensure printed receipt matches DB
       let fullSale = sale
@@ -1941,6 +1969,70 @@ export function RetailPOS() {
         items={cart}
         onConfirm={handlePaymentConfirm}
       />
+
+      <Dialog
+        open={showOtherPaymentMethodDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowOtherPaymentMethodDialog(false)
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Other Payment Method</DialogTitle>
+            <DialogDescription>
+              Enter the name of the payment method before finalizing the sale.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="other-payment-name" className="text-sm font-medium">
+                Method name
+              </Label>
+              <Input
+                id="other-payment-name"
+                value={pendingOtherPaymentMethodName}
+                onChange={(event) => setPendingOtherPaymentMethodName(event.target.value)}
+                placeholder="e.g. Gift Card, Voucher, Cheque"
+                className="mt-2"
+                autoFocus
+              />
+            </div>
+            <div className="rounded bg-gray-50 p-3 text-sm text-gray-700">
+              {pendingOtherPaymentAmount !== undefined ? (
+                <>
+                  Amount received: MWK {pendingOtherPaymentAmount.toLocaleString()}<br />
+                  Change due: MWK {Number(pendingOtherPaymentChange || 0).toLocaleString()}
+                </>
+              ) : (
+                <>Enter the payment method name and confirm to complete the sale.</>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowOtherPaymentMethodDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!pendingOtherPaymentMethodName.trim()}
+              onClick={() => void handleFinalizeSale(
+                "other",
+                pendingOtherPaymentAmount,
+                pendingOtherPaymentChange,
+                pendingOtherPaymentMethodName.trim(),
+              )}
+            >
+              Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ReceiptPostSaleModal
         open={showReceiptPrompt}

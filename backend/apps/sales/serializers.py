@@ -268,13 +268,14 @@ class SaleSerializer(serializers.ModelSerializer):
         if 'payment_method' in attrs:
             valid_methods = [
                 'cash', 'card', 'mobile', 'airtel', 'tnm',
-                'first_capital_bank', 'national_bank', 'standard_bank',
+                'first_capital_bank', 'national_bank', 'standard_bank', 'other',
                 'tab', 'credit'
             ]
             if attrs['payment_method'] not in valid_methods:
-                raise serializers.ValidationError({
-                    "payment_method": f"Invalid payment method. Must be one of: {', '.join(valid_methods)}"
-                })
+                if not isinstance(attrs['payment_method'], str) or not attrs['payment_method'].strip():
+                    raise serializers.ValidationError({
+                        "payment_method": f"Invalid payment method. Must be one of: {', '.join(valid_methods)} or a custom method name"
+                    })
 
         return attrs
 

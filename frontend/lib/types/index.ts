@@ -217,6 +217,7 @@ export type PaymentMethod =
   | "cash"
   | "card"
   | "mobile"
+  | "other"
   | "tab"
   | "credit"
   | "airtel"
@@ -237,7 +238,7 @@ export interface Sale {
   discount?: number
   discountType?: "percentage" | "amount"
   discountReason?: string
-  paymentMethod: PaymentMethod
+  paymentMethod: string
   status: "completed" | "pending" | "refunded"
   createdAt: string
   _raw?: any

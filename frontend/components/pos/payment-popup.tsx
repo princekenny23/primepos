@@ -32,7 +32,7 @@ interface PaymentPopupProps {
   tax?: number;
   customer?: { name?: string; phone?: string } | null;
   items?: CartItem[];
-  onConfirm: (method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab", amount?: number, change?: number) => Promise<void> | void;
+  onConfirm: (method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other", amount?: number, change?: number) => Promise<void> | void;
 }
 
 const NUMPAD = [
@@ -80,10 +80,26 @@ export function PaymentPopup({
   const received = receivedAmount ? parseFloat(receivedAmount) : 0;
   const change = Math.max(0, received - total);
 
+  const canConfirm = () => {
+    if (!selectedMethod) return false
+    if (selectedMethod === "cash" || selectedMethod === "other") {
+      const amountNum = parseFloat(receivedAmount) || 0
+      return amountNum >= total
+    }
+    return true
+  }
+
   const handleConfirm = () => {
-    onConfirm(selectedMethod as "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab", received || undefined, change);
-    setSelectedMethod('cash');
-    setReceivedAmount('');
+    const method = selectedMethod as "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other"
+
+    if (method === "cash" || method === "other") {
+      onConfirm(method, received || undefined, change)
+    } else {
+      onConfirm(method, total, 0)
+    }
+
+    setSelectedMethod('cash')
+    setReceivedAmount('')
   };
 
   const handleDismiss = () => {
@@ -211,6 +227,7 @@ export function PaymentPopup({
                 <SelectItem value="national_bank">National Bank</SelectItem>
                 <SelectItem value="standard_bank">Standard Bank</SelectItem>
                 <SelectItem value="tab">Tab/Credit</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -275,6 +292,7 @@ export function PaymentPopup({
               <Button
                 onClick={handleConfirm}
                 size="sm"
+                disabled={!canConfirm()}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm"
               >
                 Pay Now

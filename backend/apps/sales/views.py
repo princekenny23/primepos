@@ -1136,13 +1136,22 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if sale.payment_status == 'paid' and sale.status == 'completed':
             return Response({"detail": "Sale already finalized."}, status=status.HTTP_400_BAD_REQUEST)
 
-        payment_method = str(request.data.get("payment_method") or sale.payment_method or "cash").strip().lower()
-        if payment_method not in [
+        requested_method = str(request.data.get("payment_method") or sale.payment_method or "cash").strip()
+        normalized_method = requested_method.lower()
+
+        if normalized_method == 'other':
+            other_payment_method_name = str(request.data.get('other_payment_method_name') or '').strip()
+            if not other_payment_method_name:
+                return Response({"detail": "other_payment_method_name is required for other payment method."}, status=status.HTTP_400_BAD_REQUEST)
+            payment_method = other_payment_method_name
+        elif normalized_method not in [
             'cash', 'card', 'mobile', 'airtel', 'tnm',
             'first_capital_bank', 'national_bank', 'standard_bank',
             'tab', 'credit'
         ]:
             return Response({"detail": "Invalid payment_method."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            payment_method = normalized_method
 
         # Deduct stock only once, at finalization time.
         if not bool(sale.delivery_required):
@@ -1168,8 +1177,8 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     )
 
         sale.payment_method = payment_method
-        if payment_method in ['cash', 'card', 'mobile', 'airtel', 'tnm',
-                              'first_capital_bank', 'national_bank', 'standard_bank']:
+        if normalized_method in ['cash', 'card', 'mobile', 'airtel', 'tnm',
+                                 'first_capital_bank', 'national_bank', 'standard_bank', 'other']:
             sale.status = 'completed'
             sale.payment_status = 'paid'
             sale.amount_paid = sale.total
@@ -1177,7 +1186,8 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             sale.card_amount = Decimal('0')
             sale.mobile_amount = Decimal('0')
             sale.bank_transfer_amount = Decimal('0')
-            if payment_method == 'cash':
+            sale.other_amount = Decimal('0')
+            if normalized_method == 'cash':
                 sale.cash_amount = sale.total
                 cash_received = request.data.get('cash_received')
                 if cash_received not in (None, ''):
@@ -1186,13 +1196,15 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         sale.change_given = max(Decimal('0'), (sale.cash_received - sale.total)).quantize(Decimal('0.01'))
                     except Exception:
                         pass
-            elif payment_method == 'card':
+            elif normalized_method == 'card':
                 sale.card_amount = sale.total
-            elif payment_method in ['mobile', 'airtel', 'tnm']:
+            elif normalized_method in ['mobile', 'airtel', 'tnm']:
                 sale.mobile_amount = sale.total
-            elif payment_method in ['first_capital_bank', 'national_bank', 'standard_bank']:
+            elif normalized_method in ['first_capital_bank', 'national_bank', 'standard_bank']:
                 sale.bank_transfer_amount = sale.total
-        elif payment_method in ['tab', 'credit']:
+            elif normalized_method == 'other':
+                sale.other_amount = sale.total
+        elif normalized_method in ['tab', 'credit']:
             sale.status = 'pending'
             sale.payment_status = 'unpaid'
             sale.amount_paid = Decimal('0')
