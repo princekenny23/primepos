@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from decimal import Decimal
 from datetime import timedelta
@@ -246,26 +247,62 @@ class StockTakeItemViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     required_tenant_permissions = ['allow_inventory', 'allow_inventory_stock_take']
     
     def get_queryset(self):
-        """Filter stock take items by tenant through stock_take"""
+        """Filter stock take items by tenant and outlet through stock_take"""
         queryset = super().get_queryset()
         # SaaS admins can see all stock take items
-        if self.request.user.is_saas_admin:
-            queryset = queryset
-        else:
-            # Regular users only see stock take items from their tenant's stock takes
+        if not self.request.user.is_saas_admin:
             tenant = getattr(self.request, 'tenant', None) or self.request.user.tenant
             if tenant:
                 queryset = queryset.filter(stock_take__tenant=tenant)
             else:
                 return queryset.none()
-        
+
+            outlet = self.get_outlet_for_request(self.request)
+            if outlet:
+                queryset = queryset.filter(stock_take__outlet=outlet)
+            else:
+                return queryset.none()
+
         # Filter by stock_take if provided in URL
         stock_take_id = self.kwargs.get('stock_take_pk')
         if stock_take_id:
             queryset = queryset.filter(stock_take_id=stock_take_id)
         
         return queryset
-    
+
+    def perform_create(self, serializer):
+        tenant = self.get_tenant_for_request(self.request)
+        if not tenant:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("Tenant is required.")
+
+        stock_take_id = self.kwargs.get('stock_take_pk')
+        if not stock_take_id:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"stock_take": "Stock take ID is required in the URL."})
+
+        try:
+            stock_take = StockTake.objects.get(id=stock_take_id, tenant=tenant)
+        except StockTake.DoesNotExist:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"stock_take": "Stock take not found or does not belong to your tenant."})
+
+        outlet = self.get_outlet_for_request(self.request)
+        if outlet and stock_take.outlet != outlet:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"outlet": "Stock take does not belong to the current outlet."})
+
+        product = serializer.validated_data.get('product')
+        if product and (product.tenant != tenant or product.outlet != stock_take.outlet):
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"product": "Product must belong to the same tenant and outlet as the stock take."})
+
+        if product and StockTakeItem.objects.filter(stock_take=stock_take, product=product).exists():
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError({"product": "Product already exists in this stock take."})
+
+        serializer.save(stock_take=stock_take)
+
     def get_serializer_context(self):
         """Add request to serializer context"""
         context = super().get_serializer_context()
@@ -339,6 +376,16 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 queryset = queryset.filter(tenant=tenant)
             else:
                 return queryset.none()
+
+            outlet = self.get_outlet_for_request(self.request)
+            if outlet:
+                queryset = queryset.filter(outlet=outlet)
+            else:
+                return queryset.none()
+        else:
+            outlet = self.get_outlet_for_request(self.request)
+            if outlet:
+                queryset = queryset.filter(outlet=outlet)
         
         return queryset
     
@@ -405,17 +452,73 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             status='running'
         )
         
-        # Auto-create stock take items for all active products
+        # Auto-create stock take items from the current live outlet inventory
         with transaction.atomic():
-            products = Product.objects.filter(tenant=tenant, is_active=True)
-            for product in products:
-                StockTakeItem.objects.create(
-                    stock_take=stock_take,
-                    product=product,
-                    expected_quantity=product.stock,
-                    counted_quantity=0,
-                    notes=''
+            products = list(Product.objects.filter(
+                tenant=tenant,
+                outlet=outlet,
+                is_active=True,
+            ).order_by('name'))
+
+            today = timezone.now().date()
+            product_ids = [product.id for product in products]
+
+            batch_totals = {
+                entry['product_id']: entry['total_quantity']
+                for entry in Batch.objects.filter(
+                    product_id__in=product_ids,
+                    outlet=outlet,
+                    expiry_date__gt=today,
+                    quantity__gt=0,
                 )
+                .values('product_id')
+                .annotate(total_quantity=Sum('quantity'))
+            }
+
+            products_with_any_batches = set(
+                Batch.objects.filter(
+                    product_id__in=product_ids,
+                    outlet=outlet,
+                )
+                .values_list('product_id', flat=True)
+                .distinct()
+            )
+
+            location_stock_map = {
+                entry['product_id']: entry['quantity']
+                for entry in LocationStock.objects.filter(
+                    product_id__in=product_ids,
+                    outlet=outlet,
+                )
+                .values('product_id', 'quantity')
+            }
+
+            created_items = []
+            for product in products:
+                expected_quantity = batch_totals.get(product.id)
+                if expected_quantity is None:
+                    expected_quantity = 0 if product.id in products_with_any_batches else location_stock_map.get(product.id, 0)
+
+                created_items.append(
+                    StockTakeItem(
+                        stock_take=stock_take,
+                        product=product,
+                        expected_quantity=expected_quantity,
+                        counted_quantity=0,
+                        notes=''
+                    )
+                )
+
+            if created_items:
+                StockTakeItem.objects.bulk_create(created_items)
+
+            logger.info(
+                "Created %s stock take items for stock take %s (tenant=%s, outlet=%s)",
+                len(created_items),
+                stock_take.id,
+                tenant.id,
+                outlet.id,
+            )
     
     def update(self, request, *args, **kwargs):
         """Override update to ensure tenant matches"""

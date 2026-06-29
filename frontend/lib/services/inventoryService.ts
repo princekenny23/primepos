@@ -48,6 +48,8 @@ export interface StockTakeData {
 }
 
 export interface StockTakeItemData {
+  product_id?: string
+  expected_quantity?: number
   counted_quantity: number
   notes?: string
 }
@@ -176,10 +178,23 @@ export const inventoryService = {
     return api.post(apiEndpoints.inventory.stockTakes, data)
   },
 
+  async createStockTakeItem(stockTakeId: string, data: StockTakeItemData): Promise<any> {
+    return api.post(`${apiEndpoints.inventory.stockTakes}${stockTakeId}/items/`, data)
+  },
+
   async getStockTakeItems(stockTakeId: string): Promise<any[]> {
     try {
-      const response = await api.get<any>(`${apiEndpoints.inventory.stockTakes}${stockTakeId}/items/`)
-      return Array.isArray(response) ? response : (response.results || [])
+      const results: any[] = []
+      let url = `${apiEndpoints.inventory.stockTakes}${stockTakeId}/items/`
+
+      while (url) {
+        const response = await api.get<any>(url)
+        const pageItems = Array.isArray(response) ? response : (response.results || [])
+        results.push(...pageItems)
+        url = response.next || null
+      }
+
+      return results
     } catch (error) {
       console.error("Failed to fetch stock take items:", error)
       return []

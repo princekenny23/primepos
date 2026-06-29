@@ -48,6 +48,7 @@ import { StartStockTakeModal } from "@/components/modals/start-stock-take-modal"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { inventoryService } from "@/lib/services/inventoryService"
+import { productService } from "@/lib/services/productService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useRealAPI } from "@/lib/utils/api-config"
 import Link from "next/link"
@@ -155,7 +156,7 @@ function parseImportRows(file: File): Promise<ImportedStockTakeRow[]> {
               barcode: barcode || undefined,
             }
           })
-          .filter((row) => row.productName)
+          .filter((row) => row.productName || row.sku || row.barcode)
 
         const invalidQty = mappedRows.find(
           (row) => !Number.isFinite(row.countedQuantity) || row.countedQuantity < 0
@@ -170,7 +171,7 @@ function parseImportRows(file: File): Promise<ImportedStockTakeRow[]> {
         }
 
         if (!mappedRows.length) {
-          reject(new Error("No valid rows found. Ensure 'Product Name' and 'Counted Quantity' columns are present."))
+          reject(new Error("No valid rows found. Provide at least one identifier such as Product Name, SKU, or Barcode, plus a counted quantity."))
           return
         }
 
@@ -236,23 +237,36 @@ function findBestStockTakeItem(row: ImportedStockTakeRow, stockTakeItems: any[])
   if (exactNameCandidates.length === 1) return exactNameCandidates[0]
   if (exactNameCandidates.length > 1) return null
 
-  if (!rowName || rowName.length < 4) return null
+  if (!rowName) return null
 
-  let bestCandidate: any = null
-  let bestScore = 0
+  const nameCandidates = stockTakeItems
+    .map((item) => {
+      const candidateName = normalizeValue(item.product?.name || item.product_name || "")
+      if (!candidateName) return null
 
-  for (const item of stockTakeItems) {
-    const candidateName = normalizeValue(item.product?.name || item.product_name || "")
-    if (!candidateName) continue
+      const containsMatch = candidateName.includes(rowName) || rowName.includes(candidateName)
+      const similarity = calculateSimilarity(rowName, candidateName)
 
-    const score = calculateSimilarity(rowName, candidateName)
-    if (score > bestScore) {
-      bestScore = score
-      bestCandidate = item
-    }
-  }
+      return {
+        item,
+        similarity,
+        containsMatch,
+      }
+    })
+    .filter((candidate): candidate is { item: any; similarity: number; containsMatch: boolean } => Boolean(candidate))
 
-  if (bestCandidate && bestScore >= 0.95) return bestCandidate
+  if (!nameCandidates.length) return null
+
+  const bestCandidate = nameCandidates.reduce((best, current) => {
+    if (current.containsMatch && !best.containsMatch) return current
+    if (!current.containsMatch && best.containsMatch) return best
+    if (current.similarity > best.similarity) return current
+    return best
+  }, nameCandidates[0])
+
+  if (bestCandidate.containsMatch) return bestCandidate.item
+  if (bestCandidate.similarity >= 0.9) return bestCandidate.item
+
   return null
 }
 
@@ -273,22 +287,31 @@ export default function StockTakingHistoryPage() {
 
   useEffect(() => {
     const loadStockTakes = async () => {
-      if (!currentBusiness) return
+      if (!currentBusiness || !currentOutlet) return
       
       setIsLoading(true)
       try {
         if (useReal) {
+          // Load all products for the outlet to get actual inventory count
+          const productList = await productService.list({
+            outlet: String(currentOutlet.id),
+            is_active: true,
+          })
+          const actualInventoryCount = productList.count || 0
+
           const response = await inventoryService.getStockTakes({
             outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
           })
           const stockTakes = response.results || []
           
-          // Transform all stock takes into unified format
+          // Transform all stock takes into unified format with actual inventory count
           const transformed = stockTakes.map((st: any) => {
             const isRunning = st.status === 'running'
             const items = st.items || []
             const countedItems = items.filter((i: any) => i.counted_quantity > 0).length
-            const totalItems = items.length
+            
+            // Use actual inventory count instead of session items count
+            const totalItems = actualInventoryCount
             const progress = totalItems > 0 
               ? Math.round((countedItems / totalItems) * 100) 
               : 0
@@ -390,88 +413,6 @@ export default function StockTakingHistoryPage() {
     }
   }
 
-  const handleImport = async () => {
-    if (!importFile) {
-      toast({
-        title: "No File Selected",
-        description: "Please select a file to import.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsImporting(true)
-    try {
-      if (!currentOutlet?.id) {
-        throw new Error("Please select an outlet before importing a stock take file.")
-      }
-
-      const importedRows = await parseImportRows(importFile)
-
-      const createdStockTake = await inventoryService.createStockTake({
-        outlet: String(currentOutlet.id),
-        operating_date: new Date().toISOString().split("T")[0],
-        description: `Imported from ${importFile.name}`,
-        tenant: currentBusiness?.id ? String(currentBusiness.id) : undefined,
-      })
-
-      const stockTakeId = String(createdStockTake.id)
-      const stockTakeItems = await inventoryService.getStockTakeItems(stockTakeId)
-
-      const matchedCounts = new Map<string, number>()
-      const unmatchedNames: string[] = []
-      let unmatchedRows = 0
-
-      for (const row of importedRows) {
-        const matchedItem = findBestStockTakeItem(row, stockTakeItems)
-        if (!matchedItem) {
-          unmatchedRows += 1
-          unmatchedNames.push(row.productName)
-          continue
-        }
-
-        const itemId = String(matchedItem.id)
-        const existing = matchedCounts.get(itemId) || 0
-        matchedCounts.set(itemId, existing + row.countedQuantity)
-      }
-
-      const updates = Array.from(matchedCounts.entries()).map(([itemId, countedQuantity]) =>
-        inventoryService.updateStockTakeItem(stockTakeId, itemId, {
-          counted_quantity: countedQuantity,
-          notes: `Imported from ${importFile.name}`,
-        })
-      )
-
-      await Promise.all(updates)
-      
-      setShowImportModal(false)
-      setImportFile(null)
-
-      const remainingCount = unmatchedRows
-      const unmatchedPreview = unmatchedNames.slice(0, 5).join(", ")
-      toast({
-        title: "Import completed",
-        description: `Imported ${matchedCounts.size} product(s).${
-          unmatchedRows ? ` ${unmatchedRows} row(s) were not matched.` : ""
-        }${unmatchedPreview ? ` Unmatched: ${unmatchedPreview}${unmatchedNames.length > 5 ? "..." : ""}` : ""}`,
-      })
-
-      const nextPath = remainingCount > 0
-        ? `/dashboard/inventory/stock-taking/${stockTakeId}?focus=remaining`
-        : `/dashboard/inventory/stock-taking/${stockTakeId}`
-      router.push(nextPath)
-    } catch (error: any) {
-      console.error("Failed to import stock takes:", error)
-      toast({
-        title: "Import Failed",
-        description: error.message || "Failed to import stock takes. Please try again.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsImporting(false)
-    }
-  }
-
   const handleDownloadTemplate = () => {
     const sampleRows = [
       {
@@ -501,14 +442,6 @@ export default function StockTakingHistoryPage() {
         description={t("inventory.stock_take.description")}
         actions={
           <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              onClick={() => setShowImportModal(true)}
-              className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
-            >
-              <Upload className="mr-2 h-4 w-4" />
-              Import Stock Take
-            </Button>
             <Button 
               onClick={() => setShowStartModal(true)}
               className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
@@ -661,85 +594,6 @@ export default function StockTakingHistoryPage() {
         open={showStartModal}
         onOpenChange={setShowStartModal}
       />
-
-      {/* Import Stock Take Modal */}
-      <Dialog open={showImportModal} onOpenChange={setShowImportModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Import Stock Take</DialogTitle>
-            <DialogDescription>
-              Upload an Excel or CSV file to import stock take counts. Product name is required; SKU and barcode are optional.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>File (Excel or CSV)</Label>
-              <div className="border-2 border-dashed rounded-lg p-6 text-center">
-                <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-                <p className="text-sm text-muted-foreground mb-2">
-                  {importFile ? importFile.name : "No file selected"}
-                </p>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handleFileChange}
-                  className="hidden"
-                  id="stock-take-file-upload"
-                  aria-label="Upload stock take file"
-                  title="Upload stock take file"
-                />
-                <Label htmlFor="stock-take-file-upload">
-                  <Button variant="outline" asChild>
-                    <span>Choose File</span>
-                  </Button>
-                </Label>
-              </div>
-            </div>
-
-            <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-900 dark:text-blue-200">
-              <p className="font-medium mb-1">File Format Requirements:</p>
-              <ul className="list-disc list-inside space-y-1 text-xs">
-                <li>Product Name (required)</li>
-                <li>Counted Quantity</li>
-                <li>Optional: SKU</li>
-                <li>Optional: Barcode</li>
-              </ul>
-              <div className="mt-3">
-                <Button type="button" size="sm" variant="outline" onClick={handleDownloadTemplate}>
-                  Download Template
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowImportModal(false)
-                setImportFile(null)
-              }}
-              disabled={isImporting}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleImport} disabled={!importFile || isImporting}>
-              {isImporting ? (
-                <>
-                  <Upload className="mr-2 h-4 w-4 animate-spin" />
-                  Importing...
-                </>
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Import
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>

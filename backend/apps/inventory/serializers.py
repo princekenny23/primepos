@@ -115,7 +115,7 @@ class StockTakeItemSerializer(serializers.ModelSerializer):
         fields = ('id', 'stock_take', 'product', 'product_id', 'product_name', 
                   'expected_quantity', 'counted_quantity',
                   'difference', 'notes', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'difference', 'product_name', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'stock_take', 'difference', 'product_name', 'created_at', 'updated_at')
 
 
 class LocationStockSerializer(serializers.ModelSerializer):
@@ -135,15 +135,21 @@ class StockTakeSerializer(serializers.ModelSerializer):
     """Stock take serializer"""
     items = StockTakeItemSerializer(many=True, read_only=True)
     user_name = serializers.SerializerMethodField()
+    outlet_name = serializers.SerializerMethodField()
 
     def get_user_name(self, obj):
         if obj.user:
             return obj.user.name if hasattr(obj.user, 'name') else (obj.user.email if hasattr(obj.user, 'email') else str(obj.user))
         return "System"
     
+    def get_outlet_name(self, obj):
+        if obj.outlet:
+            return obj.outlet.name if hasattr(obj.outlet, 'name') else str(obj.outlet)
+        return "Unknown Outlet"
+    
     class Meta:
         model = StockTake
-        fields = ('id', 'tenant', 'outlet', 'user', 'user_name', 'operating_date', 'status',
+        fields = ('id', 'tenant', 'outlet', 'outlet_name', 'user', 'user_name', 'operating_date', 'status',
               'description', 'items', 'created_at', 'completed_at')
         read_only_fields = ('id', 'tenant', 'user', 'status', 'created_at', 'completed_at')
     

@@ -103,7 +103,7 @@ export class ApiClient {
     options: RequestInit = {},
     retry = true
   ): Promise<T> {
-    const url = `${this.baseURL}${endpoint}`
+    const url = String(endpoint).startsWith("http") ? String(endpoint) : `${this.baseURL}${endpoint}`
     const isAuthEndpoint = endpoint.startsWith('/auth/')
     const endpointNoQuery = endpoint.split('?')[0]
     const isManagementEndpoint =
