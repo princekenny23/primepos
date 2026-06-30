@@ -27,7 +27,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { tabService, type CloseTabData, type Tab, type TabListItem } from "@/lib/services/barTabService"
 import { useBusinessStore } from "@/stores/businessStore"
 
-type CloseTabPaymentMethod = "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit"
+type CloseTabPaymentMethod = "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit" | "other"
 
 interface CloseTabModalProps {
   open: boolean

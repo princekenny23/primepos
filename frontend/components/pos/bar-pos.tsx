@@ -233,7 +233,7 @@ export function BarPOS() {
 
   // Close tab form
   const [closeTabForm, setCloseTabForm] = useState({
-    payment_method: "cash" as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit",
+    payment_method: "cash" as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit" | "other",
     cash_received: "",
     notes: "",
   })
@@ -830,52 +830,8 @@ export function BarPOS() {
       return
     }
 
-    try {
-      const subtotal = Math.round(cartSubtotal * 100) / 100
-      const discount = Math.round(discountAmount * 100) / 100
-      const tax = 0
-      const total = Math.round((subtotal - discount + tax) * 100) / 100
-
-      const initiated = await saleService.initiatePayment({
-        outlet: outlet.id,
-        shift: activeShift.id,
-        customer: selectedCustomer?.id || undefined,
-        delivery_required: isDeliveryRequired,
-        items_data: cart.map((item) => ({
-          product_id: item.productId,
-          unit_id: (item as any).unitId || undefined,
-          quantity: item.quantity,
-          price: Math.round(item.price * 100) / 100,
-          notes: item.notes || "",
-        })),
-        subtotal,
-        tax,
-        discount,
-        total,
-        notes: "Transaction initiated from Bar POS pay screen.",
-      })
-
-      if (!("id" in initiated)) {
-        setOfflineCheckoutStarted(true)
-        setTransactionLocked(true)
-        setShowPaymentModal(true)
-        toast({
-          title: "Checkout queued offline",
-          description: initiated.detail || "Transaction will sync when internet returns.",
-        })
-        return
-      }
-
-      setInitiatedSaleId(String(initiated.id))
-      setTransactionLocked(true)
-      setShowPaymentModal(true)
-    } catch (error: any) {
-      toast({
-        title: "Checkout start failed",
-        description: error?.message || "Unable to initiate transaction.",
-        variant: "destructive",
-      })
-    }
+    // Open payment modal and defer initiating until user selects 'tab'/'credit'
+    setShowPaymentModal(true)
   }
 
   const handlePaymentCancel = async () => {
@@ -1117,9 +1073,10 @@ export function BarPOS() {
 
   // Close tab with payment data from PaymentMethodModal
   const handleCloseTabWithPayment = async (
-    method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit" | "other",
+    method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit" | "other" | "mixed",
     amount?: number,
-    change?: number
+    change?: number,
+    options?: { payment_lines?: Array<{ payment_method: string; amount: number; other_payment_method_name?: string }>; other_payment_method_name?: string }
   ) => {
     if (!currentTab) return
     
@@ -1128,6 +1085,7 @@ export function BarPOS() {
       const result = await tabService.close(currentTab.id, {
         payment_method: method,
         cash_received: method === "cash" ? amount : undefined,
+        payment_lines: options?.payment_lines || (options?.other_payment_method_name ? [{ payment_method: options.other_payment_method_name, amount: Number(currentTab.total) }] : undefined),
         discount: discountAmount,
         discount_type: saleDiscount?.type === "percentage" ? "percentage" : saleDiscount ? "fixed" : undefined,
         discount_reason: saleDiscount?.reason,
@@ -2319,6 +2277,7 @@ export function BarPOS() {
       {/* ==================== PAYMENT POPUP ==================== */}
       <PaymentPopup
         open={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
         onDismiss={() => {
           void handlePaymentCancel()
         }}
@@ -2332,17 +2291,15 @@ export function BarPOS() {
         tax={0}
         customer={currentTab ? { name: currentTab.customer_name || undefined, phone: currentTab.customer_phone } : undefined}
         items={cart}
-        onConfirm={async (method, amount, change) => {
+        onConfirm={async (method, amount, change, options) => {
           const paymentMethod = method === "tab" ? "credit" : method
           if (currentTab) {
-            handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit", amount, change)
+            handleCloseTabWithPayment(paymentMethod as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit" | "mixed", amount, change, options)
           } else {
             const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && (!window.navigator.onLine || offlineCheckoutStarted)
 
-            if (!isOfflineCheckout && !initiatedSaleId) {
-              toast({ title: "Error", description: "No initiated transaction found. Click Payment again.", variant: "destructive" })
-              return
-            }
+            // For tab/credit we require an initiated sale. For immediate payments, create+complete in one call.
+            const immediatePayment = !["tab", "credit"].includes(method)
 
             setIsProcessing(true)
             try {
@@ -2413,11 +2370,80 @@ export function BarPOS() {
                 return
               }
 
-              const sale = await saleService.finalizePayment(initiatedSaleId, {
-                payment_method: paymentMethod as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit",
-                cash_received: amount,
-                change,
-              })
+              let sale: any
+
+              if (immediatePayment && !isOfflineCheckout && !initiatedSaleId) {
+                const subtotal = Math.round(cartSubtotal * 100) / 100
+                const discount = Math.round(discountAmount * 100) / 100
+                const tax = 0
+                const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+                sale = await saleService.create({
+                  outlet: String(outlet!.id),
+                  shift: String(activeShift!.id),
+                  customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+                  delivery_required: isDeliveryRequired,
+                  items_data: cart.map((item) => ({
+                    product_id: String('product' in item ? (item as any).product : (item as any).productId),
+                    unit_id: (item as any).unitId || undefined,
+                    quantity: item.quantity,
+                    price: Math.round(item.price * 100) / 100,
+                    notes: item.notes || "",
+                  })),
+                  subtotal,
+                  tax,
+                  discount,
+                  total,
+                  payment_method: paymentMethod as any,
+                  payment_lines: options?.payment_lines || (options?.other_payment_method_name ? [{ payment_method: options.other_payment_method_name, amount: total }] : undefined),
+                  notes: "Quick sale from Bar POS",
+                } as any)
+              } else {
+                // If payment requires an initiated sale (tab/credit) and none exists, initiate now
+                if (!initiatedSaleId) {
+                  const subtotal = Math.round(cartSubtotal * 100) / 100
+                  const discount = Math.round(discountAmount * 100) / 100
+                  const tax = 0
+                  const total = Math.round((subtotal - discount + tax) * 100) / 100
+
+                  const initiated = await saleService.initiatePayment({
+                    outlet: outlet!.id,
+                    shift: activeShift!.id,
+                    customer: selectedCustomer?.id || undefined,
+                    delivery_required: isDeliveryRequired,
+                    items_data: cart.map((item) => ({
+                      product_id: (item as any).productId || (item as any).product,
+                      unit_id: (item as any).unitId || undefined,
+                      quantity: item.quantity,
+                      price: Math.round(item.price * 100) / 100,
+                      notes: item.notes || "",
+                    })),
+                    subtotal,
+                    tax,
+                    discount,
+                    total,
+                    notes: "Initiated for tab/credit from Bar POS",
+                  })
+
+                  if (!('id' in initiated)) {
+                    setOfflineCheckoutStarted(true)
+                    setTransactionLocked(true)
+                    setShowPaymentModal(true)
+                    toast({ title: "Checkout queued offline", description: initiated.detail || "Transaction will sync when internet returns." })
+                    return
+                  }
+
+                  setInitiatedSaleId(String(initiated.id))
+                }
+
+                sale = await saleService.finalizePayment(initiatedSaleId, {
+                  payment_method: paymentMethod as "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit" | "mixed",
+                  cash_received: amount,
+                  change,
+                  other_payment_method_name: options?.other_payment_method_name,
+                  payment_lines: options?.payment_lines,
+                })
+              }
 
               const saleAny = sale as any
 

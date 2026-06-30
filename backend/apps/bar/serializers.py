@@ -156,38 +156,76 @@ class OpenTabSerializer(serializers.Serializer):
 
 class CloseTabSerializer(serializers.Serializer):
     """Serializer for closing a tab and creating a sale"""
-    payment_method = serializers.ChoiceField(choices=['cash', 'card', 'mobile', 'credit'])
+    payment_method = serializers.ChoiceField(
+        choices=['cash', 'card', 'mobile', 'airtel', 'tnm', 'first_capital_bank', 'national_bank', 'standard_bank', 'credit', 'other', 'mixed'],
+        required=False,
+        allow_null=True,
+    )
     discount = serializers.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'))
     discount_type = serializers.ChoiceField(choices=['percentage', 'fixed'], required=False)
     discount_reason = serializers.CharField(required=False, allow_blank=True)
-    
+
     # For cash payments
     cash_received = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
-    
+
+    # For split payments
+    payment_lines = serializers.ListField(
+        child=serializers.DictField(required=False),
+        required=False,
+        allow_empty=False,
+    )
+
     # For credit payments
     due_date = serializers.DateTimeField(required=False, allow_null=True)
-    
+
     # Optional tip
     tip = serializers.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'))
-    
+
     notes = serializers.CharField(required=False, allow_blank=True, default='')
-    
+
     def validate(self, data):
         payment_method = data.get('payment_method')
-        
+        payment_lines = data.get('payment_lines')
+
+        if payment_lines:
+            if not isinstance(payment_lines, list) or len(payment_lines) < 1:
+                raise serializers.ValidationError({'payment_lines': 'payment_lines must be a non-empty list'})
+
+            normalized_lines = []
+            for idx, line in enumerate(payment_lines):
+                if not isinstance(line, dict):
+                    raise serializers.ValidationError({f'payment_lines[{idx}]': 'Each payment line must be an object'})
+
+                line_method = str(line.get('payment_method') or '').strip()
+                line_amount = line.get('amount')
+                if not line_method or line_amount is None:
+                    raise serializers.ValidationError({f'payment_lines[{idx}]': 'payment_method and amount are required'})
+
+                normalized_lines.append({
+                    'payment_method': line_method,
+                    'amount': Decimal(str(line_amount)),
+                    'other_payment_method_name': line.get('other_payment_method_name'),
+                })
+
+            if len(normalized_lines) > 1:
+                data['payment_method'] = 'mixed'
+            elif normalized_lines:
+                data['payment_method'] = normalized_lines[0]['payment_method']
+
+            data['payment_lines'] = normalized_lines
+
         if payment_method == 'cash':
             cash_received = data.get('cash_received')
             if cash_received is None:
                 raise serializers.ValidationError({
                     'cash_received': 'Cash received is required for cash payments'
                 })
-        
+
         if payment_method == 'credit':
             due_date = data.get('due_date')
             if not due_date:
-                # Default to 30 days from now
                 data['due_date'] = timezone.now() + timezone.timedelta(days=30)
-        
+
         return data
 
 

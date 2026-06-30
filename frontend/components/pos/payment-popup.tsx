@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,6 +20,24 @@ interface CartItem {
   total?: number;
 }
 
+type PaymentMethod =
+  | "cash"
+  | "airtel"
+  | "tnm"
+  | "first_capital_bank"
+  | "national_bank"
+  | "standard_bank"
+  | "tab"
+  | "other"
+  | "mixed";
+
+interface PaymentLine {
+  payment_method: Exclude<PaymentMethod, "mixed">;
+  amount: number;
+  change?: number;
+  other_payment_method_name?: string;
+}
+
 interface PaymentPopupProps {
   open: boolean;
   onClose?: () => void;
@@ -32,7 +50,12 @@ interface PaymentPopupProps {
   tax?: number;
   customer?: { name?: string; phone?: string } | null;
   items?: CartItem[];
-  onConfirm: (method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other", amount?: number, change?: number) => Promise<void> | void;
+  onConfirm: (
+    method: PaymentMethod,
+    amount?: number,
+    change?: number,
+    options?: { payment_lines?: PaymentLine[]; other_payment_method_name?: string }
+  ) => Promise<void> | void;
 }
 
 const NUMPAD = [
@@ -56,8 +79,34 @@ export function PaymentPopup({
   items = [],
   onConfirm,
 }: PaymentPopupProps) {
-  const [selectedMethod, setSelectedMethod] = useState<string>('cash');
+  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod>('cash');
   const [receivedAmount, setReceivedAmount] = useState<string>('');
+  const [paymentLines, setPaymentLines] = useState<PaymentLine[]>([]);
+  const [otherPaymentMethodName, setOtherPaymentMethodName] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const paidAmount = paymentLines.reduce((sum, line) => sum + line.amount, 0);
+  const remainingAmount = Math.max(0, total - paidAmount);
+
+  useEffect(() => {
+    if (!open) return;
+    setSelectedMethod('cash');
+    setReceivedAmount('');
+    setPaymentLines([]);
+    setOtherPaymentMethodName('');
+    setIsSubmitting(false);
+  }, [open]);
+
+  const resetForm = () => {
+    setPaymentLines([]);
+    setSelectedMethod('cash');
+    setReceivedAmount('');
+    setOtherPaymentMethodName('');
+  };
+
+  const handleMethodChange = (value: string) => {
+    setSelectedMethod(value as PaymentMethod);
+  };
 
   const handleNumpadClick = (value: string) => {
     if (value === 'Backspace') {
@@ -78,28 +127,96 @@ export function PaymentPopup({
   };
 
   const received = receivedAmount ? parseFloat(receivedAmount) : 0;
-  const change = Math.max(0, received - total);
+  const change = selectedMethod === 'cash' ? Math.max(0, received - remainingAmount) : 0;
 
-  const canConfirm = () => {
-    if (!selectedMethod) return false
-    if (selectedMethod === "cash" || selectedMethod === "other") {
-      const amountNum = parseFloat(receivedAmount) || 0
-      return amountNum >= total
+  const canAddLine = () => {
+    if (!selectedMethod || selectedMethod === 'mixed') return false
+    const amountNum = parseFloat(receivedAmount) || 0
+    if (amountNum <= 0) return false
+    if (amountNum > remainingAmount) return false
+    if (selectedMethod === 'other') {
+      return Boolean(otherPaymentMethodName.trim())
     }
     return true
   }
 
-  const handleConfirm = () => {
-    const method = selectedMethod as "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other"
+  const canCompleteWithCurrentEntry = () => {
+    if (remainingAmount <= 0) return false
+    if (!selectedMethod || selectedMethod === 'mixed') return false
+    if (received <= 0) return false
+    if (received < remainingAmount) return false
+    if (selectedMethod !== 'cash' && received > remainingAmount + 0.001) return false
+    if (selectedMethod === 'other' && !otherPaymentMethodName.trim()) return false
+    return true
+  }
 
-    if (method === "cash" || method === "other") {
-      onConfirm(method, received || undefined, change)
-    } else {
-      onConfirm(method, total, 0)
+  const canConfirm = () => {
+    if (isSubmitting) return false
+    if (paymentLines.length > 0 && remainingAmount === 0) return true
+    return canCompleteWithCurrentEntry()
+  }
+
+  const removePaymentLine = (index: number) => {
+    setPaymentLines((current) => current.filter((_, idx) => idx !== index))
+  }
+
+  const addPaymentLine = () => {
+    if (!canAddLine()) return
+    const line: PaymentLine = {
+      payment_method: selectedMethod as Exclude<PaymentMethod, 'mixed'>,
+      amount: received,
+    }
+    if (selectedMethod === 'other') {
+      line.other_payment_method_name = otherPaymentMethodName.trim()
+    }
+    setPaymentLines((current) => [...current, line])
+    setReceivedAmount('')
+    setOtherPaymentMethodName('')
+    setSelectedMethod('cash')
+  }
+
+  const handleConfirm = async () => {
+    if (!canConfirm()) return
+
+    let lines = [...paymentLines]
+    let confirmChange = 0
+
+    if (remainingAmount > 0) {
+      if (!canCompleteWithCurrentEntry()) return
+
+      confirmChange = selectedMethod === 'cash' ? Math.max(0, received - remainingAmount) : 0
+
+      const line: PaymentLine = {
+        payment_method: selectedMethod as Exclude<PaymentMethod, 'mixed'>,
+        amount: remainingAmount,
+      }
+      if (selectedMethod === 'other') {
+        line.other_payment_method_name = otherPaymentMethodName.trim()
+      }
+      lines.push(line)
     }
 
-    setSelectedMethod('cash')
-    setReceivedAmount('')
+    const lineTotal = lines.reduce((sum, line) => sum + line.amount, 0)
+    const method = lines.length > 1 ? 'mixed' : (lines[0]?.payment_method || selectedMethod)
+    const options = lines.length > 1
+      ? { payment_lines: lines }
+      : {
+          payment_lines: lines.length === 1 ? lines : undefined,
+          other_payment_method_name: lines[0]?.other_payment_method_name,
+        }
+
+    setIsSubmitting(true)
+    try {
+      await onConfirm(method, lineTotal, confirmChange, options)
+      resetForm()
+      if (onClose) {
+        onClose()
+      } else {
+        handleDismiss()
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
   };
 
   const handleDismiss = () => {
@@ -215,7 +332,7 @@ export function PaymentPopup({
             {/* Payment Method */}
             <div className="mb-4">
               <label className="mb-2 block text-xs font-semibold text-gray-700">Payment Method</label>
-              <Select value={selectedMethod} onValueChange={setSelectedMethod}>
+              <Select value={selectedMethod} onValueChange={handleMethodChange}>
                 <SelectTrigger className="w-full border-gray-300 bg-white text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -232,6 +349,43 @@ export function PaymentPopup({
               </Select>
             </div>
 
+            {/* Payment Lines */}
+            {paymentLines.length > 0 && (
+              <div className="mb-4 rounded border border-gray-200 bg-white p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-gray-700">Payment Breakdown</span>
+                  <span className="text-xs text-muted-foreground">Remaining MWK {remainingAmount.toLocaleString()}</span>
+                </div>
+                <div className="space-y-2">
+                  {paymentLines.map((line, idx) => (
+                    <div key={`${line.payment_method}-${idx}`} className="flex items-center justify-between rounded bg-gray-50 p-2 text-sm">
+                      <div>
+                        <div className="font-medium text-gray-900">
+                          {line.payment_method === 'other'
+                            ? line.other_payment_method_name || 'Other'
+                            : line.payment_method.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                        </div>
+                        {line.payment_method === 'other' && line.other_payment_method_name && (
+                          <div className="text-xs text-gray-500">{line.other_payment_method_name}</div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-semibold text-gray-900">MWK {line.amount.toLocaleString()}</div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removePaymentLine(idx)}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Received Amount */}
             <div className="mb-4">
               <label className="mb-2 block text-xs font-semibold text-gray-700">Amount Received</label>
@@ -246,11 +400,32 @@ export function PaymentPopup({
               </div>
             </div>
 
+            {/* Custom name for Other */}
+            {selectedMethod === 'other' && (
+              <div className="mb-4">
+                <label className="mb-2 block text-xs font-semibold text-gray-700">Other Payment Method Name</label>
+                <input
+                  type="text"
+                  value={otherPaymentMethodName}
+                  onChange={(e) => setOtherPaymentMethodName(e.target.value)}
+                  placeholder="e.g. PayPal, Bank Deposit"
+                  className="w-full rounded border border-gray-300 bg-white p-2 text-sm outline-none"
+                />
+              </div>
+            )}
+
             {/* Change Due */}
-            <div className="mb-4 rounded bg-emerald-50 p-3">
-              <div className="text-xs text-gray-600">Change Due</div>
-              <div className="text-lg font-bold text-emerald-600">MWK {change.toLocaleString()}</div>
-            </div>
+            {selectedMethod === 'cash' && (
+              <div className="mb-4 rounded bg-emerald-50 p-3">
+                <div className="text-xs text-gray-600">Change Due</div>
+                <div className="text-lg font-bold text-emerald-600">MWK {change.toLocaleString()}</div>
+                {remainingAmount > 0 && received >= remainingAmount && change > 0 && (
+                  <div className="mt-1 text-xs text-emerald-700">
+                    Tendered MWK {received.toLocaleString()} for MWK {remainingAmount.toLocaleString()} due
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Numeric Keypad - Compact */}
             <div className="mb-4 grid grid-cols-3 gap-1">
@@ -290,12 +465,20 @@ export function PaymentPopup({
                 Cancel
               </Button>
               <Button
+                onClick={addPaymentLine}
+                size="sm"
+                disabled={!canAddLine()}
+                className="flex-1 bg-slate-600 hover:bg-slate-700 text-white text-sm"
+              >
+                Add Payment
+              </Button>
+              <Button
                 onClick={handleConfirm}
                 size="sm"
                 disabled={!canConfirm()}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-sm"
               >
-                Pay Now
+                {isSubmitting ? 'Processing...' : 'Confirm Sale'}
               </Button>
             </div>
           </div>

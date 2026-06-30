@@ -42,6 +42,9 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
   const [isLoading, setIsLoading] = useState(false)
   const [returnType, setReturnType] = useState<ReturnType>("supplier")
   const [products, setProducts] = useState<any[]>([])
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+  const [hasMore, setHasMore] = useState(false)
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [searchTerm, setSearchTerm] = useState("")
   const [selectedProductId, setSelectedProductId] = useState("")
@@ -64,9 +67,12 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
       try {
         const suppliersData = await supplierService.list()
         setSuppliers(Array.isArray(suppliersData) ? suppliersData : suppliersData.results || [])
-
-        const productsData = await productService.list({ is_active: true })
-        setProducts(Array.isArray(productsData) ? productsData : productsData.results || [])
+        const productsData = await productService.list({ is_active: true, page: 1, limit: pageSize })
+        const list = Array.isArray(productsData) ? productsData : productsData.results || []
+        setProducts(list)
+        if ((productsData as any).next) setHasMore(true)
+        else if (typeof (productsData as any).count === "number") setHasMore(1 * pageSize < ((productsData as any).count || 0))
+        else setHasMore(list.length === pageSize)
       } catch (error) {
         console.error("Failed to load data:", error)
       }
@@ -74,6 +80,23 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
 
     loadData()
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const loadProducts = async () => {
+      try {
+        const resp = await productService.list({ is_active: true, page, limit: pageSize, search: searchTerm || undefined })
+        const list = Array.isArray(resp) ? resp : resp.results || []
+        setProducts(list)
+        if ((resp as any).next) setHasMore(true)
+        else if (typeof (resp as any).count === "number") setHasMore(page * pageSize < ((resp as any).count || 0))
+        else setHasMore(list.length === pageSize)
+      } catch (error) {
+        console.error("Failed to load products:", error)
+      }
+    }
+    loadProducts()
+  }, [open, page, searchTerm])
 
   // Reset form when modal closes
   useEffect(() => {
@@ -100,12 +123,8 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
         .filter((_, i) => i !== editingIndex)
         .map(i => i.product_id)
     )
-    return products.filter(p =>
-      !addedIds.has(String(p.id)) &&
-      (p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-       p.sku?.toLowerCase().includes(searchTerm.toLowerCase()))
-    )
-  }, [products, items, searchTerm, editingIndex])
+    return products.filter(p => !addedIds.has(String(p.id)))
+  }, [products, items, editingIndex])
 
   const resetDraft = () => {
     setSelectedProductId("")
@@ -356,7 +375,7 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
                 </div>
                 {searchTerm && !selectedProductId && (
                   <div className="border rounded-md bg-background max-h-48 overflow-y-auto">
-                    {filteredProducts.slice(0, 8).length > 0 ? filteredProducts.slice(0, 8).map((product) => (
+                    {filteredProducts.length > 0 ? filteredProducts.map((product) => (
                       <button
                         key={product.id}
                         type="button"
@@ -375,6 +394,15 @@ export function NewReturnModal({ open, onOpenChange, onReturnCreated }: NewRetur
                     )) : (
                       <p className="px-3 py-2 text-sm text-muted-foreground">No products found</p>
                     )}
+                    <div className="flex items-center justify-between px-2 py-1">
+                      <Button size="sm" variant="ghost" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                        Prev
+                      </Button>
+                      <div className="text-sm text-muted-foreground">Page {page}</div>
+                      <Button size="sm" onClick={() => { if (hasMore) setPage(p => p + 1) }} disabled={!hasMore}>
+                        Next
+                      </Button>
+                    </div>
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-2">

@@ -226,6 +226,12 @@ export type PaymentMethod =
   | "national_bank"
   | "standard_bank"
 
+export interface SalePaymentLine {
+  payment_method: string
+  amount: number
+  other_payment_method_name?: string
+}
+
 export interface Sale {
   id: string
   businessId: string
@@ -239,6 +245,8 @@ export interface Sale {
   discountType?: "percentage" | "amount"
   discountReason?: string
   paymentMethod: string
+  paymentLines?: SalePaymentLine[]
+  payment_lines?: SalePaymentLine[]
   status: "completed" | "pending" | "refunded"
   createdAt: string
   _raw?: any

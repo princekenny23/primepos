@@ -29,6 +29,7 @@ export interface ReceiptData {
   discount?: number
   total: number
   paymentMethod: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab"
+  paymentLines?: Array<{ payment_method?: string; amount?: number; other_payment_method_name?: string }>
   businessName?: string
   phone?: string
   address?: string
@@ -102,7 +103,13 @@ export function generateHTMLReceipt(data: ReceiptData): string {
     `
     })
     .join("")
-
+  const getPaymentLineLabel = (line: any) => {
+    const method = String(line?.payment_method || "").trim().toLowerCase()
+    if (method === "other" && line?.other_payment_method_name) {
+      return String(line.other_payment_method_name)
+    }
+    return String(line.payment_method || line.other_payment_method_name || "Unknown")
+  }
   return `
     <!DOCTYPE html>
     <html>
@@ -199,11 +206,27 @@ export function generateHTMLReceipt(data: ReceiptData): string {
 
       <div class="divider"></div>
 
+      ${data.paymentLines && data.paymentLines.length > 0 ? `
       <table>
         <tr>
-          <td>Payment: ${data.paymentMethod.toUpperCase()}</td>
+          <td colspan="2" style="font-weight: bold;">Payment Breakdown</td>
+        </tr>
+        ${data.paymentLines
+          .map((line) => `
+        <tr>
+          <td>${getPaymentLineLabel(line)}</td>
+          <td style="text-align: right;">MWK ${Number(line.amount || 0).toFixed(2)}</td>
+        </tr>
+        `)
+          .join("")}
+      </table>
+      ` : `
+      <table>
+        <tr>
+          <td>Payment: ${String(data.paymentMethod || "UNKNOWN").toUpperCase()}</td>
         </tr>
       </table>
+      `}
 
       <div class="footer">
         <strong class="thank-you-line">* Thank you for your business *</strong>
@@ -282,7 +305,18 @@ export function generateTextReceipt(data: ReceiptData): string {
   lines.push("=" .repeat(40))
   lines.push("")
 
-  lines.push(`Payment Method: ${data.paymentMethod.toUpperCase()}`)
+  if (data.paymentLines && data.paymentLines.length > 0) {
+    lines.push("Payment Breakdown:")
+    data.paymentLines.forEach((line) => {
+      const method = String(line.payment_method || "").trim().toLowerCase()
+      const label = method === "other" && line.other_payment_method_name
+        ? String(line.other_payment_method_name)
+        : String(line.payment_method || line.other_payment_method_name || "Unknown")
+      lines.push(`${label}: ${Number(line.amount || 0).toFixed(2)} MWK`)
+    })
+  } else {
+    lines.push(`Payment Method: ${String(data.paymentMethod || "UNKNOWN").toUpperCase()}`)
+  }
   lines.push("")
   lines.push("* Thank you for your business *")
   lines.push("* Powered by PRIMEPOS *")

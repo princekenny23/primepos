@@ -40,6 +40,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
+import { mapSaleToViewDetailsModalProps } from "@/lib/utils/view-sale-details"
 import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
@@ -49,6 +50,7 @@ import type { Sale } from "@/lib/types"
 interface SaleDetail extends Sale {
   payment_method?: string
   payment_status?: string
+  payment_lines?: Array<{ payment_method: string; amount: number; other_payment_method_name?: string }>
   receipt_number?: string
   created_at?: string
   _raw?: any
@@ -612,29 +614,21 @@ export default function CreditsPage() {
               setSelectedSale(null)
             }
           }}
-          sale={{
-            id: selectedSale._raw?.receipt_number || selectedSale.receipt_number || selectedSale.id,
-            date: (selectedSale as any).created_at || selectedSale.createdAt,
-            customer: selectedSale.customer?.name,
-            outlet: selectedSale.outlet?.name,
-            items: (selectedSale.items || []).map((item: any, index: number) => ({
-              id: item.id || item.productId || `item-${index}`,
-              name: item.productName || item.name || "Unknown Product",
-              quantity: item.quantity || 0,
-              price: item.price || 0,
-              total: item.total || (item.price || 0) * (item.quantity || 0),
-            })),
-            subtotal: selectedSale.subtotal || 0,
-            tax: selectedSale.tax || 0,
-            discount: selectedSale.discount || 0,
-            total: selectedSale.total || 0,
-            paymentMethod: selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "tab",
-            status: selectedSale.status || (
-              ["tab", "credit"].includes(String(selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "").toLowerCase())
+          sale={mapSaleToViewDetailsModalProps(selectedSale, {
+            paymentMethodFallback: "tab",
+            status:
+              selectedSale.status ||
+              (["tab", "credit"].includes(
+                String(
+                  selectedSale._raw?.payment_method ||
+                    selectedSale.payment_method ||
+                    selectedSale.paymentMethod ||
+                    ""
+                ).toLowerCase()
+              )
                 ? "pending"
-                : "completed"
-            ),
-          }}
+                : "completed"),
+          })}
         />
       )}
 

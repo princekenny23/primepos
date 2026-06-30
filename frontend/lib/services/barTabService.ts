@@ -143,7 +143,7 @@ export interface AddItemData {
 // ==================== Close Tab ====================
 
 export interface CloseTabData {
-  payment_method: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit"
+  payment_method?: "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "credit" | "other" | "mixed"
   discount?: number
   discount_type?: "percentage" | "fixed"
   discount_reason?: string
@@ -151,6 +151,11 @@ export interface CloseTabData {
   due_date?: string
   tip?: number
   notes?: string
+  payment_lines?: Array<{
+    payment_method: string
+    amount: number
+    other_payment_method_name?: string
+  }>
 }
 
 export interface CloseTabResponse {

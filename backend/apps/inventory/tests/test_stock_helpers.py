@@ -19,7 +19,7 @@ from apps.inventory.stock_helpers import (
     mark_expired_batches,
     get_expiring_soon
 )
-from apps.products.models import Product, ItemVariation, Category
+from apps.products.models import Product, Category
 from apps.outlets.models import Outlet
 from apps.tenants.models import Tenant
 from apps.accounts.models import User
@@ -66,22 +66,13 @@ class StockHelpersTestCase(TestCase):
             cost=Decimal("5.00")
         )
         
-        # Create variation
-        self.variation = ItemVariation.objects.create(
-            product=self.product,
-            name="Default",
-            price=Decimal("10.00"),
-            cost=Decimal("5.00"),
-            track_inventory=True
-        )
-        
         # Create batches with different expiry dates
         today = timezone.now().date()
         
         # Batch 1: Expiring in 10 days (should be sold first)
         self.batch1 = Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="BATCH-001",
             expiry_date=today + timedelta(days=10),
@@ -92,7 +83,7 @@ class StockHelpersTestCase(TestCase):
         # Batch 2: Expiring in 30 days (should be sold second)
         self.batch2 = Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="BATCH-002",
             expiry_date=today + timedelta(days=30),
@@ -103,7 +94,7 @@ class StockHelpersTestCase(TestCase):
         # Batch 3: Expired 5 days ago (should NOT be sold)
         self.batch3 = Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="BATCH-003",
             expiry_date=today - timedelta(days=5),
@@ -114,7 +105,7 @@ class StockHelpersTestCase(TestCase):
         # Batch 4: Expiring in 50 days (should be sold third)
         self.batch4 = Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="BATCH-004",
             expiry_date=today + timedelta(days=50),
@@ -124,7 +115,7 @@ class StockHelpersTestCase(TestCase):
     
     def test_get_available_stock_excludes_expired(self):
         """Test that get_available_stock excludes expired batches"""
-        available = get_available_stock(self.variation, self.outlet)
+        available = get_available_stock(self.product, self.outlet)
         
         # Should be 20 + 30 + 40 = 90 (excluding batch3 which is expired)
         self.assertEqual(available, 90)
@@ -136,12 +127,12 @@ class StockHelpersTestCase(TestCase):
             name="Empty Store"
         )
         
-        available = get_available_stock(self.variation, new_outlet)
+        available = get_available_stock(self.product, new_outlet)
         self.assertEqual(available, 0)
     
     def test_get_batch_for_sale_returns_oldest(self):
         """Test that get_batch_for_sale returns oldest expiring batch"""
-        batch = get_batch_for_sale(self.variation, self.outlet, 10)
+        batch = get_batch_for_sale(self.product, self.outlet, 10)
         
         # Should return batch1 (expires soonest)
         self.assertIsNotNone(batch)
@@ -149,7 +140,7 @@ class StockHelpersTestCase(TestCase):
     
     def test_get_batch_for_sale_insufficient_stock(self):
         """Test that get_batch_for_sale returns None when insufficient stock"""
-        batch = get_batch_for_sale(self.variation, self.outlet, 1000)
+        batch = get_batch_for_sale(self.product, self.outlet, 1000)
         
         # Total available is 90, requesting 1000 should return None
         self.assertIsNone(batch)
@@ -157,7 +148,7 @@ class StockHelpersTestCase(TestCase):
     def test_deduct_stock_single_batch(self):
         """Test deducting quantity from single batch"""
         deductions = deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=10,
             user=self.user,
@@ -187,7 +178,7 @@ class StockHelpersTestCase(TestCase):
         """Test deducting quantity spanning multiple batches (FIFO)"""
         # Deduct 35 (more than batch1's 20)
         deductions = deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=35,
             user=self.user,
@@ -222,7 +213,7 @@ class StockHelpersTestCase(TestCase):
         """Test that deduction follows FIFO (oldest expiry first)"""
         # Deduct 75 (will need batch1 + batch2 + part of batch4)
         deductions = deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=75,
             user=self.user,
@@ -247,7 +238,7 @@ class StockHelpersTestCase(TestCase):
         """Test that insufficient stock raises ValueError"""
         with self.assertRaises(ValueError) as context:
             deduct_stock(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 quantity=1000,  # More than available (90)
                 user=self.user,
@@ -257,7 +248,7 @@ class StockHelpersTestCase(TestCase):
         
         # Check error message
         self.assertIn("Insufficient stock", str(context.exception))
-        self.assertIn(self.product.name, str(context.exception))
+        self.assertIn("Requested:", str(context.exception))
     
     def test_deduct_stock_transaction_atomic(self):
         """Test that deduct_stock rolls back on error"""
@@ -266,7 +257,7 @@ class StockHelpersTestCase(TestCase):
         # Force an error during deduction by mocking
         with self.assertRaises(ValueError):
             deduct_stock(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 quantity=1000,
                 user=self.user,
@@ -290,7 +281,7 @@ class StockHelpersTestCase(TestCase):
         expiry = today + timedelta(days=60)
         
         batch = add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=50,
             batch_number="BATCH-NEW",
@@ -319,7 +310,7 @@ class StockHelpersTestCase(TestCase):
         initial_qty = self.batch1.quantity
         
         batch = add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=25,
             batch_number="BATCH-001",  # Existing batch
@@ -334,11 +325,11 @@ class StockHelpersTestCase(TestCase):
     
     def test_adjust_stock_positive(self):
         """Test positive stock adjustment"""
-        current = get_available_stock(self.variation, self.outlet)
+        current = get_available_stock(self.product, self.outlet)
         target = current + 50
         
         batch = adjust_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             new_quantity=target,
             user=self.user,
@@ -348,16 +339,16 @@ class StockHelpersTestCase(TestCase):
         self.assertIsNotNone(batch)
         
         # Verify new available stock
-        new_available = get_available_stock(self.variation, self.outlet)
+        new_available = get_available_stock(self.product, self.outlet)
         self.assertEqual(new_available, target)
     
     def test_adjust_stock_negative(self):
         """Test negative stock adjustment"""
-        current = get_available_stock(self.variation, self.outlet)
+        current = get_available_stock(self.product, self.outlet)
         target = current - 20
         
         result = adjust_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             new_quantity=target,
             user=self.user,
@@ -368,7 +359,7 @@ class StockHelpersTestCase(TestCase):
         self.assertIsNone(result)
         
         # Verify new available stock
-        new_available = get_available_stock(self.variation, self.outlet)
+        new_available = get_available_stock(self.product, self.outlet)
         self.assertEqual(new_available, target)
     
     def test_mark_expired_batches(self):
@@ -377,7 +368,7 @@ class StockHelpersTestCase(TestCase):
         
         # Mark expired batches
         count = mark_expired_batches(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet
         )
         
@@ -401,7 +392,7 @@ class StockHelpersTestCase(TestCase):
         # Get batches expiring in next 15 days
         expiring = get_expiring_soon(
             days=15,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet
         )
         
@@ -414,7 +405,7 @@ class StockHelpersTestCase(TestCase):
         # Get batches expiring in next 40 days
         expiring = get_expiring_soon(
             days=40,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet
         )
         
@@ -429,7 +420,7 @@ class StockHelpersTestCase(TestCase):
         """Test that LocationStock syncs with Batch totals"""
         # Deduct some stock
         deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=10,
             user=self.user,
@@ -439,12 +430,12 @@ class StockHelpersTestCase(TestCase):
         
         # Get LocationStock
         location_stock = LocationStock.objects.get(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet
         )
         
         # Should match available stock from batches
-        available = get_available_stock(self.variation, self.outlet)
+        available = get_available_stock(self.product, self.outlet)
         self.assertEqual(location_stock.quantity, available)
     
     def test_concurrent_deductions(self):
@@ -457,7 +448,7 @@ class StockHelpersTestCase(TestCase):
         # Simulate two concurrent sales
         with transaction.atomic():
             deduct_stock(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 quantity=5,
                 user=self.user,
@@ -467,7 +458,7 @@ class StockHelpersTestCase(TestCase):
         
         with transaction.atomic():
             deduct_stock(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 quantity=5,
                 user=self.user,
@@ -487,7 +478,7 @@ class StockHelpersTestCase(TestCase):
         
         # Deduct stock
         deductions = deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=10,
             user=self.user,
@@ -513,17 +504,12 @@ class StockHelpersEdgeCasesTestCase(TestCase):
             name="Test",
             retail_price=Decimal("10.00")
         )
-        self.variation = ItemVariation.objects.create(
-            product=self.product,
-            name="Default",
-            price=Decimal("10.00")
-        )
     
     def test_deduct_from_empty_stock(self):
         """Test deducting from variation with no batches"""
         with self.assertRaises(ValueError):
             deduct_stock(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 quantity=1,
                 user=self.user,
@@ -538,7 +524,7 @@ class StockHelpersEdgeCasesTestCase(TestCase):
         # add_stock doesn't validate positive quantity in current implementation
         # but it should - this is a potential enhancement
         batch = add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=10,  # Valid
             batch_number="TEST",
@@ -555,7 +541,7 @@ class StockHelpersEdgeCasesTestCase(TestCase):
         # Create batch expiring today
         Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="EXPIRES-TODAY",
             expiry_date=today,  # Expires today
@@ -564,5 +550,5 @@ class StockHelpersEdgeCasesTestCase(TestCase):
         )
         
         # Should not be available (expiry_date > today excludes today)
-        available = get_available_stock(self.variation, self.outlet)
+        available = get_available_stock(self.product, self.outlet)
         self.assertEqual(available, 0)

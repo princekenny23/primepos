@@ -39,6 +39,7 @@ class SaleItemSerializer(serializers.ModelSerializer):
 class SaleSerializer(serializers.ModelSerializer):
     """Sale serializer with optimized nested data"""
     items = SaleItemSerializer(many=True, read_only=True)
+    payment_lines = serializers.SerializerMethodField(read_only=True)
     items_data = serializers.ListField(
         child=serializers.DictField(),
         write_only=True,
@@ -67,7 +68,7 @@ class SaleSerializer(serializers.ModelSerializer):
         fields = (
             'id', 'tenant', 'outlet', 'outlet_detail', 'user', 'user_detail', 
             'shift', 'shift_detail', 'customer', 'customer_detail', 'till', 'till_detail', 'receipt_number',
-            'subtotal', 'tax', 'discount', 'total', 'payment_method', 'status',
+            'subtotal', 'tax', 'discount', 'total', 'payment_method', 'payment_lines', 'status',
             'is_void', 'void_reason',
             'cash_received', 'change_given',
             'due_date', 'amount_paid', 'payment_status',
@@ -79,7 +80,7 @@ class SaleSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             'id', 'tenant', 'user', 'receipt_number', 'due_date', 'amount_paid', 'payment_status', 'table', 'created_at', 'updated_at',
-            'cash_amount', 'card_amount', 'mobile_amount', 'bank_transfer_amount', 'other_amount', 'tab_amount', 'credit_amount',
+            'cash_amount', 'card_amount', 'mobile_amount', 'bank_transfer_amount', 'other_amount', 'tab_amount', 'credit_amount', 'payment_lines',
         )
     
     def get_outlet_detail(self, obj):
@@ -155,6 +156,51 @@ class SaleSerializer(serializers.ModelSerializer):
                 }
                 for kot in obj.kitchen_tickets.all()
             ]
+        return []
+
+    def get_payment_lines(self, obj):
+        """Return payment lines in a stable shape for the API and UI."""
+        raw_lines = getattr(obj, 'payment_lines', None) or []
+        if not isinstance(raw_lines, list):
+            raw_lines = []
+
+        normalized = []
+        for line in raw_lines:
+            if not isinstance(line, dict):
+                continue
+            payment_method = line.get('payment_method')
+            if payment_method is None:
+                continue
+            amount = line.get('amount')
+            if isinstance(amount, Decimal):
+                amount_value = str(amount.quantize(Decimal('0.01')))
+            else:
+                try:
+                    amount_value = str(Decimal(str(amount)).quantize(Decimal('0.01')))
+                except (InvalidOperation, ValueError, TypeError):
+                    amount_value = str(amount or '0')
+            normalized.append({
+                'payment_method': str(payment_method),
+                'amount': amount_value,
+                'other_payment_method_name': line.get('other_payment_method_name') or None,
+            })
+
+        if normalized:
+            return normalized
+
+        payment_method = getattr(obj, 'payment_method', None)
+        if payment_method:
+            total = getattr(obj, 'total', Decimal('0'))
+            try:
+                total_value = str(Decimal(str(total)).quantize(Decimal('0.01')))
+            except (InvalidOperation, ValueError, TypeError):
+                total_value = str(total or '0')
+            return [{
+                'payment_method': str(payment_method),
+                'amount': total_value,
+                'other_payment_method_name': None,
+            }]
+
         return []
     
     def validate_outlet(self, value):

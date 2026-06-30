@@ -45,13 +45,18 @@ export interface CreateSaleData {
   discount_type?: "percentage" | "amount"
   discount_reason?: string
   total: number
-  payment_method: "cash" | "card" | "mobile" | "other" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit"
+  payment_method: "cash" | "card" | "mobile" | "other" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit" | "mixed"
   notes?: string
   // Restaurant-specific fields
   table_id?: string
   guests?: number
   priority?: "normal" | "high" | "urgent"
   status?: string
+  payment_lines?: Array<{
+    payment_method: string
+    amount: number
+    other_payment_method_name?: string
+  }>
 }
 
 export interface VoidSaleData {
@@ -70,7 +75,7 @@ export interface VoidSaleData {
   tax?: number
   discount?: number
   total?: number
-  payment_method?: "cash" | "card" | "mobile" | "other" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit"
+  payment_method?: "cash" | "card" | "mobile" | "other" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit" | "mixed"
   notes?: string
   reason?: string
 }
@@ -125,6 +130,14 @@ export function buildSaleCreatePayload(data: CreateSaleData): any {
     total: String(data.total),
     payment_method: data.payment_method,
     notes: data.notes || "",
+  }
+
+  if (data.payment_lines && Array.isArray(data.payment_lines) && data.payment_lines.length > 0) {
+    backendData.payment_lines = data.payment_lines.map((pl) => ({
+      payment_method: pl.payment_method,
+      amount: String(pl.amount),
+      other_payment_method_name: pl.other_payment_method_name || undefined,
+    }))
   }
 
   if (data.discount && data.discount > 0) {
@@ -196,6 +209,8 @@ function transformSale(backendSale: any): Sale {
     discountType: backendSale.discount_type || backendSale.discountType,
     discountReason: backendSale.discount_reason || backendSale.discount_reason,
     paymentMethod,
+    paymentLines: (backendSale.payment_lines || backendSale._raw?.payment_lines || []) as any,
+    payment_lines: backendSale.payment_lines || backendSale._raw?.payment_lines || [],
     status: derivedStatus,
     createdAt: backendSale.created_at || backendSale.createdAt || new Date().toISOString(),
     // Include raw backend data with nested detail fields (outlet_detail, user_detail, shift_detail, customer_detail)
@@ -323,10 +338,15 @@ export const saleService = {
   async finalizePayment(
     id: string,
     payload: {
-      payment_method: "cash" | "card" | "mobile" | "other" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit"
+      payment_method: "cash" | "card" | "mobile" | "other" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit" | "mixed"
       cash_received?: number
       change?: number
       other_payment_method_name?: string
+      payment_lines?: Array<{
+        payment_method: string
+        amount: number
+        other_payment_method_name?: string
+      }>
     }
   ): Promise<SaleWithMetadata> {
     const response = await api.post<any>(`/sales/${id}/finalize-payment/`, payload)

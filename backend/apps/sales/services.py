@@ -73,14 +73,26 @@ class ReceiptService:
         return f"{ReceiptService._PDF_CONTENT_PREFIX}{base64.b64encode(pdf_bytes).decode('ascii')}"
 
     @staticmethod
-    def decode_pdf_content(content: str) -> Optional[bytes]:
-        if not content or not content.startswith(ReceiptService._PDF_CONTENT_PREFIX):
-            return None
-        encoded = content[len(ReceiptService._PDF_CONTENT_PREFIX):]
+    def _base64_decode(encoded: str) -> Optional[bytes]:
         try:
             return base64.b64decode(encoded)
         except Exception:
             return None
+
+    @staticmethod
+    def decode_pdf_content(content: str) -> Optional[bytes]:
+        if not content:
+            return None
+
+        raw_content = content.strip()
+
+        if raw_content.startswith(ReceiptService._PDF_CONTENT_PREFIX):
+            raw_content = raw_content[len(ReceiptService._PDF_CONTENT_PREFIX):]
+
+        if raw_content.startswith("data:application/pdf;base64,"):
+            raw_content = raw_content.split("base64,", 1)[1]
+
+        return ReceiptService._base64_decode(raw_content)
     
     @staticmethod
     def generate_receipt(sale: Sale, format: str = 'pdf', user: User = None) -> Receipt:
@@ -374,6 +386,38 @@ class ReceiptService:
         elements.append(totals_table)
         elements.append(Spacer(1, 20))
 
+        # Payment breakdown (if multiple payment lines were used)
+        try:
+            raw_lines = getattr(sale, 'payment_lines', None)
+            if raw_lines and isinstance(raw_lines, (list, tuple)) and len(raw_lines) > 0:
+                elements.append(Paragraph('Payment Breakdown', ParagraphStyle(
+                    'payment_header', parent=styles['Heading3'], fontSize=12, textColor=colors.HexColor('#1e3a8a')
+                )))
+                pay_rows = []
+                for pl in raw_lines:
+                    pm = pl.get('payment_method') if isinstance(pl, dict) else None
+                    other = pl.get('other_payment_method_name') if isinstance(pl, dict) else None
+                    amt = pl.get('amount') if isinstance(pl, dict) else None
+                    method_label = pm or other or 'Unknown'
+                    try:
+                        amt_num = Decimal(str(amt)) if amt is not None else Decimal('0')
+                    except Exception:
+                        amt_num = Decimal('0')
+                    pay_rows.append([str(method_label), f"{currency} {amt_num:,.2f}"])
+
+                pay_table = Table(pay_rows, colWidths=[80*mm, 80*mm])
+                pay_table.setStyle(TableStyle([
+                    ('FONTSIZE', (0, 0), (-1, -1), 9),
+                    ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                    ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                    ('PADDING', (0, 0), (-1, -1), 4),
+                ]))
+                elements.append(pay_table)
+                elements.append(Spacer(1, 12))
+        except Exception:
+            # Non-critical: continue rendering even if payment_lines parsing fails
+            pass
+
         dotted_line = Table([['']], colWidths=[160*mm])
         dotted_line.setStyle(TableStyle([
             ('LINEABOVE', (0, 0), (-1, -1), 0.5, colors.grey, 1),
@@ -659,6 +703,27 @@ class ReceiptService:
         for line in align_lr("Total:", f"{currency} {sale.total:,.2f}", width):
             lines.append(ReceiptService._escpos_bold(line))
         lines.extend(align_lr("Payment:", sale.get_payment_method_display(), width))
+
+        # If payment_lines present, include a breakdown section
+        try:
+            raw_lines = getattr(sale, 'payment_lines', None)
+            if raw_lines and isinstance(raw_lines, (list, tuple)) and len(raw_lines) > 0:
+                lines.append("-")
+                lines.extend(wrap_text("Payment Breakdown:", width))
+                for pl in raw_lines:
+                    pm = pl.get('payment_method') if isinstance(pl, dict) else None
+                    other = pl.get('other_payment_method_name') if isinstance(pl, dict) else None
+                    amt = pl.get('amount') if isinstance(pl, dict) else None
+                    method_label = pm or other or 'Unknown'
+                    try:
+                        amt_num = Decimal(str(amt)) if amt is not None else Decimal('0')
+                    except Exception:
+                        amt_num = Decimal('0')
+                    # Format as left-right aligned line
+                    lines.extend(align_lr(str(method_label), f"{currency} {amt_num:,.2f}", width))
+        except Exception:
+            # Non-critical
+            pass
 
         lines.append("")
         lines.extend(wrap_text("Thank you for your business!", width))

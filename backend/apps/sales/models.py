@@ -26,6 +26,7 @@ class Sale(models.Model):
         ('other', 'Other'),
         ('tab', 'Tab'),
         ('credit', 'Credit'),
+        ('mixed', 'Mixed'),
     ]
 
     STATUS_CHOICES = [
@@ -67,6 +68,7 @@ class Sale(models.Model):
     )
     total = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default='cash')
+    payment_lines = models.JSONField(blank=True, null=True, default=list)
     # Denormalized per-payment-method aggregates for fast reporting
     cash_amount = models.DecimalField(
         max_digits=12,
@@ -158,6 +160,7 @@ class Sale(models.Model):
     void_reason = models.TextField(default='', blank=True, help_text="Reason for voiding a sale")
     
     notes = models.TextField(blank=True)
+    payment_lines = models.JSONField(null=True, blank=True, default=list, help_text="Detailed payment lines for split payments")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

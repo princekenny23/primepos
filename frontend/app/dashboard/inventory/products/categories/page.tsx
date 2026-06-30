@@ -26,6 +26,9 @@ export default function CategoriesPage() {
   const [selectedCategory, setSelectedCategory] = useState<any>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+  const [hasMore, setHasMore] = useState(false)
 
   useEffect(() => {
     const loadCategories = async () => {
@@ -35,11 +38,15 @@ export default function CategoriesPage() {
       try {
         const cats = await categoryService.list({
           outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+          page,
+          limit: pageSize,
         })
         setCategories(cats)
+        setHasMore(Array.isArray(cats) && cats.length === pageSize)
       } catch (error) {
         console.error("Failed to load categories:", error)
         setCategories([])
+        setHasMore(false)
       } finally {
         setIsLoading(false)
       }
@@ -51,10 +58,14 @@ export default function CategoriesPage() {
   const handleCategorySaved = () => {
     // Reload categories after save
     if (currentBusiness) {
+      setPage(1)
       categoryService.list({
         outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+        page: 1,
+        limit: pageSize,
       }).then(cats => {
         setCategories(cats)
+        setHasMore(Array.isArray(cats) && cats.length === pageSize)
       })
     }
   }
@@ -105,59 +116,81 @@ export default function CategoriesPage() {
               </Button>
             </div>
           ) : (
-            <div className="rounded-md border border-gray-300 bg-white">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-gray-50">
-                    <TableHead className="text-gray-900 font-semibold">Category</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Description</TableHead>
-                    <TableHead className="text-gray-900 font-semibold">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {categories.map((category) => (
-                    <TableRow key={category.id} className="border-gray-300">
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Folder className="h-4 w-4 text-primary" />
-                          <span className="font-medium">{category.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {category.description || "No description"}
-                      </TableCell>
-                      
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => {
-                              setSelectedCategory(category)
-                              setShowAddCategory(true)
-                            }}
-                            className="border-gray-300"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="text-destructive border-gray-300"
-                            onClick={() => {
-                              // TODO: Implement delete functionality
-                              alert("Delete functionality coming soon")
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
+            <>
+              <div className="rounded-md border border-gray-300 bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50">
+                      <TableHead className="text-gray-900 font-semibold">Category</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Description</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {categories.map((category) => (
+                      <TableRow key={category.id} className="border-gray-300">
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Folder className="h-4 w-4 text-primary" />
+                            <span className="font-medium">{category.name}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {category.description || "No description"}
+                        </TableCell>
+                        
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => {
+                                setSelectedCategory(category)
+                                setShowAddCategory(true)
+                              }}
+                              className="border-gray-300"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="text-destructive border-gray-300"
+                              onClick={() => {
+                                // TODO: Implement delete functionality
+                                alert("Delete functionality coming soon")
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              <div className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <Button
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    variant="ghost"
+                  >
+                    Previous
+                  </Button>
+                </div>
+                <div className="text-sm text-gray-600">Page {page}</div>
+                <div>
+                  <Button
+                    disabled={!hasMore}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </PageLayout>

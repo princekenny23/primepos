@@ -615,38 +615,7 @@ export function RetailPOS() {
       const tax = 0
       const total = Math.round((subtotal - discount + tax) * 100) / 100
 
-      const initiated = await saleService.initiatePayment({
-        outlet: currentOutlet.id,
-        shift: activeShift.id,
-        customer: selectedCustomer?.id || undefined,
-        delivery_required: isDeliveryRequired,
-        items_data: cart.map((item) => ({
-          product_id: item.productId,
-          unit_id: (item as any).unitId || undefined,
-          quantity: item.quantity,
-          price: Math.round(item.price * 100) / 100,
-          notes: item.notes || "",
-        })),
-        subtotal,
-        tax,
-        discount,
-        total,
-        notes: "Transaction initiated from POS pay screen.",
-      })
-
-      if (!("id" in initiated)) {
-        setOfflineCheckoutStarted(true)
-        setTransactionLocked(true)
-        setShowPaymentMethod(true)
-        toast({
-          title: "Checkout queued offline",
-          description: initiated.detail || "Transaction will sync when internet returns.",
-        })
-        return
-      }
-
-      setInitiatedSaleId(String(initiated.id))
-      setTransactionLocked(true)
+      // Open payment modal and defer initiating until user selects 'tab'/'credit'
       setShowPaymentMethod(true)
     } catch (error: any) {
       toast({
@@ -731,9 +700,10 @@ export function RetailPOS() {
   }
 
   const handlePaymentConfirm = async (
-    method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other",
+    method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other" | "mixed",
     amount?: number,
     change?: number,
+    options?: { payment_lines?: Array<{ payment_method: string; amount: number; other_payment_method_name?: string }>; other_payment_method_name?: string }
   ) => {
     if (method === "other") {
       setPendingOtherPaymentAmount(amount)
@@ -744,14 +714,14 @@ export function RetailPOS() {
       return
     }
 
-    await handleFinalizeSale(method, amount, change)
+    await handleFinalizeSale(method, amount, change, options)
   }
 
   const handleFinalizeSale = async (
-    method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other",
+    method: "cash" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "other" | "mixed",
     amount?: number,
     change?: number,
-    otherPaymentMethodName?: string,
+    options?: { payment_lines?: Array<{ payment_method: string; amount: number; other_payment_method_name?: string }>; other_payment_method_name?: string }
   ) => {
     paymentCloseByConfirmRef.current = true
     setShowOtherPaymentMethodDialog(false)
@@ -777,6 +747,8 @@ export function RetailPOS() {
       const paymentTotal = Math.round((paymentSubtotal - paymentDiscount + paymentTax) * 100) / 100
 
       const isOfflineCheckout = typeof window !== "undefined" && offlineConfig.isPhaseAtLeast(2) && (!window.navigator.onLine || offlineCheckoutStarted)
+
+      const immediatePayment = !["tab", "credit"].includes(method)
 
       if (isOfflineCheckout) {
         const offlineSale = await completeOfflineCashSale({
@@ -860,8 +832,60 @@ export function RetailPOS() {
         return
       }
 
-      if (!initiatedSaleId) {
-        throw new Error("No initiated transaction found. Click PAY to start again.")
+      if (!initiatedSaleId && immediatePayment) {
+        // Create and complete sale in one call for immediate payments
+        const sale = await saleService.create({
+          outlet: String(currentOutlet.id),
+          shift: String(activeShift.id),
+          customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+          delivery_required: isDeliveryRequired,
+          items_data: cart.map((item) => ({
+            product_id: String(item.productId),
+            unit_id: (item as any).unitId || undefined,
+            quantity: item.quantity,
+            price: Math.round(item.price * 100) / 100,
+            notes: item.notes || "",
+          })),
+          subtotal: paymentSubtotal,
+          tax: paymentTax,
+          discount: paymentDiscount,
+          total: paymentTotal,
+          payment_method: method as any,
+          payment_lines: options?.payment_lines || (options?.other_payment_method_name ? [{ payment_method: options.other_payment_method_name, amount: paymentTotal }] : undefined),
+          notes: "Quick sale from Retail POS",
+        } as any)
+
+        // Use sale directly for receipt printing
+        const fullSale = await saleService.get(String(sale.id)).catch(() => sale)
+
+        const receiptCartItems = (fullSale.items || []).map((it: any, idx: number) => ({
+          id: it.productId ? `${it.productId}-${idx}` : `item-${idx}`,
+          name: it.productName || it.product_name || it.name || "Item",
+          price: it.price || 0,
+          quantity: it.quantity || 0,
+          discount: 0,
+          total: it.total || (it.quantity || 0) * (it.price || 0),
+        }))
+
+        setPostSaleReceiptData({
+          cart: receiptCartItems,
+          subtotal: fullSale.subtotal ?? paymentSubtotal,
+          discount: fullSale.discount ?? paymentDiscount,
+          tax: fullSale.tax ?? paymentTax,
+          total: fullSale.total ?? paymentTotal,
+          sale: fullSale,
+        })
+        setPostSaleOutletId(typeof currentOutlet!.id === 'string' ? parseInt(String(currentOutlet!.id), 10) : currentOutlet!.id)
+        setPostSaleReceiptSaleId(String(fullSale?.id || sale.id))
+
+        clearCart()
+        setSelectedCustomer(null)
+        setSaleDiscount(null)
+        setIsDeliveryRequired(false)
+        setTransactionLocked(false)
+        setInitiatedSaleId("")
+        setShowReceiptPrompt(true)
+        return
       }
 
       // Revalidate stock with latest sellable quantities before finalizing payment.
@@ -890,13 +914,51 @@ export function RetailPOS() {
         }
       }
 
-      // Finalize previously initiated sale
-      const sale = await saleService.finalizePayment(initiatedSaleId, {
-        payment_method: method,
-        cash_received: amount,
-        change,
-        other_payment_method_name: otherPaymentMethodName,
-      })
+      // If this is tab/credit and no initiated sale exists, initiate first
+      let sale
+      if (!immediatePayment && !initiatedSaleId) {
+        const initiated = await saleService.initiatePayment({
+          outlet: currentOutlet.id,
+          shift: activeShift.id,
+          customer: selectedCustomer?.id || undefined,
+          delivery_required: isDeliveryRequired,
+          items_data: cart.map((item) => ({ product_id: item.productId, unit_id: (item as any).unitId || undefined, quantity: item.quantity, price: Math.round(item.price * 100) / 100, notes: item.notes || "" })),
+          subtotal: paymentSubtotal,
+          tax: paymentTax,
+          discount: paymentDiscount,
+          total: paymentTotal,
+          notes: "Initiated for tab/credit from Retail POS",
+        })
+
+        if (!('id' in initiated)) {
+          setOfflineCheckoutStarted(true)
+          setTransactionLocked(true)
+          setShowPaymentMethod(true)
+          toast({ title: "Checkout queued offline", description: initiated.detail || "Transaction will sync when internet returns." })
+          return
+        }
+
+        setInitiatedSaleId(String(initiated.id))
+      }
+
+      if (immediatePayment && !initiatedSaleId) {
+        // create+complete handled earlier
+      }
+
+      if (!immediatePayment) {
+        sale = await saleService.finalizePayment(initiatedSaleId, {
+          payment_method: method,
+          cash_received: amount,
+          change,
+          other_payment_method_name: options?.other_payment_method_name,
+          payment_lines: options?.payment_lines,
+        })
+      }
+
+      if (!sale?.id) {
+        throw new Error('Unable to finalize sale. No sale was created.')
+      }
+
       // Fetch canonical sale from backend to ensure printed receipt matches DB
       let fullSale = sale
       try {
@@ -1043,6 +1105,7 @@ export function RetailPOS() {
   const handlePaymentCancel = async () => {
     if (paymentCloseByConfirmRef.current) {
       paymentCloseByConfirmRef.current = false
+      setShowPaymentMethod(false)
       return
     }
 
@@ -1954,6 +2017,7 @@ export function RetailPOS() {
       {/* Payment Popup Modal - Single unified popup */}
       <PaymentPopup
         open={showPaymentMethod}
+        onClose={() => setShowPaymentMethod(false)}
         onDismiss={() => {
           void handlePaymentCancel()
         }}
@@ -2025,7 +2089,9 @@ export function RetailPOS() {
                 "other",
                 pendingOtherPaymentAmount,
                 pendingOtherPaymentChange,
-                pendingOtherPaymentMethodName.trim(),
+                {
+                  other_payment_method_name: pendingOtherPaymentMethodName.trim(),
+                },
               )}
             >
               Confirm

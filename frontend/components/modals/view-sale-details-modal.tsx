@@ -27,6 +27,10 @@ import { printReceipt } from "@/lib/print"
 import { api, apiEndpoints } from "@/lib/api"
 import { useToast } from "@/components/ui/use-toast"
 import { saleService } from "@/lib/services/saleService"
+import {
+  getSalePaymentLines,
+  type ViewSaleDetailsModalSale,
+} from "@/lib/utils/view-sale-details"
 
 interface SaleItem {
   id: string
@@ -36,25 +40,10 @@ interface SaleItem {
   total: number
 }
 
-interface SaleDetails {
-  id: string
-  date: string
-  customer?: string
-  outlet?: string
-  items: SaleItem[]
-  subtotal: number
-  tax: number
-  discount: number
-  total: number
-  paymentMethod: string
-  status: string
-  amountPaid?: number
-}
-
 interface ViewSaleDetailsModalProps {
   open: boolean
-  onOpenChange: (open: boolean) => void
-  sale: SaleDetails | null
+  onOpenChange?: (open: boolean) => void
+  sale: ViewSaleDetailsModalSale | null
 }
 
 export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetailsModalProps) {
@@ -62,8 +51,82 @@ export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetai
   const { toast } = useToast()
   const [isPrinting, setIsPrinting] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
-  
+
   if (!sale) return null
+
+  const saleDbId = String(sale.saleDbId || sale.id || "").trim()
+  const rawPaymentLines = getSalePaymentLines(sale as unknown as Record<string, unknown>)
+
+  const paymentLines = Array.isArray(rawPaymentLines)
+    ? rawPaymentLines.filter((line: any) => {
+        const amount = Number(line?.amount ?? 0)
+        return Number.isFinite(amount) && amount > 0
+      })
+    : []
+
+  const paymentMethodRaw = String(
+    (sale as any).paymentMethod ||
+    (sale as any).payment_method ||
+    (sale as any)._raw?.payment_method ||
+    ""
+  ).trim()
+
+  const formatPaymentMethodName = (method?: string) =>
+    String(method || "Unknown")
+      .replace(/_/g, " ")
+      .split(" ")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+
+  const getPaymentLineLabel = (line: any) => {
+    const method = String(line?.payment_method || "").trim().toLowerCase()
+    if (method === "other" && line?.other_payment_method_name) {
+      return String(line.other_payment_method_name)
+    }
+    return formatPaymentMethodName(line?.payment_method || line?.other_payment_method_name)
+  }
+
+  const paymentBreakdownDisplayLines = (() => {
+    if (Array.isArray(paymentLines) && paymentLines.length > 0) {
+      return paymentLines
+        .map((pl: any) => ({
+          label: getPaymentLineLabel(pl),
+          amount: Number(pl.amount ?? 0),
+        }))
+        .filter((line) => Number.isFinite(line.amount) && line.amount > 0)
+    }
+
+    if (paymentMethodRaw) {
+      const label =
+        paymentMethodRaw.toLowerCase() === "other"
+          ? String((sale as any).other_payment_method_name || "Other")
+          : formatPaymentMethodName(paymentMethodRaw)
+
+      return [{ label, amount: Number(sale.total || 0) }]
+    }
+
+    return []
+  })()
+
+  const displayPaymentMethod = (() => {
+    if (paymentLines.length > 1) {
+      return "Split Payment"
+    }
+
+    if (paymentBreakdownDisplayLines.length === 1) {
+      return paymentBreakdownDisplayLines[0].label
+    }
+
+    if (!paymentMethodRaw) {
+      return "Unknown"
+    }
+
+    if (paymentMethodRaw.toLowerCase() === "mixed") {
+      return "Mixed"
+    }
+
+    return formatPaymentMethodName(paymentMethodRaw)
+  })()
 
   const getReceiptRecord = async () => {
     const response = await saleService.list({ search: String(sale.id) })
@@ -137,7 +200,12 @@ export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetai
           discount: sale.discount,
           tax: sale.tax,
           total: sale.total,
-          sale: { id: sale.id },
+          sale: {
+            id: saleDbId || sale.id,
+            receipt_number: sale.id,
+            payment_method: paymentMethodRaw,
+            payment_lines: paymentLines,
+          },
         },
         undefined
       )
@@ -201,8 +269,23 @@ export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetai
                 Payment Method
               </p>
               <Badge variant="outline" className="capitalize mt-1">
-                {sale.paymentMethod}
+                {displayPaymentMethod}
               </Badge>
+              {(paymentLines.length > 0 || paymentBreakdownDisplayLines.length > 0) && (
+                <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Payment Breakdown
+                  </p>
+                  <div className="mt-2 space-y-1 text-sm">
+                    {paymentBreakdownDisplayLines.map((line, idx) => (
+                      <div key={`${line.label}-${idx}`} className="text-muted-foreground">
+                        <span className="font-medium text-foreground">{line.label}</span>
+                        <span> — {formatCurrency(line.amount, currentBusiness)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Status</p>
@@ -304,7 +387,7 @@ export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetai
         </div>
 
         <DialogFooter className="flex-col sm:flex-row gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange?.(false)}>
             Close
           </Button>
           <Button variant="outline" onClick={handlePrintReceipt} disabled={isPrinting}>

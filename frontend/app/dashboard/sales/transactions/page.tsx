@@ -42,12 +42,18 @@ import { format } from "date-fns"
 import { useRouter } from "next/navigation"
 import { CustomerSelectModal } from "@/components/modals/customer-select-modal"
 import { ViewSaleDetailsModal } from "@/components/modals/view-sale-details-modal"
+import {
+  mapSaleToViewDetailsModalProps,
+  resolveTransactionStatus,
+  getSalePaymentLines,
+} from "@/lib/utils/view-sale-details"
 import { RefundReturnModal } from "@/components/modals/refund-return-modal"
 import { useI18n } from "@/contexts/i18n-context"
 import type { Sale } from "@/lib/types"
 
 interface SaleDetail extends Sale {
   payment_method?: string
+  payment_lines?: Array<{ payment_method: string; amount: number; other_payment_method_name?: string }>
   receipt_number?: string
   created_at?: string
   _raw?: any
@@ -141,6 +147,8 @@ export default function TransactionsPage() {
 
     saleDetail.receipt_number = sale._raw?.receipt_number || sale.receipt_number
     saleDetail.payment_method = sale._raw?.payment_method || sale.payment_method || sale.paymentMethod
+    // Expose payment_lines if present
+    saleDetail.payment_lines = sale._raw?.payment_lines || sale.payment_lines
 
     return saleDetail
   }, [])
@@ -155,6 +163,13 @@ export default function TransactionsPage() {
       }
       return [sale, ...prev]
     })
+  }, [])
+
+  const handleSaleDetailsModalOpenChange = useCallback((open: boolean) => {
+    setShowSaleDetails(open)
+    if (!open) {
+      setSelectedSale(null)
+    }
   }, [])
 
   // Load transactions
@@ -362,6 +377,10 @@ export default function TransactionsPage() {
         outlet: (fullSale as any).outlet || sale.outlet,
         receipt_number: (fullSale as any)._raw?.receipt_number || (fullSale as any).receipt_number || sale.receipt_number,
         payment_method: (fullSale as any)._raw?.payment_method || (fullSale as any).payment_method || sale.payment_method,
+        payment_lines: getSalePaymentLines({
+          ...(fullSale as unknown as Record<string, unknown>),
+          _raw: (fullSale as any)._raw || fullSale,
+        }) as SaleDetail["payment_lines"],
       }
       setSelectedSale(saleDetail)
       setShowSaleDetails(true)
@@ -615,41 +634,10 @@ export default function TransactionsPage() {
       {selectedSale && (
         <ViewSaleDetailsModal
           open={showSaleDetails}
-          onOpenChange={(open) => {
-            setShowSaleDetails(open)
-            if (!open) {
-              setSelectedSale(null)
-            }
-          }}
-          sale={{
-            id: selectedSale._raw?.receipt_number || selectedSale.receipt_number || selectedSale.id,
-            date: (selectedSale as any).created_at || selectedSale.createdAt,
-            customer: selectedSale.customer?.name,
-            outlet: selectedSale.outlet?.name,
-            items: (selectedSale.items || []).map((item: any, index: number) => ({
-              id: item.id || item.productId || `item-${index}`,
-              name: item.productName || item.name || "Unknown Product",
-              quantity: item.quantity || 0,
-              price: item.price || 0,
-              total: item.total || (item.price || 0) * (item.quantity || 0),
-            })),
-            subtotal: selectedSale.subtotal || 0,
-            tax: selectedSale.tax || 0,
-            discount: selectedSale.discount || 0,
-            total: selectedSale.total || 0,
-            paymentMethod: selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "cash",
-            status: (() => {
-              const pm = String(selectedSale._raw?.payment_method || selectedSale.payment_method || selectedSale.paymentMethod || "").toLowerCase()
-              const isTabCredit = pm === "tab" || pm === "credit"
-              if (!isTabCredit) return "completed"
-              const ps = String(selectedSale._raw?.payment_status || "").toLowerCase()
-              if (ps === "paid") return "completed"
-              if (ps === "partially_paid") return "partially_paid"
-              if (ps === "overdue") return "overdue"
-              return "pending"
-            })(),
-            amountPaid: parseFloat(selectedSale._raw?.amount_paid || "0"),
-          }}
+          onOpenChange={handleSaleDetailsModalOpenChange}
+          sale={mapSaleToViewDetailsModalProps(selectedSale, {
+            status: resolveTransactionStatus(selectedSale),
+          })}
         />
       )}
 

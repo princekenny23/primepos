@@ -12,6 +12,123 @@ from apps.inventory.models import Batch, LocationStock, StockMovement
 logger = logging.getLogger(__name__)
 
 
+def _coerce_decimal(value):
+    if value is None:
+        return Decimal('0.00')
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
+def _resolve_product(product=None, variation=None):
+    """Support both the current Product-based API and older variation-based calls."""
+    from apps.products.models import Product
+
+    if product is not None:
+        if isinstance(product, Product):
+            return product
+        product_attr = getattr(product, 'product', None)
+        if isinstance(product_attr, Product):
+            return product_attr
+        return product
+
+    if variation is not None:
+        if isinstance(variation, Product):
+            return variation
+        product_attr = getattr(variation, 'product', None)
+        if isinstance(product_attr, Product):
+            return product_attr
+        return variation
+
+    raise TypeError('A product instance is required')
+
+
+def _get_ledger_quantity_and_cost(product, outlet):
+    """Return the current stock quantity and weighted-average acquisition cost from the movement ledger."""
+    from django.db.models import Sum
+
+    positive_movements = StockMovement.objects.filter(
+        product=product,
+        outlet=outlet,
+        movement_type__in=['purchase', 'adjustment', 'return', 'transfer_in'],
+    ).order_by('created_at')
+    negative_movements = StockMovement.objects.filter(
+        product=product,
+        outlet=outlet,
+        movement_type__in=['sale', 'transfer_out', 'damage', 'expiry'],
+    ).order_by('created_at')
+
+    total_acquired_qty = int(positive_movements.aggregate(total=Sum('quantity'))['total'] or 0)
+    total_acquired_cost = Decimal('0.00')
+    for movement in positive_movements:
+        unit_cost = _coerce_decimal(
+            movement.batch.cost_price if movement.batch_id and movement.batch and movement.batch.cost_price is not None else product.cost
+        )
+        total_acquired_cost += unit_cost * Decimal(int(movement.quantity or 0))
+
+    sold_qty = int(negative_movements.aggregate(total=Sum('quantity'))['total'] or 0)
+    current_qty = max(0, total_acquired_qty - sold_qty)
+    return current_qty, total_acquired_cost, total_acquired_qty
+
+
+def get_stock_valuation(product, outlet):
+    """Return current stock quantity and value using the weighted-average cost method."""
+    today = timezone.now().date()
+    active_batches = list(
+        Batch.objects.filter(product=product, outlet=outlet, expiry_date__gt=today, quantity__gt=0).order_by('expiry_date', 'created_at')
+    )
+
+    quantity, total_cost, total_acquired_qty = _get_ledger_quantity_and_cost(product, outlet)
+    if total_acquired_qty > 0:
+        unit_cost = (total_cost / Decimal(total_acquired_qty)).quantize(Decimal('0.01'))
+        value = (unit_cost * Decimal(quantity)).quantize(Decimal('0.01')) if quantity else Decimal('0.00')
+        return {
+            'quantity': quantity,
+            'value': value,
+            'unit_cost': unit_cost,
+            'batches': active_batches,
+        }
+
+    if active_batches:
+        quantity = sum(int(batch.quantity or 0) for batch in active_batches)
+        value = Decimal('0.00')
+        for batch in active_batches:
+            unit_cost = _coerce_decimal(batch.cost_price if batch.cost_price is not None else product.cost)
+            value += unit_cost * Decimal(int(batch.quantity or 0))
+        return {
+            'quantity': quantity,
+            'value': value.quantize(Decimal('0.01')),
+            'unit_cost': _coerce_decimal(product.cost),
+            'batches': active_batches,
+        }
+
+    unit_cost = _coerce_decimal(product.cost)
+    return {
+        'quantity': 0,
+        'value': Decimal('0.00'),
+        'unit_cost': unit_cost,
+        'batches': [],
+    }
+
+
+def rebuild_stock_state(product, outlet, user=None, reason='Stock state rebuild'):
+    """Synchronize the denormalized stock fields from the stock ledger and batches."""
+    valuation = get_stock_valuation(product, outlet)
+    location_stock, _ = LocationStock.objects.get_or_create(
+        product=product,
+        outlet=outlet,
+        tenant=product.tenant,
+        defaults={'quantity': 0},
+    )
+    location_stock.quantity = valuation['quantity']
+    location_stock.save(update_fields=['quantity', 'updated_at'])
+
+    from apps.products.models import Product as _Product
+    _Product.objects.filter(id=product.id).update(stock=valuation['quantity'])
+    product.stock = valuation['quantity']
+    return valuation
+
+
 def get_sellable_stock(product, outlet):
     """Return sellable stock for a product at an outlet.
 
@@ -54,12 +171,12 @@ def get_available_stock(unit, outlet):
     Returns:
         int: Total available quantity (non-expired batches)
     """
-    # Support both ProductUnit and Product for backward compatibility
     from apps.products.models import ProductUnit
+
     if isinstance(unit, ProductUnit):
         product = unit.product
     else:
-        product = unit
+        product = _resolve_product(product=unit)
 
     return get_sellable_stock(product, outlet)
 
@@ -77,6 +194,8 @@ def get_batch_for_sale(product, outlet, required_quantity):
     Returns:
         Batch instance or None if insufficient stock
     """
+    product = _resolve_product(product=product)
+
     today = timezone.now().date()
     
     # Get non-expired batches ordered by expiry date (FIFO)
@@ -97,7 +216,7 @@ def get_batch_for_sale(product, outlet, required_quantity):
 
 
 @transaction.atomic
-def deduct_stock(product, outlet, quantity, user, reference_id, reason='', movement_type='sale'):
+def deduct_stock(product=None, outlet=None, quantity=None, user=None, reference_id='', reason='', movement_type='sale', variation=None):
     """
     Deduct stock from batches using FIFO expiry logic
     UNITS ONLY ARCHITECTURE: Changed from variation-based to product-based
@@ -117,6 +236,11 @@ def deduct_stock(product, outlet, quantity, user, reference_id, reason='', movem
     Raises:
         ValueError: If insufficient stock
     """
+    product = _resolve_product(product=product, variation=variation)
+
+    if quantity is None:
+        raise TypeError('quantity is required')
+
     today = timezone.now().date()
     remaining = quantity
     deductions = []
@@ -222,37 +346,13 @@ def deduct_stock(product, outlet, quantity, user, reference_id, reason='', movem
     # Bulk create all stock movements (1 query instead of N queries)
     StockMovement.objects.bulk_create(movements_to_create, batch_size=100)
 
-    # Update LocationStock once (after all batch updates)
-    location_stock, created = LocationStock.objects.get_or_create(
-        product=product,
-        outlet=outlet,
-        tenant=product.tenant,
-        defaults={'quantity': 0}
-    )
-    location_stock.sync_quantity_from_batches()
-
-    # --- PHASE 1 FIX: keep Product.stock in sync with batch reality ---
-    # Product.stock is a denormalised projection; we recompute it from the
-    # non-expired batch totals so it is never stale after a sale deduction.
-    new_stock = sum(
-        b.quantity
-        for b in Batch.objects.filter(
-            product=product,
-            outlet=outlet,
-            expiry_date__gt=today,
-            quantity__gt=0,
-        )
-    )
-    from apps.products.models import Product as _Product
-    _Product.objects.filter(id=product.id).update(stock=new_stock)
-    # Refresh the in-memory instance so callers see the updated value.
-    product.stock = new_stock
+    rebuild_stock_state(product, outlet, user=user, reason=reason or f"{movement_type.title()} stock deduction")
 
     return deductions
 
 
 @transaction.atomic
-def add_stock(product, outlet, quantity, batch_number, expiry_date, cost_price=None, user=None, reason='', movement_type='purchase'):
+def add_stock(product=None, outlet=None, quantity=None, batch_number=None, expiry_date=None, cost_price=None, user=None, reason='', movement_type='purchase', variation=None):
     """
     Add stock to a batch (creates batch if doesn't exist)
     UNITS ONLY ARCHITECTURE: Changed from variation-based to product-based
@@ -270,6 +370,13 @@ def add_stock(product, outlet, quantity, batch_number, expiry_date, cost_price=N
     Returns:
         Batch instance
     """
+    product = _resolve_product(product=product, variation=variation)
+
+    if quantity is None:
+        raise TypeError('quantity is required')
+    if batch_number is None or expiry_date is None:
+        raise TypeError('batch_number and expiry_date are required')
+
     # Get or create batch
     batch, created = Batch.objects.get_or_create(
         product=product,
@@ -305,32 +412,8 @@ def add_stock(product, outlet, quantity, batch_number, expiry_date, cost_price=N
         reason=reason or f"{movement_type.title()} - Batch {batch_number}"
     )
     
-    # Update LocationStock
-    location_stock, created = LocationStock.objects.get_or_create(
-        product=product,
-        outlet=outlet,
-        tenant=product.tenant,
-        defaults={'quantity': 0}
-    )
-    location_stock.sync_quantity_from_batches()
+    rebuild_stock_state(product, outlet, user=user, reason=reason or f"{movement_type.title()} stock addition")
 
-    # --- PHASE 1 FIX: Sync Product.stock with batch reality after add ---
-    # Ensures Product.stock is always in sync after stock additions
-    # (previously only deduct_stock did this, causing stale fallback in sale checks)
-    today = timezone.now().date()
-    new_stock = sum(
-        b.quantity
-        for b in Batch.objects.filter(
-            product=product,
-            outlet=outlet,
-            expiry_date__gt=today,
-            quantity__gt=0,
-        )
-    )
-    from apps.products.models import Product as _Product
-    _Product.objects.filter(id=product.id).update(stock=new_stock)
-    product.stock = new_stock
-    
     logger.info(
         f"Added {quantity} to batch {batch_number} "
         f"({product.name}) at {outlet.name}, "
@@ -341,7 +424,7 @@ def add_stock(product, outlet, quantity, batch_number, expiry_date, cost_price=N
 
 
 @transaction.atomic
-def adjust_stock(product, outlet, new_quantity, user, reason='Stock adjustment'):
+def adjust_stock(product=None, outlet=None, new_quantity=None, user=None, reason='Stock adjustment', variation=None):
     """
     Adjust stock to a specific quantity (creates adjustment batch)
     UNITS ONLY ARCHITECTURE: Changed from variation-based to product-based
@@ -356,6 +439,11 @@ def adjust_stock(product, outlet, new_quantity, user, reason='Stock adjustment')
     Returns:
         Batch instance
     """
+    product = _resolve_product(product=product, variation=variation)
+
+    if new_quantity is None:
+        raise TypeError('new_quantity is required')
+
     current_quantity = get_available_stock(product, outlet)
     difference = new_quantity - current_quantity
     
@@ -396,7 +484,7 @@ def adjust_stock(product, outlet, new_quantity, user, reason='Stock adjustment')
 
 
 @transaction.atomic
-def mark_expired_batches(product=None, outlet=None):
+def mark_expired_batches(product=None, outlet=None, variation=None):
     """
     Mark expired batches and create expiry movements
     UNITS ONLY ARCHITECTURE: Changed from variation-based to product-based
@@ -409,6 +497,8 @@ def mark_expired_batches(product=None, outlet=None):
     Returns:
         int: Number of batches marked as expired
     """
+    product = _resolve_product(product=product, variation=variation)
+
     today = timezone.now().date()
     
     # Build query
@@ -442,14 +532,8 @@ def mark_expired_batches(product=None, outlet=None):
         batch.quantity = 0
         batch.save(update_fields=['quantity', 'updated_at'])
         
-        # Update LocationStock
-        location_stock = LocationStock.objects.filter(
-            product=batch.product,
-            outlet=batch.outlet
-        ).first()
-        if location_stock:
-            location_stock.sync_quantity_from_batches()
-        
+        rebuild_stock_state(batch.product, batch.outlet, user=None, reason=f"Batch expiry cleanup for {batch.batch_number}")
+
         expired_count += 1
         logger.warning(
             f"Marked {qty_expired} units as expired in batch {batch.batch_number} "
@@ -459,7 +543,7 @@ def mark_expired_batches(product=None, outlet=None):
     return expired_count
 
 
-def get_expiring_soon(days=30, product=None, outlet=None):
+def get_expiring_soon(days=30, product=None, outlet=None, variation=None):
     """
     Get batches expiring within specified days
     UNITS ONLY ARCHITECTURE: Changed from variation-based to product-based
@@ -472,6 +556,8 @@ def get_expiring_soon(days=30, product=None, outlet=None):
     Returns:
         QuerySet of Batch instances
     """
+    product = _resolve_product(product=product, variation=variation) if product is not None or variation is not None else None
+
     from datetime import timedelta
     today = timezone.now().date()
     threshold = today + timedelta(days=days)
@@ -549,22 +635,7 @@ def restore_stock_for_refund(product, outlet, quantity, user, reference_id, reas
         reason=reason,
     )
 
-    # Sync LocationStock and Product.stock projections.
-    location_stock, _ = LocationStock.objects.get_or_create(
-        product=product,
-        outlet=outlet,
-        tenant=product.tenant,
-        defaults={'quantity': 0},
-    )
-    location_stock.sync_quantity_from_batches()
-
-    new_stock = sum(
-        b.quantity
-        for b in Batch.objects.filter(product=product, outlet=outlet, expiry_date__gt=today, quantity__gt=0)
-    )
-    from apps.products.models import Product as _Product
-    _Product.objects.filter(id=product.id).update(stock=new_stock)
-    product.stock = new_stock
+    rebuild_stock_state(product, outlet, user=user, reason=reason or 'Refund restoration')
 
     logger.info(
         f"Restored {quantity} units to batch {target_batch.batch_number} "

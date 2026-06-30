@@ -460,19 +460,27 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
             receipt_number = self._generate_receipt_number(tenant)
             
             # Calculate payment details
-            payment_method = data['payment_method']
+            payment_method = data.get('payment_method') or 'cash'
+            payment_lines = data.get('payment_lines') or []
             cash_received = data.get('cash_received')
             change_given = Decimal('0')
-            
+
+            if payment_lines:
+                payment_method = 'mixed' if len(payment_lines) > 1 else str(payment_lines[0].get('payment_method') or payment_method)
+
             if payment_method == 'cash' and cash_received:
                 change_given = cash_received - tab.total
-            
+
             # Payment status for credit
             payment_status = 'paid'
             amount_paid = tab.total
             cash_amount = Decimal('0')
             card_amount = Decimal('0')
             mobile_amount = Decimal('0')
+            bank_transfer_amount = Decimal('0')
+            other_amount = Decimal('0')
+            tab_amount = Decimal('0')
+            credit_amount = Decimal('0')
             if payment_method == 'credit':
                 payment_status = 'unpaid'
                 amount_paid = Decimal('0')
@@ -480,9 +488,50 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                 cash_amount = tab.total
             elif payment_method == 'card':
                 card_amount = tab.total
-            elif payment_method == 'mobile':
+            elif payment_method in ['mobile', 'airtel', 'tnm']:
                 mobile_amount = tab.total
-            
+            elif payment_method in ['first_capital_bank', 'national_bank', 'standard_bank']:
+                bank_transfer_amount = tab.total
+            elif payment_method == 'tab':
+                tab_amount = tab.total
+            elif payment_method == 'credit':
+                credit_amount = tab.total
+            elif payment_method == 'other':
+                other_amount = tab.total
+            elif payment_method == 'mixed' and payment_lines:
+                for line in payment_lines:
+                    line_method = str(line.get('payment_method') or '').strip()
+                    line_amount = Decimal(str(line.get('amount') or '0')).quantize(Decimal('0.01'))
+                    if line_method == 'cash':
+                        cash_amount += line_amount
+                    elif line_method == 'card':
+                        card_amount += line_amount
+                    elif line_method in ['mobile', 'airtel', 'tnm']:
+                        mobile_amount += line_amount
+                    elif line_method in ['first_capital_bank', 'national_bank', 'standard_bank']:
+                        bank_transfer_amount += line_amount
+                    elif line_method == 'tab':
+                        tab_amount += line_amount
+                    elif line_method == 'credit':
+                        credit_amount += line_amount
+                    else:
+                        other_amount += line_amount
+
+            if payment_lines:
+                sale_payment_lines = [
+                    {
+                        'payment_method': str(line.get('payment_method') or '').strip(),
+                        'amount': str(Decimal(str(line.get('amount') or '0')).quantize(Decimal('0.01'))),
+                        'other_payment_method_name': line.get('other_payment_method_name') or None,
+                    }
+                    for line in payment_lines
+                ]
+            else:
+                sale_payment_lines = [{
+                    'payment_method': payment_method,
+                    'amount': str(tab.total.quantize(Decimal('0.01'))),
+                }]
+
             # Create sale record
             sale = Sale.objects.create(
                 tenant=tenant,
@@ -496,6 +545,7 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                 tax=tab.tax,
                 total=tab.total,
                 payment_method=payment_method,
+                payment_lines=sale_payment_lines,
                 status='completed',
                 cash_received=cash_received,
                 change_given=change_given,
@@ -505,6 +555,10 @@ class TabViewSet(TenantFilterMixin, viewsets.ModelViewSet):
                 cash_amount=cash_amount,
                 card_amount=card_amount,
                 mobile_amount=mobile_amount,
+                bank_transfer_amount=bank_transfer_amount,
+                other_amount=other_amount,
+                tab_amount=tab_amount,
+                credit_amount=credit_amount,
                 notes=f"From Tab #{tab.tab_number}. {data.get('notes', '')}",
             )
             

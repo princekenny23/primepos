@@ -45,6 +45,9 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
   const [isLoading, setIsLoading] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+  const [hasMore, setHasMore] = useState(false)
   const [transferItems, setTransferItems] = useState<TransferItem[]>([])
   const [fromOutletId, setFromOutletId] = useState("")
   const [toOutletId, setToOutletId] = useState("")
@@ -54,11 +57,16 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
   const [draftQuantity, setDraftQuantity] = useState("")
   const [editingItemId, setEditingItemId] = useState<string | null>(null)
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (p = 1, search = "") => {
     setLoadingProducts(true)
     try {
-      const response = await productService.list({ is_active: true })
+      const filters: any = { is_active: true, page: p, limit: pageSize }
+      if (search) filters.search = search
+      const response = await productService.list(filters)
       setProducts(response.results || [])
+      if (response.next) setHasMore(true)
+      else if (typeof response.count === "number") setHasMore(p * pageSize < (response.count || 0))
+      else setHasMore((response.results || []).length === pageSize)
     } catch (error) {
       console.error("Failed to load products:", error)
       toast({
@@ -73,7 +81,7 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
 
   useEffect(() => {
     if (open) {
-      loadProducts()
+      loadProducts(page, searchTerm)
       setTransferItems([])
       setFromOutletId("")
       setToOutletId("")
@@ -83,18 +91,21 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
       setDraftQuantity("")
       setEditingItemId(null)
     }
-  }, [open, loadProducts])
+  }, [open, loadProducts, page])
+
+  useEffect(() => {
+    if (open) {
+      setPage(1)
+      loadProducts(1, searchTerm)
+    }
+  }, [searchTerm, open, loadProducts])
 
   const filteredProducts = useMemo(() => {
     const addedIds = new Set(
       transferItems.filter(i => i.id !== editingItemId).map(i => i.product_id)
     )
-    return products.filter(p =>
-      !addedIds.has(String(p.id)) &&
-      (p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-       (p as any).sku?.toLowerCase().includes(searchTerm.toLowerCase()))
-    )
-  }, [products, transferItems, searchTerm, editingItemId])
+    return products.filter(p => !addedIds.has(String(p.id)))
+  }, [products, transferItems, editingItemId])
 
   const resetDraft = () => {
     setSelectedProductId("")
@@ -314,7 +325,7 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
                 </div>
                 {searchTerm && !selectedProductId && (
                   <div className="border rounded-md bg-background max-h-48 overflow-y-auto">
-                    {filteredProducts.slice(0, 8).length > 0 ? filteredProducts.slice(0, 8).map(p => (
+                    {filteredProducts.length > 0 ? filteredProducts.map(p => (
                       <button
                         key={p.id}
                         type="button"
@@ -327,6 +338,15 @@ export function TransferStockModal({ open, onOpenChange, onSuccess }: TransferSt
                     )) : (
                       <p className="px-3 py-2 text-sm text-muted-foreground">No products found</p>
                     )}
+                    <div className="flex items-center justify-between px-2 py-1">
+                      <Button size="sm" variant="ghost" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                        Prev
+                      </Button>
+                      <div className="text-sm text-muted-foreground">Page {page}</div>
+                      <Button size="sm" onClick={() => { if (hasMore) setPage(p => p + 1) }} disabled={!hasMore}>
+                        Next
+                      </Button>
+                    </div>
                   </div>
                 )}
                 <div className="flex items-end gap-2">

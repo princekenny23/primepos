@@ -37,6 +37,8 @@ export interface ProductFilters {
 
 export interface CategoryFilters {
   outlet?: string
+  page?: number
+  limit?: number
 }
 
 // Transform backend product to frontend format
@@ -286,6 +288,8 @@ export const categoryService = {
   async list(filters?: CategoryFilters): Promise<Category[]> {
     const params = new URLSearchParams()
     if (filters?.outlet) params.append("outlet", filters.outlet)
+    if (filters?.page) params.append("page", String(filters.page))
+    if (filters?.limit) params.append("limit", String(filters.limit))
 
     const query = params.toString()
     const response = await api.get<any>(`${apiEndpoints.categories.list}${query ? `?${query}` : ""}`)

@@ -468,6 +468,86 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         sale.discount_amount = discount
         # Round total to 2 decimal places
         sale.total = (total_subtotal + tax - discount).quantize(Decimal('0.01'))
+        # --- Handle payment_lines passed at creation (create+complete flow) ---
+        raw_payment_lines = request.data.get('payment_lines')
+        if raw_payment_lines:
+            if not isinstance(raw_payment_lines, (list, tuple)):
+                raise serializers.ValidationError({
+                    'payment_lines': 'payment_lines must be a list of {payment_method, amount, other_payment_method_name?}'
+                })
+
+            parsed_lines = []
+            sum_amount = Decimal('0')
+            for idx, pl in enumerate(raw_payment_lines):
+                if not isinstance(pl, dict):
+                    raise serializers.ValidationError({f'payment_lines[{idx}]': 'Each payment line must be an object'})
+                pm = pl.get('payment_method')
+                amt_raw = pl.get('amount')
+                if pm is None or amt_raw is None:
+                    raise serializers.ValidationError({f'payment_lines[{idx}]': 'payment_method and amount are required'})
+                try:
+                    amt = Decimal(str(amt_raw)).quantize(Decimal('0.01'))
+                except (InvalidOperation, ValueError):
+                    raise serializers.ValidationError({f'payment_lines[{idx}].amount': 'Invalid decimal amount'})
+                if amt <= 0:
+                    raise serializers.ValidationError({f'payment_lines[{idx}].amount': 'Amount must be greater than 0'})
+                other_name = pl.get('other_payment_method_name')
+                parsed_lines.append({'payment_method': str(pm), 'amount': amt, 'other_payment_method_name': other_name})
+                sum_amount += amt
+
+            if sum_amount != sale.total:
+                raise serializers.ValidationError({'payment_lines': 'Sum of payment line amounts must equal sale.total'})
+
+            # Persist payment_lines and derive aggregate fields
+            sale.payment_lines = [
+                {
+                    'payment_method': str(pl['payment_method']),
+                    'amount': str(pl['amount'].quantize(Decimal('0.01'))),
+                    'other_payment_method_name': pl.get('other_payment_method_name') or None,
+                }
+                for pl in parsed_lines
+            ]
+            if len(parsed_lines) > 1:
+                sale.payment_method = 'mixed'
+            else:
+                sale.payment_method = parsed_lines[0]['payment_method']
+
+            # Reset breakdown fields
+            sale.cash_amount = Decimal('0')
+            sale.card_amount = Decimal('0')
+            sale.mobile_amount = Decimal('0')
+            sale.bank_transfer_amount = Decimal('0')
+            sale.other_amount = Decimal('0')
+            sale.tab_amount = Decimal('0')
+            sale.credit_amount = Decimal('0')
+
+            for pl in parsed_lines:
+                m = pl['payment_method']
+                a = pl['amount']
+                if m == 'cash':
+                    sale.cash_amount += a
+                elif m in ('card',):
+                    sale.card_amount += a
+                elif m in ('mobile', 'airtel', 'tnm'):
+                    sale.mobile_amount += a
+                elif m in ('first_capital_bank', 'national_bank', 'standard_bank'):
+                    sale.bank_transfer_amount += a
+                elif m == 'tab':
+                    sale.tab_amount += a
+                elif m == 'credit':
+                    sale.credit_amount += a
+                else:
+                    sale.other_amount += a
+
+            # Determine paid vs pending status depending on presence of credit/tab
+            if any(pl['payment_method'] in ('tab', 'credit') for pl in parsed_lines):
+                sale.amount_paid = sum((pl['amount'] for pl in parsed_lines if pl['payment_method'] not in ('tab', 'credit')))
+                sale.payment_status = 'unpaid'
+                sale.status = 'pending'
+            else:
+                sale.amount_paid = sale.total
+                sale.payment_status = 'paid'
+                sale.status = 'completed'
         
         # MVP Validation: Only cash and credit/tab payments allowed (Phase 2 for card/mobile)
         if sale.payment_method in ['card', 'mobile']:
@@ -1136,22 +1216,100 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if sale.payment_status == 'paid' and sale.status == 'completed':
             return Response({"detail": "Sale already finalized."}, status=status.HTTP_400_BAD_REQUEST)
 
-        requested_method = str(request.data.get("payment_method") or sale.payment_method or "cash").strip()
-        normalized_method = requested_method.lower()
+        payment_lines_raw = request.data.get('payment_lines')
+        parsed_payment_lines = []
+        payment_method = None
+        normalized_method = None
 
-        if normalized_method == 'other':
-            other_payment_method_name = str(request.data.get('other_payment_method_name') or '').strip()
-            if not other_payment_method_name:
-                return Response({"detail": "other_payment_method_name is required for other payment method."}, status=status.HTTP_400_BAD_REQUEST)
-            payment_method = other_payment_method_name
-        elif normalized_method not in [
-            'cash', 'card', 'mobile', 'airtel', 'tnm',
-            'first_capital_bank', 'national_bank', 'standard_bank',
-            'tab', 'credit'
-        ]:
-            return Response({"detail": "Invalid payment_method."}, status=status.HTTP_400_BAD_REQUEST)
+        if payment_lines_raw is not None:
+            if not isinstance(payment_lines_raw, list) or len(payment_lines_raw) == 0:
+                return Response({"detail": "payment_lines must be a non-empty list."}, status=status.HTTP_400_BAD_REQUEST)
+
+            total_line_amount = Decimal('0')
+            for idx, line in enumerate(payment_lines_raw):
+                if not isinstance(line, dict):
+                    return Response({"detail": f"payment_lines[{idx}] must be an object."}, status=status.HTTP_400_BAD_REQUEST)
+
+                line_method = str(line.get('payment_method') or '').strip()
+                if not line_method:
+                    return Response({"detail": f"payment_lines[{idx}].payment_method is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+                normalized_line_method = line_method.lower()
+                try:
+                    line_amount = Decimal(str(line.get('amount'))).quantize(Decimal('0.01'))
+                except (InvalidOperation, ValueError, TypeError):
+                    return Response({"detail": f"payment_lines[{idx}].amount must be a valid decimal."}, status=status.HTTP_400_BAD_REQUEST)
+
+                if line_amount <= 0:
+                    return Response({"detail": f"payment_lines[{idx}].amount must be greater than 0."}, status=status.HTTP_400_BAD_REQUEST)
+
+                if normalized_line_method == 'other':
+                    other_name = str(line.get('other_payment_method_name') or '').strip()
+                    if not other_name:
+                        return Response({"detail": f"payment_lines[{idx}].other_payment_method_name is required for other payment_method."}, status=status.HTTP_400_BAD_REQUEST)
+                    display_method = other_name
+                elif normalized_line_method not in [
+                    'cash', 'card', 'mobile', 'airtel', 'tnm',
+                    'first_capital_bank', 'national_bank', 'standard_bank',
+                    'tab', 'credit'
+                ]:
+                    return Response({"detail": f"payment_lines[{idx}].payment_method '{normalized_line_method}' is invalid."}, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    display_method = normalized_line_method
+                    other_name = None
+
+                parsed_payment_lines.append({
+                    'payment_method': display_method,
+                    'method_category': normalized_line_method,
+                    'amount': line_amount,
+                    'other_payment_method_name': other_name,
+                })
+                total_line_amount += line_amount
+
+            if abs(total_line_amount - sale.total) > Decimal('0.01'):
+                return Response({"detail": "Sum of payment_lines must equal sale total."}, status=status.HTTP_400_BAD_REQUEST)
+
+            sale.payment_lines = [
+                {
+                    'payment_method': str(pl['payment_method']),
+                    'amount': str(pl['amount'].quantize(Decimal('0.01'))),
+                    'other_payment_method_name': pl['other_payment_method_name'] or None,
+                }
+                for pl in parsed_payment_lines
+            ]
+
+            if len(parsed_payment_lines) > 1:
+                payment_method = 'mixed'
+                normalized_method = 'mixed'
+            else:
+                payment_method = parsed_payment_lines[0]['payment_method']
+                normalized_method = parsed_payment_lines[0]['method_category']
         else:
-            payment_method = normalized_method
+            requested_method = str(request.data.get("payment_method") or sale.payment_method or "cash").strip()
+            normalized_method = requested_method.lower()
+
+            if normalized_method == 'other':
+                other_payment_method_name = str(request.data.get('other_payment_method_name') or '').strip()
+                if not other_payment_method_name:
+                    return Response({"detail": "other_payment_method_name is required for other payment method."}, status=status.HTTP_400_BAD_REQUEST)
+                payment_method = other_payment_method_name
+                sale.payment_lines = [{
+                    'payment_method': payment_method,
+                    'amount': str(sale.total),
+                    'other_payment_method_name': other_payment_method_name,
+                }]
+            elif normalized_method not in [
+                'cash', 'card', 'mobile', 'airtel', 'tnm',
+                'first_capital_bank', 'national_bank', 'standard_bank',
+                'tab', 'credit'
+            ]:
+                return Response({"detail": "Invalid payment_method."}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                payment_method = normalized_method
+                sale.payment_lines = [{
+                    'payment_method': payment_method,
+                    'amount': str(sale.total),
+                }]
 
         # Deduct stock only once, at finalization time.
         if not bool(sale.delivery_required):
@@ -1178,7 +1336,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
         sale.payment_method = payment_method
         if normalized_method in ['cash', 'card', 'mobile', 'airtel', 'tnm',
-                                 'first_capital_bank', 'national_bank', 'standard_bank', 'other']:
+                                 'first_capital_bank', 'national_bank', 'standard_bank', 'other', 'mixed']:
             sale.status = 'completed'
             sale.payment_status = 'paid'
             sale.amount_paid = sale.total
@@ -1187,23 +1345,41 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             sale.mobile_amount = Decimal('0')
             sale.bank_transfer_amount = Decimal('0')
             sale.other_amount = Decimal('0')
-            if normalized_method == 'cash':
-                sale.cash_amount = sale.total
-                cash_received = request.data.get('cash_received')
-                if cash_received not in (None, ''):
-                    try:
-                        sale.cash_received = Decimal(str(cash_received)).quantize(Decimal('0.01'))
-                        sale.change_given = max(Decimal('0'), (sale.cash_received - sale.total)).quantize(Decimal('0.01'))
-                    except Exception:
-                        pass
-            elif normalized_method == 'card':
-                sale.card_amount = sale.total
-            elif normalized_method in ['mobile', 'airtel', 'tnm']:
-                sale.mobile_amount = sale.total
-            elif normalized_method in ['first_capital_bank', 'national_bank', 'standard_bank']:
-                sale.bank_transfer_amount = sale.total
-            elif normalized_method == 'other':
-                sale.other_amount = sale.total
+
+            if normalized_method == 'mixed':
+                for line in parsed_payment_lines:
+                    if line['method_category'] == 'cash':
+                        sale.cash_amount += line['amount']
+                    elif line['method_category'] == 'card':
+                        sale.card_amount += line['amount']
+                    elif line['method_category'] in ['mobile', 'airtel', 'tnm']:
+                        sale.mobile_amount += line['amount']
+                    elif line['method_category'] in ['first_capital_bank', 'national_bank', 'standard_bank']:
+                        sale.bank_transfer_amount += line['amount']
+                    elif line['method_category'] == 'other':
+                        sale.other_amount += line['amount']
+                    elif line['method_category'] == 'tab':
+                        sale.tab_amount += line['amount']
+                    elif line['method_category'] == 'credit':
+                        sale.credit_amount += line['amount']
+            else:
+                if normalized_method == 'cash':
+                    sale.cash_amount = sale.total
+                    cash_received = request.data.get('cash_received')
+                    if cash_received not in (None, ''):
+                        try:
+                            sale.cash_received = Decimal(str(cash_received)).quantize(Decimal('0.01'))
+                            sale.change_given = max(Decimal('0'), (sale.cash_received - sale.total)).quantize(Decimal('0.01'))
+                        except Exception:
+                            pass
+                elif normalized_method == 'card':
+                    sale.card_amount = sale.total
+                elif normalized_method in ['mobile', 'airtel', 'tnm']:
+                    sale.mobile_amount = sale.total
+                elif normalized_method in ['first_capital_bank', 'national_bank', 'standard_bank']:
+                    sale.bank_transfer_amount = sale.total
+                elif normalized_method == 'other':
+                    sale.other_amount = sale.total
         elif normalized_method in ['tab', 'credit']:
             sale.status = 'pending'
             sale.payment_status = 'unpaid'
@@ -1510,20 +1686,15 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         status=status.HTTP_400_BAD_REQUEST
                     )
             else:
-                # Legacy: deduct from product.stock
-                product.stock -= item_data['quantity']
-                product.save(update_fields=['stock'])
-                
-                # Record stock movement for legacy products
-                StockMovement.objects.create(
-                    tenant=tenant,
+                # Legacy fallback: use the shared inventory helper so stock stays in sync.
+                deduct_stock(
                     product=product,
                     outlet=outlet,
-                    user=request.user,
-                    movement_type='sale',
                     quantity=item_data['quantity'],
+                    user=request.user,
                     reference_id=str(sale.id),
-                    reason=f"Cash sale {sale.receipt_number}"
+                    reason=f"Cash sale {sale.receipt_number}",
+                    movement_type='sale',
                 )
         
         # Cash movement creation removed - new payment system will handle this
@@ -1665,26 +1836,20 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 refund_amount += (per_unit * qty)
 
                 if restock and item.product:
-                    # CRITICAL: Verify product belongs to tenant
                     product = Product.objects.select_for_update().get(id=item.product.id, tenant=sale.tenant)
-                    product.stock += int(qty)
-                    product.save()
-
                     reason_parts = [f"Refund for sale {sale.receipt_number}"]
                     if refund_reason:
                         reason_parts.append(str(refund_reason))
                     if refund_method:
                         reason_parts.append(f"Method: {refund_method}")
 
-                    StockMovement.objects.create(
-                        tenant=sale.tenant,
+                    restore_stock_for_refund(
                         product=product,
                         outlet=sale.outlet,
-                        user=request.user,
-                        movement_type='return',
                         quantity=int(qty),
+                        user=request.user,
+                        reference_id=str(sale.id),
                         reason=": ".join(reason_parts),
-                        reference_id=str(sale.id)
                     )
             
             # Update sale status

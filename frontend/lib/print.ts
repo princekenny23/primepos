@@ -347,6 +347,21 @@ function buildPlainTextReceipt(payload: ReceiptPayload): string {
   if (payload.tax > 0) lines.push(`Tax: ${payload.tax.toFixed(2)}`)
   if (payload.discount > 0) lines.push(`Discount: -${payload.discount.toFixed(2)}`)
   lines.push(`Total: ${payload.total.toFixed(2)}`)
+  if (Array.isArray(sale.payment_lines) && sale.payment_lines.length > 0) {
+    lines.push("-----------------------------")
+    lines.push("Payment Breakdown:")
+    sale.payment_lines.forEach((line: any) => {
+      const method = String(line.payment_method || "").trim().toLowerCase()
+      const label = method === "other" && line.other_payment_method_name
+        ? String(line.other_payment_method_name)
+        : line.payment_method || line.other_payment_method_name || "Unknown"
+      const amount = Number(line.amount || 0).toFixed(2)
+      lines.push(`${label}: ${amount}`)
+    })
+  } else if (sale.payment_method) {
+    lines.push("-----------------------------")
+    lines.push(`Payment Method: ${String(sale.payment_method).toUpperCase()}`)
+  }
   lines.push("-----------------------------")
   lines.push("* Thank you for your business *")
   lines.push("* Powered by PRIMEPOS *")

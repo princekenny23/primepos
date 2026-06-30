@@ -347,7 +347,12 @@ export function SingleProductPOS() {
     }
   }
 
-  const handlePayment = async (paymentMethod: string, amount: number) => {
+  const handlePayment = async (
+    paymentMethod: string,
+    amount: number,
+    change?: number,
+    options?: { payment_lines?: Array<{ payment_method: string; amount: number; other_payment_method_name?: string }>; other_payment_method_name?: string }
+  ) => {
     paymentCloseByConfirmRef.current = true
     if (!currentBusiness || !currentOutlet || !activeShift) {
       toast({
@@ -434,14 +439,75 @@ export function SingleProductPOS() {
         return
       }
 
-      if (!initiatedSaleId) {
-        throw new Error("No initiated transaction found. Click Pay again.")
+      const immediatePayment = !["tab", "credit"].includes(paymentMethod)
+
+      if (immediatePayment && !initiatedSaleId) {
+        const sale = await saleService.create({
+          outlet: String(currentOutlet.id),
+          shift: String(activeShift.id),
+          customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+          items_data: cart.map((item) => ({
+            product_id: String(item.productId),
+            quantity: item.quantity,
+            price: item.price,
+          })),
+          subtotal: cartTotal,
+          tax: 0,
+          discount: 0,
+          total: cartTotal,
+          payment_method: paymentMethod as any,
+          payment_lines: options?.payment_lines || (options?.other_payment_method_name ? [{ payment_method: options.other_payment_method_name, amount: cartTotal }] : undefined),
+          notes: "Quick sale from single product POS",
+        } as any)
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("sale-completed"))
+        }
+
+        clearCart()
+        setSelectedCustomer(null)
+        setTransactionLocked(false)
+        setInitiatedSaleId("")
+        setShowPaymentMethod(false)
+        setIsProcessingPayment(false)
+        return
       }
 
-      const sale = await saleService.finalizePayment(initiatedSaleId, {
-        payment_method: paymentMethod as any,
-        cash_received: amount,
-      })
+      // For tab/credit ensure we have an initiated sale
+      if (!immediatePayment && !initiatedSaleId) {
+        const initiated = await saleService.initiatePayment({
+          outlet: String(currentOutlet.id),
+          shift: String(activeShift.id),
+          customer: selectedCustomer?.id ? String(selectedCustomer.id) : undefined,
+          delivery_required: false,
+          items_data: cart.map((item) => ({ product_id: String(item.productId), quantity: item.quantity, price: item.price })),
+          subtotal: cartTotal,
+          tax: 0,
+          discount: 0,
+          total: cartTotal,
+          notes: "Initiated for tab/credit from single product POS",
+        })
+
+        if (!('id' in initiated)) {
+          setOfflineCheckoutStarted(true)
+          setTransactionLocked(true)
+          setInitiatedSaleId("")
+          throw new Error('Checkout queued offline')
+        }
+
+        setInitiatedSaleId(String(initiated.id))
+      }
+
+      let sale
+      if (!immediatePayment) {
+        sale = await saleService.finalizePayment(initiatedSaleId, {
+          payment_method: paymentMethod as any,
+          cash_received: amount,
+          change,
+          other_payment_method_name: options?.other_payment_method_name,
+          payment_lines: options?.payment_lines,
+        })
+      }
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("sale-completed"))
@@ -461,6 +527,10 @@ export function SingleProductPOS() {
       setSelectedCustomer(null)
       setTransactionLocked(false)
       setInitiatedSaleId("")
+
+      if (!sale?.id) {
+        throw new Error('Unable to finalize sale. No sale was created.')
+      }
 
       // Attempt to print the canonical saved sale (non-blocking)
       try {
@@ -494,6 +564,7 @@ export function SingleProductPOS() {
   const handlePaymentCancel = async () => {
     if (paymentCloseByConfirmRef.current) {
       paymentCloseByConfirmRef.current = false
+      setShowPaymentMethod(false)
       return
     }
     setShowPaymentMethod(false)
@@ -915,6 +986,7 @@ export function SingleProductPOS() {
       
       <PaymentPopup
         open={showPaymentMethod}
+        onClose={() => setShowPaymentMethod(false)}
         onDismiss={() => {
           setShowPaymentMethod(false)
         }}
@@ -928,7 +1000,7 @@ export function SingleProductPOS() {
         tax={0}
         customer={selectedCustomer}
         items={cart}
-        onConfirm={(method, amount) => handlePayment(method, amount || cartTotal)}
+        onConfirm={(method, amount, change, options) => handlePayment(method, amount || cartTotal, change, options)}
       />
 
       {/* Receipt preview removed from POS terminal - printing is automatic */}

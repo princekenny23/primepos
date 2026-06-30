@@ -52,6 +52,9 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
   const [isLoading, setIsLoading] = useState(false)
   const [products, setProducts] = useState<Product[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
+  const [page, setPage] = useState(1)
+  const pageSize = 10
+  const [hasMore, setHasMore] = useState(false)
   const [adjustmentItems, setAdjustmentItems] = useState<AdjustmentItem[]>([])
   const [commonReason, setCommonReason] = useState("")
   const [commonNotes, setCommonNotes] = useState("")
@@ -66,11 +69,16 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
 
   const outlet = tenantOutlet || currentOutlet
 
-  const loadProducts = useCallback(async () => {
+  const loadProducts = useCallback(async (p = 1, search = "") => {
     setLoadingProducts(true)
     try {
-      const response = await productService.list({ is_active: true })
+      const filters: any = { is_active: true, page: p, limit: pageSize }
+      if (search) filters.search = search
+      const response = await productService.list(filters)
       setProducts(response.results || [])
+      if (response.next) setHasMore(true)
+      else if (typeof response.count === "number") setHasMore(p * pageSize < (response.count || 0))
+      else setHasMore((response.results || []).length === pageSize)
     } catch (error) {
       console.error("Failed to load products:", error)
       toast({
@@ -85,7 +93,7 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
 
   useEffect(() => {
     if (open) {
-      loadProducts()
+      loadProducts(page, searchTerm)
       // Generate tracking number
       const tracking = `ADJ-${Date.now().toString().slice(-8)}`
       setTrackingNumber(tracking)
@@ -114,13 +122,14 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
       setDraftQuantity("")
       setEditingItemId(null)
     }
-  }, [open, outlet, outlets, loadProducts])
+  }, [open, outlet, outlets, loadProducts, page])
 
   useEffect(() => {
     if (open) {
-      loadProducts()
+      setPage(1)
+      loadProducts(1, searchTerm)
     }
-  }, [open, loadProducts])
+  }, [searchTerm, open, loadProducts])
 
   const filteredProducts = useMemo(() => {
     const searchValue = searchTerm.trim().toLowerCase()
@@ -130,14 +139,7 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
         .map((item) => String(item.product_id))
     )
 
-    return products.filter(product =>
-      !selectedProductIds.has(String(product.id)) && (
-        searchValue.length === 0 ||
-        product.name?.toLowerCase().includes(searchValue) ||
-        (product.sku && product.sku.toLowerCase().includes(searchValue)) ||
-        (product.barcode && product.barcode.toLowerCase().includes(searchValue))
-      )
-    )
+    return products.filter(product => !selectedProductIds.has(String(product.id)))
   }, [adjustmentItems, editingItemId, products, searchTerm])
 
   const selectedProduct = useMemo(
@@ -457,7 +459,7 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
                       {filteredProducts.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-muted-foreground">No matching products.</p>
                       ) : (
-                        filteredProducts.slice(0, 8).map((product) => (
+                        filteredProducts.map((product) => (
                           <button
                             key={product.id}
                             type="button"
@@ -472,6 +474,15 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
                           </button>
                         ))
                       )}
+                      <div className="flex items-center justify-between px-2 py-1">
+                        <Button size="sm" variant="ghost" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>
+                          Prev
+                        </Button>
+                        <div className="text-sm text-muted-foreground">Page {page}</div>
+                        <Button size="sm" onClick={() => { if (hasMore) setPage(p => p + 1) }} disabled={!hasMore}>
+                          Next
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
