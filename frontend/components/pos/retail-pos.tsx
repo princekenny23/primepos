@@ -157,10 +157,6 @@ export function RetailPOS() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("")
   const [showQuickSelectDropdown, setShowQuickSelectDropdown] = useState(false)
   const [showPaymentMethod, setShowPaymentMethod] = useState(false)
-  const [showOtherPaymentMethodDialog, setShowOtherPaymentMethodDialog] = useState(false)
-  const [pendingOtherPaymentAmount, setPendingOtherPaymentAmount] = useState<number | undefined>(undefined)
-  const [pendingOtherPaymentChange, setPendingOtherPaymentChange] = useState<number | undefined>(undefined)
-  const [pendingOtherPaymentMethodName, setPendingOtherPaymentMethodName] = useState("")
   const [showReceiptPrompt, setShowReceiptPrompt] = useState(false)
   const [showManualReceiptDialog, setShowManualReceiptDialog] = useState(false)
   const [postSaleReceiptData, setPostSaleReceiptData] = useState<any>(null)
@@ -706,11 +702,7 @@ export function RetailPOS() {
     options?: { payment_lines?: Array<{ payment_method: string; amount: number; other_payment_method_name?: string }>; other_payment_method_name?: string }
   ) => {
     if (method === "other") {
-      setPendingOtherPaymentAmount(amount)
-      setPendingOtherPaymentChange(change)
-      setPendingOtherPaymentMethodName("")
-      setShowPaymentMethod(false)
-      setShowOtherPaymentMethodDialog(true)
+      await handleFinalizeSale(method, amount, change, options)
       return
     }
 
@@ -724,7 +716,6 @@ export function RetailPOS() {
     options?: { payment_lines?: Array<{ payment_method: string; amount: number; other_payment_method_name?: string }>; other_payment_method_name?: string }
   ) => {
     paymentCloseByConfirmRef.current = true
-    setShowOtherPaymentMethodDialog(false)
 
     // Re-validate (shouldn't happen, but safety check)
     if (!currentOutlet || !activeShift) {
@@ -2034,71 +2025,7 @@ export function RetailPOS() {
         onConfirm={handlePaymentConfirm}
       />
 
-      <Dialog
-        open={showOtherPaymentMethodDialog}
-        onOpenChange={(open) => {
-          if (!open) {
-            setShowOtherPaymentMethodDialog(false)
-          }
-        }}
-      >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Other Payment Method</DialogTitle>
-            <DialogDescription>
-              Enter the name of the payment method before finalizing the sale.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label htmlFor="other-payment-name" className="text-sm font-medium">
-                Method name
-              </Label>
-              <Input
-                id="other-payment-name"
-                value={pendingOtherPaymentMethodName}
-                onChange={(event) => setPendingOtherPaymentMethodName(event.target.value)}
-                placeholder="e.g. Gift Card, Voucher, Cheque"
-                className="mt-2"
-                autoFocus
-              />
-            </div>
-            <div className="rounded bg-gray-50 p-3 text-sm text-gray-700">
-              {pendingOtherPaymentAmount !== undefined ? (
-                <>
-                  Amount received: MWK {pendingOtherPaymentAmount.toLocaleString()}<br />
-                  Change due: MWK {Number(pendingOtherPaymentChange || 0).toLocaleString()}
-                </>
-              ) : (
-                <>Enter the payment method name and confirm to complete the sale.</>
-              )}
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowOtherPaymentMethodDialog(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              disabled={!pendingOtherPaymentMethodName.trim()}
-              onClick={() => void handleFinalizeSale(
-                "other",
-                pendingOtherPaymentAmount,
-                pendingOtherPaymentChange,
-                {
-                  other_payment_method_name: pendingOtherPaymentMethodName.trim(),
-                },
-              )}
-            >
-              Confirm
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Other payment method dialog removed — PaymentPopup now supplies the name */}
 
       <ReceiptPostSaleModal
         open={showReceiptPrompt}

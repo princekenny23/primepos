@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RefreshCw } from "lucide-react"
 import { useState, useEffect } from "react"
@@ -46,6 +47,10 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
   const [isLoadingReceipt, setIsLoadingReceipt] = useState(false)
   const [restock, setRestock] = useState(true)
   const [reason, setReason] = useState("")
+  const [refundMethod, setRefundMethod] = useState<
+    "cash" | "card" | "mobile" | "airtel" | "tnm" | "first_capital_bank" | "national_bank" | "standard_bank" | "tab" | "credit" | "other"
+  >("cash")
+  const [otherRefundMethodName, setOtherRefundMethodName] = useState("")
   const [isProcessing, setIsProcessing] = useState(false)
 
   useEffect(() => {
@@ -57,6 +62,8 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
       setSelectedItems({})
       setRestock(true)
       setReason("")
+      setRefundMethod("cash")
+      setOtherRefundMethodName("")
       setIsLoadingReceipt(false)
       setIsProcessing(false)
       return
@@ -191,9 +198,10 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
       await saleService.refund(String(saleId), {
         reason: reason.trim() || undefined,
         restock,
-        refund_method: "cash",
+        refund_method: refundMethod,
         refund_amount: refundAmount,
         items: itemsPayload,
+        other_payment_method_name: refundMethod === "other" ? otherRefundMethodName.trim() || undefined : undefined,
       })
 
       if (typeof window !== "undefined") {
@@ -357,7 +365,7 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Confirm Refund</DialogTitle>
-            <DialogDescription>Review amount and confirm cash refund.</DialogDescription>
+            <DialogDescription>Review amount and choose refund method.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -370,8 +378,36 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
 
             <div className="space-y-2">
               <Label htmlFor="refund-method">Refund Method *</Label>
-              <Input id="refund-method" value="Cash" readOnly />
+              <Select value={refundMethod} onValueChange={(value) => setRefundMethod(value as typeof refundMethod)}>
+                <SelectTrigger id="refund-method" className="w-full border-gray-300 bg-white text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="card">Card</SelectItem>
+                  <SelectItem value="mobile">Mobile Money</SelectItem>
+                  <SelectItem value="airtel">Airtel Money</SelectItem>
+                  <SelectItem value="tnm">TNM Money</SelectItem>
+                  <SelectItem value="first_capital_bank">First Capital Bank</SelectItem>
+                  <SelectItem value="national_bank">National Bank</SelectItem>
+                  <SelectItem value="standard_bank">Standard Bank</SelectItem>
+                  <SelectItem value="tab">Tab / Credit</SelectItem>
+                  <SelectItem value="credit">Credit</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+            {refundMethod === "other" && (
+              <div className="space-y-2">
+                <Label htmlFor="other-refund-method-name">Other Payment Method Name</Label>
+                <Input
+                  id="other-refund-method-name"
+                  placeholder="e.g. Bank Deposit"
+                  value={otherRefundMethodName}
+                  onChange={(e) => setOtherRefundMethodName(e.target.value)}
+                />
+              </div>
+            )}
           </div>
 
           <DialogFooter>

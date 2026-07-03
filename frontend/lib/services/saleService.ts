@@ -228,33 +228,79 @@ function transformSale(backendSale: any): Sale {
 
 export const saleService = {
   async list(filters?: SaleFilters): Promise<{ results: SaleWithMetadata[]; count: number }> {
-    const params = new URLSearchParams()
-    if (filters?.outlet) params.append("outlet", filters.outlet)
-    if (filters?.user) params.append("user", filters.user)
-    if (filters?.status) params.append("status", filters.status)
-    if (filters?.payment_method) params.append("payment_method", filters.payment_method)
-    if (filters?.start_date) params.append("start_date", filters.start_date)
-    if (filters?.end_date) params.append("end_date", filters.end_date)
-    if (filters?.search) params.append("search", filters.search)
-    if (filters?.page) params.append("page", String(filters.page))
-    if (filters?.tenant) params.append("tenant", filters.tenant)
-    if (filters?.businessId) params.append("business", filters.businessId)
-    if (filters?.limit) params.append("limit", String(filters.limit))
-    
-    const query = params.toString()
-    const response = await api.get<any>(`${apiEndpoints.sales.list}${query ? `?${query}` : ""}`)
-    
-    // Handle paginated and non-paginated responses
-    if (Array.isArray(response)) {
-      return {
-        results: response.map(transformSale),
-        count: response.length,
+    const buildUrl = (page?: number) => {
+      const params = new URLSearchParams()
+      if (filters?.outlet) params.append("outlet", filters.outlet)
+      if (filters?.user) params.append("user", filters.user)
+      if (filters?.status) params.append("status", filters.status)
+      if (filters?.payment_method) params.append("payment_method", filters.payment_method)
+      if (filters?.start_date) params.append("start_date", filters.start_date)
+      if (filters?.end_date) params.append("end_date", filters.end_date)
+      if (filters?.search) params.append("search", filters.search)
+      if (filters?.tenant) params.append("tenant", filters.tenant)
+      if (filters?.businessId) params.append("business", filters.businessId)
+      if (filters?.limit) params.append("limit", String(filters.limit))
+      if (filters?.page != null) {
+        params.append("page", String(filters.page))
+      } else if (page != null) {
+        params.append("page", String(page))
+      }
+      const query = params.toString()
+      return `${apiEndpoints.sales.list}${query ? `?${query}` : ""}`
+    }
+
+    const requestedLimit = filters?.limit
+    const results: SaleWithMetadata[] = []
+    let page = filters?.page ?? 1
+    let count = 0
+    let hasNext = false
+
+    const appendResults = (items: any[]) => {
+      const transformed = items.map(transformSale)
+      if (requestedLimit != null && results.length + transformed.length > requestedLimit) {
+        results.push(...transformed.slice(0, requestedLimit - results.length))
+      } else {
+        results.push(...transformed)
       }
     }
-    
+
+    const response = await api.get<any>(buildUrl(page))
+    if (Array.isArray(response)) {
+      const transformed = response.map(transformSale)
+      return {
+        results: requestedLimit != null ? transformed.slice(0, requestedLimit) : transformed,
+        count: transformed.length,
+      }
+    }
+
+    appendResults(response.results || [])
+    count = response.count || results.length
+    hasNext = Boolean(response.next)
+
+    if (filters?.page != null || !hasNext || results.length === 0 || (requestedLimit != null && results.length >= requestedLimit)) {
+      return {
+        results,
+        count,
+      }
+    }
+
+    while (hasNext && (requestedLimit == null || results.length < requestedLimit)) {
+      page += 1
+      const nextResponse = await api.get<any>(buildUrl(page))
+      if (Array.isArray(nextResponse)) {
+        appendResults(nextResponse)
+        count = results.length
+        break
+      }
+
+      appendResults(nextResponse.results || [])
+      count = nextResponse.count || count || results.length
+      hasNext = Boolean(nextResponse.next) && results.length < (requestedLimit ?? Infinity)
+    }
+
     return {
-      results: (response.results || []).map(transformSale),
-      count: response.count || (response.results || []).length,
+      results,
+      count,
     }
   },
 
@@ -370,6 +416,7 @@ export const saleService = {
           refund_method?: string
           refund_amount?: number
           items?: Array<{ item_id: string; quantity: number }>
+          other_payment_method_name?: string
         }
   ): Promise<SaleWithMetadata> {
     const payload = typeof options === "string"

@@ -208,6 +208,37 @@ export function ManagePermissionsModal({
     }
   }, [open, tenant])
 
+  // Handle toggle events emitted from TenantAppAccessPanel (CustomEvent)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail || {}
+      const key = detail?.key as keyof TenantPermissions | undefined
+      const value = Boolean(detail?.value)
+      const outletId = detail?.outletId || null
+
+      if (!key) return
+
+      // If the event is for a specific outlet, route to outlet handler
+      if (outletId && selectedOutlet && String(outletId) === String(selectedOutlet.id)) {
+        toggleOutletPermission(selectedOutlet.id, key as TenantAppAccessKey, value)
+        return
+      }
+
+      // Otherwise treat as tenant-level toggle
+      handleToggle(key as keyof TenantPermissions, value)
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("tenant-app-access-toggle", handler as EventListener)
+    }
+
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("tenant-app-access-toggle", handler as EventListener)
+      }
+    }
+  }, [selectedOutlet])
+
   const loadPermissions = async () => {
     setIsLoading(true)
     try {
@@ -552,7 +583,6 @@ export function ManagePermissionsModal({
             <TabsContent value="apps" className="space-y-4 mt-4">
               <TenantAppAccessPanel
                 permissions={permissions}
-                onToggle={handleToggle}
                 disabled={isSaving}
                 description="Control which top-level tenant apps are enabled. This is shared with Edit Tenant module access."
               />
@@ -911,7 +941,7 @@ export function ManagePermissionsModal({
                       <CardContent className="space-y-4">
                         <TenantAppAccessPanel
                           permissions={selectedOutlet.modulePermissions}
-                          onToggle={(key, value) => toggleOutletPermission(selectedOutlet.id, key, value)}
+                          outletId={selectedOutlet.id}
                           disabled={selectedOutlet.isSaving || isSavingOutletPermissions}
                           title="Outlet App Access"
                           description="These module switches apply only to this outlet. Distribution is controlled by the Distribution toggle here."

@@ -52,6 +52,61 @@ def _report_metadata(request, tenant, outlet_id=None, filters=None):
     }
 
 
+def _normalize_payment_line_method(line):
+    method = str(line.get('payment_method') or '').strip().lower()
+    other_name = str(line.get('other_payment_method_name') or '').strip()
+
+    if method == 'other' and other_name:
+        return other_name
+    if not method:
+        return other_name or 'other'
+    return method
+
+
+def _aggregate_payment_methods(payment_rows):
+    breakdown = {}
+
+    for row in payment_rows:
+        payment_method = row.get('payment_method') or 'unknown'
+        payment_lines = row.get('payment_lines') or []
+        sale_total = row.get('total') or Decimal('0')
+
+        if payment_method == 'mixed' and isinstance(payment_lines, list) and payment_lines:
+            seen_methods = set()
+            for line in payment_lines:
+                line_method = _normalize_payment_line_method(line)
+                amount = Decimal(str(line.get('amount') or 0))
+                if line_method not in breakdown:
+                    breakdown[line_method] = {'payment_method': line_method, 'count': 0, 'total': Decimal('0')}
+                breakdown[line_method]['total'] += amount
+                if line_method not in seen_methods:
+                    breakdown[line_method]['count'] += 1
+                    seen_methods.add(line_method)
+            continue
+
+        if payment_method == 'other' and isinstance(payment_lines, list) and len(payment_lines) == 1:
+            payment_method = _normalize_payment_line_method(payment_lines[0])
+
+        key = payment_method.strip().lower() if isinstance(payment_method, str) else str(payment_method)
+        if not key:
+            key = 'unknown'
+
+        if key not in breakdown:
+            breakdown[key] = {'payment_method': key, 'count': 0, 'total': Decimal('0')}
+
+        breakdown[key]['count'] += 1
+        breakdown[key]['total'] += Decimal(str(sale_total))
+
+    return [
+        {
+            'payment_method': method,
+            'count': int(data['count']),
+            'total': float(data['total']),
+        }
+        for method, data in breakdown.items()
+    ]
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def sales_report(request):
@@ -98,10 +153,8 @@ def sales_report(request):
     total_tax = queryset.aggregate(Sum('tax'))['tax__sum'] or 0
     total_discount = queryset.aggregate(Sum('discount'))['discount__sum'] or 0
 
-    by_payment_method = payment_queryset.values('payment_method').annotate(
-        count=Count('id'),
-        total=Sum('total')
-    )
+    payment_rows = payment_queryset.values('payment_method', 'total', 'payment_lines')
+    by_payment_method = _aggregate_payment_methods(payment_rows)
     
     # Top products
     top_products = SaleItem.objects.filter(sale__in=queryset).values('product_name').annotate(
@@ -468,10 +521,8 @@ def daily_sales_report(request):
     total_discount = queryset.aggregate(Sum('discount'))['discount__sum'] or Decimal('0')
     
     # By payment method
-    by_payment_method = queryset.values('payment_method').annotate(
-        count=Count('id'),
-        total=Sum('total')
-    )
+    payment_rows = queryset.values('payment_method', 'total', 'payment_lines')
+    by_payment_method = _aggregate_payment_methods(payment_rows)
     
     # By shift
     by_shift = queryset.values('shift__id', 'shift__operating_date').annotate(

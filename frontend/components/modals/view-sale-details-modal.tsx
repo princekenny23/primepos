@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Receipt, Download, Printer, Store, User, CreditCard } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useBusinessStore } from "@/stores/businessStore"
 import { formatCurrency } from "@/lib/utils/currency"
 import { receiptService } from "@/lib/services/receiptService"
@@ -29,6 +29,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { saleService } from "@/lib/services/saleService"
 import {
   getSalePaymentLines,
+  mapSaleToViewDetailsModalProps,
   type ViewSaleDetailsModalSale,
 } from "@/lib/utils/view-sale-details"
 
@@ -51,11 +52,56 @@ export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetai
   const { toast } = useToast()
   const [isPrinting, setIsPrinting] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [loadedSale, setLoadedSale] = useState<ViewSaleDetailsModalSale | null>(null)
+  const [isFetchingSale, setIsFetchingSale] = useState(false)
+  const [fetchSaleError, setFetchSaleError] = useState<string | null>(null)
+  const saleDbId = String(sale?.saleDbId || "").trim()
+
+  useEffect(() => {
+    if (!open || !saleDbId) {
+      return
+    }
+
+    const existingLines = getSalePaymentLines(sale as unknown as Record<string, unknown>)
+    const originalPaymentMethod = String(
+      (sale as any).paymentMethod ||
+      (sale as any).payment_method ||
+      (sale as any)._raw?.payment_method ||
+      ""
+    ).trim().toLowerCase()
+
+    if (existingLines.length > 0 || originalPaymentMethod !== "mixed") {
+      return
+    }
+
+    let mounted = true
+    setIsFetchingSale(true)
+    setFetchSaleError(null)
+
+    saleService
+      .get(saleDbId)
+      .then((fullSale) => {
+        if (!mounted) return
+        setLoadedSale(mapSaleToViewDetailsModalProps(fullSale))
+      })
+      .catch((error: any) => {
+        if (!mounted) return
+        setFetchSaleError(error?.message || "Failed to load full sale details.")
+      })
+      .finally(() => {
+        if (!mounted) return
+        setIsFetchingSale(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [open, sale, saleDbId])
 
   if (!sale) return null
 
-  const saleDbId = String(sale.saleDbId || sale.id || "").trim()
-  const rawPaymentLines = getSalePaymentLines(sale as unknown as Record<string, unknown>)
+  const activeSale = loadedSale || sale
+  const rawPaymentLines = getSalePaymentLines(activeSale as unknown as Record<string, unknown>)
 
   const paymentLines = Array.isArray(rawPaymentLines)
     ? rawPaymentLines.filter((line: any) => {
@@ -65,9 +111,9 @@ export function ViewSaleDetailsModal({ open, onOpenChange, sale }: ViewSaleDetai
     : []
 
   const paymentMethodRaw = String(
-    (sale as any).paymentMethod ||
-    (sale as any).payment_method ||
-    (sale as any)._raw?.payment_method ||
+    (activeSale as any).paymentMethod ||
+    (activeSale as any).payment_method ||
+    (activeSale as any)._raw?.payment_method ||
     ""
   ).trim()
 

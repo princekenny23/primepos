@@ -1,4 +1,5 @@
 "use client"
+/* eslint-disable */
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -25,7 +26,9 @@ export interface TenantAppAccessState {
 
 interface TenantAppAccessPanelProps {
   permissions: TenantAppAccessState
-  onToggle: (key: TenantAppAccessKey, value: boolean) => void
+  // `onToggle` removed to keep props serializable for server -> client usage.
+  // Consumers can listen for the `tenant-app-access-toggle` CustomEvent.
+  outletId?: string
   disabled?: boolean
   title?: string
   description?: string
@@ -43,7 +46,7 @@ const appRows: Array<{ key: TenantAppAccessKey; label: string }> = [
 
 export function TenantAppAccessPanel({
   permissions,
-  onToggle,
+  outletId,
   disabled = false,
   title = "Tenant App Access",
   description,
@@ -66,7 +69,15 @@ export function TenantAppAccessPanel({
               <Label>{row.label}</Label>
               <Switch
                 checked={permissions[row.key]}
-                onCheckedChange={(checked) => onToggle(row.key, checked)}
+                onCheckedChange={(checked) => {
+                  if (typeof window !== "undefined") {
+                    window.dispatchEvent(
+                      new CustomEvent("tenant-app-access-toggle", {
+                        detail: { key: row.key, value: checked, outletId: outletId || null },
+                      })
+                    )
+                  }
+                }}
                 disabled={disabled}
               />
             </div>
