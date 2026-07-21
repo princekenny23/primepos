@@ -5,7 +5,7 @@ from urllib.parse import quote_plus
 from django.db import transaction
 from django.db.models import Max
 
-from apps.inventory.models import StockMovement
+from apps.inventory.stock_helpers import get_sellable_stock
 from apps.products.models import Product, ProductUnit
 from apps.sales.models import Sale, SaleItem
 from apps.sales.services import ReceiptService
@@ -85,10 +85,11 @@ def create_whatsapp_order(storefront: Storefront, payload: dict):
             unit_name = unit.unit_name
             price = unit.retail_price
 
-        if product.stock < quantity_in_base_units:
+        available_stock = get_sellable_stock(product, outlet)
+        if available_stock < quantity_in_base_units:
             raise ValueError(
                 f"Item {index + 1}: insufficient stock for {product.name}. "
-                f"Available: {product.stock}, requested: {quantity_in_base_units}."
+                f"Available: {available_stock}, requested: {quantity_in_base_units}."
             )
 
         line_total = (Decimal(quantity) * price).quantize(Decimal('0.01'))
@@ -140,22 +141,6 @@ def create_whatsapp_order(storefront: Storefront, payload: dict):
             total=entry['total'],
             notes='',
             kitchen_status='pending',
-        )
-
-        # Reserve stock immediately using the same movement ledger used by existing sales.
-        product = entry['product']
-        product.stock -= entry['quantity_in_base_units']
-        product.save(update_fields=['stock'])
-
-        StockMovement.objects.create(
-            tenant=tenant,
-            product=product,
-            outlet=outlet,
-            user=None,
-            movement_type='sale',
-            quantity=entry['quantity_in_base_units'],
-            reference_id=str(sale.id),
-            reason=f"Storefront WhatsApp order {sale.receipt_number}",
         )
 
     customer_name = payload.get('customer_name', '').strip()

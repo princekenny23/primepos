@@ -14,6 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast"
 
 const PA_HEARTBEAT_WINDOW_MS = 90_000
+const QZ_TRAY_ENABLED_STORAGE_KEY = "primepos.qzTrayEnabled"
+const QZ_TRAY_CONNECT_STATUS_STORAGE_KEY = "primepos.qzTrayConnectStatus"
+const QZ_TRAY_CDN_URLS = [
+  "https://cdn.jsdelivr.net/npm/qz-tray@2.0.0/qz-tray.js",
+  "https://unpkg.com/qz-tray@2.0.0/qz-tray.js",
+  "https://cdnjs.cloudflare.com/ajax/libs/qz-tray/2.0.0/qz-tray.js",
+]
 
 type WizardStep = 1 | 2 | 3
 
@@ -100,6 +107,10 @@ export function PrinterSettings() {
   const [extraPrinters, setExtraPrinters] = useState<string[]>([])
   const [lastAssignedOutletName, setLastAssignedOutletName] = useState("")
   const [selectedPaperWidth, setSelectedPaperWidth] = useState<string>("80")
+  const [qzEnabled, setQzEnabled] = useState(false)
+  const [qzStatus, setQzStatus] = useState<"idle" | "connecting" | "ready" | "error">("idle")
+  const [qzPrinters, setQzPrinters] = useState<string[]>([])
+  const [isScanningQz, setIsScanningQz] = useState(false)
   const mergedPrinters = useMemo(
     () => Array.from(new Set([...(printers || []), ...extraPrinters])),
     [printers, extraPrinters]
@@ -111,6 +122,149 @@ export function PrinterSettings() {
     setExtraPrinters((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]))
   }
 
+  const persistQzPreference = (enabled: boolean) => {
+    if (typeof window === "undefined") return
+    try {
+      localStorage.setItem(QZ_TRAY_ENABLED_STORAGE_KEY, enabled ? "true" : "false")
+      localStorage.setItem(QZ_TRAY_CONNECT_STATUS_STORAGE_KEY, enabled ? "enabled" : "disabled")
+    } catch {
+      // ignore storage failures
+    }
+  }
+
+  const loadQzTrayScript = async (url: string): Promise<boolean> => {
+    if (typeof document === "undefined") return false
+
+    return new Promise<boolean>((resolve) => {
+      const script = document.createElement("script")
+      script.async = true
+      script.crossOrigin = "anonymous"
+      script.src = url
+      script.setAttribute("data-primepos-qz", "true")
+
+      const cleanup = () => {
+        script.remove()
+      }
+
+      script.addEventListener(
+        "load",
+        () => {
+          cleanup()
+          resolve(true)
+        },
+        { once: true }
+      )
+
+      script.addEventListener(
+        "error",
+        () => {
+          cleanup()
+          resolve(false)
+        },
+        { once: true }
+      )
+
+      document.head.appendChild(script)
+    })
+  }
+
+  const ensureQzTrayReady = async (): Promise<boolean> => {
+    if (typeof window === "undefined") return false
+
+    const existingQz = (window as Window & typeof globalThis & { qz?: any }).qz
+    if (existingQz && typeof existingQz.websocket?.connect === "function") {
+      return true
+    }
+
+    if (typeof document === "undefined") return false
+
+    const existingScript = document.querySelector('script[data-primepos-qz="true"]') as HTMLScriptElement | null
+    if (existingScript) {
+      await new Promise<void>((resolve, reject) => {
+        existingScript.addEventListener("load", () => resolve(), { once: true })
+        existingScript.addEventListener("error", () => reject(new Error("QZ Tray script failed to load")), { once: true })
+      })
+      return Boolean((window as Window & typeof globalThis & { qz?: any }).qz)
+    }
+
+    for (const url of QZ_TRAY_CDN_URLS) {
+      const loaded = await loadQzTrayScript(url)
+      if (!loaded) continue
+
+      const candidate = (window as Window & typeof globalThis & { qz?: any }).qz
+      if (candidate && typeof candidate.websocket?.connect === "function") {
+        return true
+      }
+    }
+
+    return false
+  }
+
+  const connectQzTray = async (silent = false) => {
+    if (!currentOutlet) {
+      if (!silent) {
+        toast({ title: "No outlet", description: "Select an outlet before connecting QZ Tray." })
+      }
+      return
+    }
+
+    const outletId = typeof currentOutlet.id === "string" ? parseInt(currentOutlet.id, 10) : Number(currentOutlet.id)
+    if (!outletId) {
+      if (!silent) {
+        toast({ title: "Invalid outlet", description: "Select a valid outlet first." })
+      }
+      return
+    }
+
+    try {
+      setIsScanningQz(true)
+      setQzStatus("connecting")
+      const ready = await ensureQzTrayReady()
+      if (!ready) {
+        throw new Error("QZ Tray is not available in this browser session.")
+      }
+
+      const qz = (window as Window & typeof globalThis & { qz?: any }).qz
+      if (!qz?.websocket?.connect || !qz?.printers?.find) {
+        throw new Error("QZ Tray library did not expose the required printer API.")
+      }
+
+      await qz.websocket.connect({ reconnect: true, attempts: 1 })
+      const discovered = await qz.printers.find()
+      const printerNames = Array.isArray(discovered)
+        ? discovered
+            .map((printer: any) => String(printer?.displayName || printer?.name || printer?.deviceName || "").trim())
+            .filter(Boolean)
+        : []
+
+      setQzPrinters(printerNames)
+      setPrinters(printerNames)
+      setRawPrinters(printerNames)
+      setQzStatus(printerNames.length > 0 ? "ready" : "error")
+
+      if (printerNames.length > 0) {
+        const preferred = printerNames[0]
+        setSelectedPrinter(preferred)
+        rememberPrinterName(preferred)
+        if (typeof window !== "undefined") {
+          localStorage.setItem(getOutletStorageKey(outletId), preferred)
+          localStorage.setItem("defaultPrinter", preferred)
+          localStorage.setItem("printChannel", "qztray")
+        }
+        if (!silent) {
+          toast({ title: "QZ Tray ready", description: `Detected ${printerNames.length} printer${printerNames.length > 1 ? "s" : ""}.` })
+        }
+      } else if (!silent) {
+        toast({ title: "QZ Tray connected", description: "QZ Tray is active but no printers were detected yet." })
+      }
+    } catch (err: any) {
+      setQzStatus("error")
+      toast({ title: "QZ Tray connection failed", description: err?.message || "Unable to initialize QZ Tray." })
+    } finally {
+      setIsScanningQz(false)
+    }
+  }
+
   const { currentOutlet: currentOutletRaw, outlets, setCurrentOutlet } = useBusinessStore()
   const currentOutlet = currentOutletRaw as any
   const activeOutlets = useMemo(
@@ -120,6 +274,19 @@ export function PrinterSettings() {
 
   useEffect(() => {
     setHostMode(isLocalhostBrowser() ? "local" : "cloud")
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const stored = localStorage.getItem(QZ_TRAY_ENABLED_STORAGE_KEY) === "true"
+      setQzEnabled(stored)
+      if (stored) {
+        setQzStatus(localStorage.getItem(QZ_TRAY_CONNECT_STATUS_STORAGE_KEY) === "ready" ? "ready" : "idle")
+      }
+    } catch {
+      // ignore storage failures
+    }
   }, [])
 
   useEffect(() => {
@@ -617,6 +784,9 @@ export function PrinterSettings() {
       }
       if (typeof window !== "undefined") {
         localStorage.setItem(getOutletStorageKey(outletId), selectedPrinter)
+        if (qzEnabled) {
+          localStorage.setItem("printChannel", "qztray")
+        }
       }
       rememberPrinterName(selectedPrinter)
 
@@ -806,6 +976,43 @@ export function PrinterSettings() {
             <div className="text-xs text-muted-foreground">Local connector detected. Cloud pairing is not required on this machine.</div>
           </div>
         )}
+
+        <div className="rounded border p-3 space-y-3">
+          <div className="font-medium">QZ Tray printer mode</div>
+          <p className="text-xs text-muted-foreground">
+            Enable QZ Tray to let the POS discover and print to local Windows printers automatically after each sale.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={qzEnabled}
+                onChange={(event) => {
+                  const next = event.target.checked
+                  setQzEnabled(next)
+                  persistQzPreference(next)
+                  if (next) {
+                    localStorage.setItem("printChannel", "qztray")
+                  }
+                }}
+              />
+              <span>Use QZ Tray for printer detection</span>
+            </label>
+            <Button variant="outline" onClick={() => connectQzTray(false)} disabled={!qzEnabled || isScanningQz}>
+              {isScanningQz ? "Connecting..." : "Connect QZ Tray"}
+            </Button>
+          </div>
+          {qzStatus !== "idle" && (
+            <div className="text-xs text-muted-foreground">
+              QZ status: {qzStatus === "ready" ? "Ready" : qzStatus === "connecting" ? "Connecting" : "Error"}
+            </div>
+          )}
+          {qzPrinters.length > 0 && (
+            <div className="text-xs text-muted-foreground">
+              Detected printers: {qzPrinters.join(", ")}
+            </div>
+          )}
+        </div>
 
         <div className="rounded border p-3 space-y-3">
           <div className="font-medium">Step 3: Search printers</div>

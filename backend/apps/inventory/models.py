@@ -79,6 +79,18 @@ class StockMovement(models.Model):
     
     movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES)
     quantity = models.IntegerField(validators=[MinValueValidator(1)])
+    quantity_delta = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Signed inventory effect in base units; positive adds stock.",
+    )
+    unit_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Immutable unit-cost snapshot at the time of movement.",
+    )
     reason = models.TextField(blank=True)
     reference_id = models.CharField(max_length=100, blank=True)  # Reference to sale, transfer, etc.
     
@@ -112,9 +124,27 @@ class StockMovement(models.Model):
         if self.batch and self.batch.outlet != self.outlet:
             raise ValidationError("Batch must belong to the same outlet")
     def save(self, *args, **kwargs):
-        """Validate before saving"""
+        """Create immutable, self-contained ledger entries."""
+        if self.pk:
+            from django.core.exceptions import ValidationError
+            raise ValidationError("Stock movements are immutable and cannot be changed.")
+
+        if self.quantity_delta is None:
+            direction = -1 if self.movement_type in {'sale', 'transfer_out', 'damage', 'expiry'} else 1
+            self.quantity_delta = direction * self.quantity
+
+        if self.unit_cost is None:
+            self.unit_cost = (
+                self.batch.cost_price
+                if self.batch_id and self.batch and self.batch.cost_price is not None
+                else self.product.cost if self.product_id and self.product.cost is not None else Decimal('0.00')
+            )
         self.clean()
         super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        from django.core.exceptions import ValidationError
+        raise ValidationError("Stock movements are immutable and cannot be deleted.")
 class StockTake(models.Model):
     """Stock taking/audit session model"""
     STATUS_CHOICES = [
@@ -222,6 +252,9 @@ class StockTakeItem(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_take_items', null=True, blank=True, help_text="Product in this stock take count")
     expected_quantity = models.IntegerField(validators=[MinValueValidator(0)])
     counted_quantity = models.IntegerField(validators=[MinValueValidator(0)])
+    is_counted = models.BooleanField(default=False)
+    counted_at = models.DateTimeField(null=True, blank=True)
+    counted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='counted_stock_take_items')
     difference = models.IntegerField(default=0)
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -40,7 +40,8 @@ export default function NewExpensePage() {
   const router = useRouter()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isLoadingShifts, setIsLoadingShifts] = useState(false)
-  const [openShifts, setOpenShifts] = useState<Shift[]>([])
+  const [shifts, setShifts] = useState<Shift[]>([])
+  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">("OPEN")
   const [formData, setFormData] = useState({
     title: "",
     vendor: "",
@@ -57,6 +58,15 @@ export default function NewExpensePage() {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
+  const handleShiftChange = (shiftId: string) => {
+    const shift = shifts.find((item) => String(item.id) === shiftId)
+    setFormData((prev) => ({
+      ...prev,
+      shift_id: shiftId,
+      expense_date: shift?.operatingDate || prev.expense_date,
+    }))
+  }
+
   const formatShiftTime = (value?: string | null) => {
     if (!value) return "-"
     const parsed = parseISO(value)
@@ -65,7 +75,7 @@ export default function NewExpensePage() {
   }
 
   const shiftOptions = useMemo(() => {
-    return openShifts.map((shift) => {
+    return shifts.map((shift) => {
       const start = formatShiftTime(shift.startTime)
       const end = formatShiftTime(shift.endTime)
       const parsedDate = shift.operatingDate ? parseISO(shift.operatingDate) : null
@@ -75,7 +85,7 @@ export default function NewExpensePage() {
         label: `Shift #${shift.id} • ${date} ${start}${end !== "-" ? ` - ${end}` : ""}`.trim(),
       }
     })
-  }, [openShifts])
+  }, [shifts])
 
   useEffect(() => {
     if (outlets.length === 1 && !formData.outlet_id) {
@@ -86,23 +96,23 @@ export default function NewExpensePage() {
   useEffect(() => {
     const loadShifts = async () => {
       if (!formData.outlet_id) {
-        setOpenShifts([])
+        setShifts([])
         setFormData((prev) => ({ ...prev, shift_id: "" }))
         return
       }
 
       setIsLoadingShifts(true)
       try {
-        const shifts = await shiftService.listOpen({ outlet: formData.outlet_id })
-        setOpenShifts(shifts)
+        const shifts = await shiftService.list({ outlet: formData.outlet_id, status: shiftStatus })
+        setShifts(shifts)
         if (shifts.length === 1) {
           setFormData((prev) => ({ ...prev, shift_id: String(shifts[0].id) }))
         } else if (!shifts.find((shift) => String(shift.id) === formData.shift_id)) {
           setFormData((prev) => ({ ...prev, shift_id: "" }))
         }
       } catch (error: any) {
-        console.error("Failed to load open shifts:", error)
-        setOpenShifts([])
+        console.error("Failed to load shifts:", error)
+        setShifts([])
         setFormData((prev) => ({ ...prev, shift_id: "" }))
       } finally {
         setIsLoadingShifts(false)
@@ -110,7 +120,7 @@ export default function NewExpensePage() {
     }
 
     loadShifts()
-  }, [formData.outlet_id, formData.shift_id])
+  }, [formData.outlet_id, formData.shift_id, shiftStatus])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -127,7 +137,7 @@ export default function NewExpensePage() {
     if (!formData.shift_id) {
       toast({
         title: "Shift Required",
-        description: "Select an open shift to keep cashup reporting accurate.",
+        description: "Select the shift that this expense belongs to.",
         variant: "destructive",
       })
       return
@@ -255,14 +265,27 @@ export default function NewExpensePage() {
                   )}
 
                   <div className="space-y-2">
+                    <Label htmlFor="shift-status">Shift Status</Label>
+                    <Select value={shiftStatus} onValueChange={(value) => setShiftStatus(value as "OPEN" | "CLOSED")}>
+                      <SelectTrigger id="shift-status">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="OPEN">Open shifts</SelectItem>
+                        <SelectItem value="CLOSED">Closed shifts</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="shift">Shift *</Label>
                     <Select
                       value={formData.shift_id}
-                      onValueChange={(value) => handleInputChange("shift_id", value)}
+                      onValueChange={handleShiftChange}
                       disabled={!formData.outlet_id || isLoadingShifts}
                     >
                       <SelectTrigger id="shift">
-                        <SelectValue placeholder={isLoadingShifts ? "Loading shifts..." : "Select open shift"} />
+                        <SelectValue placeholder={isLoadingShifts ? "Loading shifts..." : `Select ${shiftStatus.toLowerCase()} shift`} />
                       </SelectTrigger>
                       <SelectContent>
                         {shiftOptions.map((shift) => (
@@ -272,8 +295,8 @@ export default function NewExpensePage() {
                         ))}
                       </SelectContent>
                     </Select>
-                    {!isLoadingShifts && formData.outlet_id && openShifts.length === 0 && (
-                      <p className="text-xs text-destructive">No open shifts for this outlet.</p>
+                    {!isLoadingShifts && formData.outlet_id && shifts.length === 0 && (
+                      <p className="text-xs text-destructive">No {shiftStatus.toLowerCase()} shifts for this outlet.</p>
                     )}
                   </div>
                 </CardContent>

@@ -536,6 +536,224 @@ export const productService = {
         
         return responseData
       },
+
+      async previewImport(file: File, outletId?: string, idempotencyKey?: string, mode?: string): Promise<{
+        batch_id: string
+        status: string
+        summary: {
+          total_rows: number
+          valid_rows: number
+          invalid_rows: number
+          warning_rows: number
+        }
+        sample_errors: Array<{ row_number: number; errors: string[] }>
+        idempotent_reuse?: boolean
+      }> {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
+        const headers: HeadersInit = {}
+
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+        }
+        if (outletId) {
+          headers['X-Outlet-ID'] = outletId
+        }
+        if (idempotencyKey) {
+          headers['X-Idempotency-Key'] = idempotencyKey
+        }
+
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+        const previewUrl = `${API_BASE_URL}${apiEndpoints.imports.productsPreview}${mode ? `?mode=${encodeURIComponent(mode)}` : ''}`
+        const response = await fetch(previewUrl, {
+          method: 'POST',
+          headers,
+          body: formData,
+        })
+
+        const responseData = await response.json().catch(() => ({ detail: 'Unknown error' }))
+        if (!response.ok) {
+          throw new Error(responseData.detail || responseData.error || `HTTP ${response.status}: ${response.statusText}`)
+        }
+
+        return responseData
+      },
+
+      async applyImport(batchId: string, mode?: string): Promise<{
+        batch_id: string
+        status: string
+        apply_summary: any
+        already_applied?: boolean
+        idempotent_reuse?: boolean
+      }> {
+        const query = mode ? `?mode=${encodeURIComponent(mode)}` : ''
+        return api.post(`${apiEndpoints.imports.productsApply(batchId)}${query}`, {})
+      },
+
+      async approveImport(batchId: string): Promise<{
+        batch_id: string
+        status: string
+        is_approved: boolean
+        approved_at: string
+      }> {
+        return api.post(apiEndpoints.imports.productsApprove(batchId), {})
+      },
+
+      async applyImportWithOptions(batchId: string, options?: {
+        idempotencyKey?: string
+        chunkSize?: number
+        continueOnError?: boolean
+        mode?: string
+      }): Promise<{
+        batch_id: string
+        status: string
+        apply_summary: any
+        idempotent_reuse?: boolean
+      }> {
+        const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
+        const headers: HeadersInit = {}
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+        }
+        if (options?.idempotencyKey) {
+          headers['X-Idempotency-Key'] = options.idempotencyKey
+        }
+
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+        const applyUrl = `${API_BASE_URL}${apiEndpoints.imports.productsApply(batchId)}${options?.mode ? `?mode=${encodeURIComponent(options.mode)}` : ''}`
+        const response = await fetch(applyUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: JSON.stringify({
+            chunk_size: options?.chunkSize,
+            continue_on_error: options?.continueOnError,
+            idempotency_key: options?.idempotencyKey,
+          }),
+        })
+
+        const responseData = await response.json().catch(() => ({ detail: 'Unknown error' }))
+        if (!response.ok && response.status !== 207) {
+          throw new Error(responseData.detail || responseData.error || `HTTP ${response.status}: ${response.statusText}`)
+        }
+
+        return responseData
+      },
+
+      async getImportStatus(batchId: string, mode?: string): Promise<any> {
+        const query = mode ? `?mode=${encodeURIComponent(mode)}` : ''
+        return api.get(`${apiEndpoints.imports.productsStatus(batchId)}${query}`)
+      },
+
+      async getImportHistory(params?: {
+        outletId?: string
+        status?: string
+        search?: string
+        dateFrom?: string
+        dateTo?: string
+        page?: number
+        pageSize?: number
+        mode?: string
+      }): Promise<{
+        count: number
+        page: number
+        page_size: number
+        total_pages: number
+        results: Array<{
+          batch_id: string
+          import_date: string
+          source_filename: string
+          status: string
+          is_approved: boolean
+          outlet: { id: string; name: string }
+          created_by?: string | null
+          total_rows: number
+          valid_rows: number
+          invalid_rows: number
+          warning_rows: number
+          applied_rows: number
+          imported: number
+          failed: number
+          previewed_at?: string | null
+          approved_at?: string | null
+          applied_at?: string | null
+        }>
+      }> {
+        const search = new URLSearchParams()
+        if (params?.outletId) search.set('outlet', params.outletId)
+        if (params?.status) search.set('status', params.status)
+        if (params?.search?.trim()) search.set('search', params.search.trim())
+        if (params?.dateFrom) search.set('date_from', params.dateFrom)
+        if (params?.dateTo) search.set('date_to', params.dateTo)
+        if (params?.mode) search.set('mode', params.mode)
+        search.set('page', String(params?.page || 1))
+        search.set('page_size', String(params?.pageSize || 10))
+
+        const query = search.toString()
+        return api.get(`${apiEndpoints.imports.productsHistory}${query ? `?${query}` : ''}`)
+      },
+
+      async getImportErrors(batchId: string, mode?: string): Promise<{
+        batch_id: string
+        preview_error_count: number
+        preview_errors: Array<{ row_number: number; errors: string[]; raw_data?: Record<string, any> }>
+        apply_error_count: number
+        apply_errors: Array<{
+          row_number: number
+          chunk_index?: number
+          error_code?: string
+          message: string
+          details?: Record<string, any>
+          raw_data?: Record<string, any>
+        }>
+      }> {
+        const query = mode ? `?mode=${encodeURIComponent(mode)}` : ''
+        return api.get(`${apiEndpoints.imports.productsErrors(batchId)}${query}`)
+      },
+
+      async getImportRows(batchId: string, params?: {
+        page?: number
+        pageSize?: number
+        search?: string
+        mode?: string
+      }): Promise<{
+        batch_id: string
+        status: string
+        is_approved: boolean
+        import_date: string
+        source_filename: string
+        outlet: { id: string; name: string }
+        count: number
+        page: number
+        page_size: number
+        total_pages: number
+        results: Array<{
+          row_number: number
+          product_name: string
+          sku: string
+          barcode: string
+          category: string
+          price: string
+          cost: string
+          stock: string
+          status: string
+          mismatch_error: string
+          action?: string
+          matched_product_id?: string
+        }>
+      }> {
+        const search = new URLSearchParams()
+        search.set('page', String(params?.page || 1))
+        search.set('page_size', String(params?.pageSize || 10))
+        if (params?.search?.trim()) search.set('search', params.search.trim())
+        if (params?.mode) search.set('mode', params.mode)
+
+        return api.get(`${apiEndpoints.imports.productsRows(batchId)}?${search.toString()}`)
+      },
     }
 
 export interface LocationStock {

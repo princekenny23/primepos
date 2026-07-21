@@ -40,7 +40,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { Plus, MoreVertical, AlertCircle, CheckCircle2, Eye, Users, Upload, Menu, Trash2 } from "lucide-react"
+import { Plus, MoreVertical, AlertCircle, CheckCircle2, Eye, Users, Upload, Menu, Trash2, Download } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
@@ -48,8 +48,8 @@ import { StartStockTakeModal } from "@/components/modals/start-stock-take-modal"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { inventoryService } from "@/lib/services/inventoryService"
-import { productService } from "@/lib/services/productService"
 import { useBusinessStore } from "@/stores/businessStore"
+import { productService } from "@/lib/services/productService"
 import { useRealAPI } from "@/lib/utils/api-config"
 import Link from "next/link"
 import { useI18n } from "@/contexts/i18n-context"
@@ -91,6 +91,18 @@ const normalizeValue = (value: unknown) =>
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "")
+
+function isStockTakeItemCounted(item: any): boolean {
+  // Preferred explicit flags from backend (present/future-safe).
+  if (typeof item?.is_counted === "boolean") return item.is_counted
+  if (item?.counted_at) return true
+
+  // Legacy fallback: infer from user interaction while allowing zero counts.
+  const hasNote = typeof item?.notes === "string" && item.notes.trim().length > 0
+  const wasEdited = Boolean(item?.updated_at && item?.created_at && item.updated_at !== item.created_at)
+  const hasPositiveCount = Number(item?.counted_quantity || 0) > 0
+  return hasNote || wasEdited || hasPositiveCount
+}
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value
@@ -292,30 +304,47 @@ export default function StockTakingHistoryPage() {
       setIsLoading(true)
       try {
         if (useReal) {
-          // Load all products for the outlet to get actual inventory count
-          const productList = await productService.list({
-            outlet: String(currentOutlet.id),
-            is_active: true,
-          })
-          const actualInventoryCount = productList.count || 0
-
           const response = await inventoryService.getStockTakes({
             outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
           })
           const stockTakes = response.results || []
+
+          const summaryById = new Map<string, { totalItems: number; countedItems: number; progress: number }>()
+          await Promise.all(
+            stockTakes.map(async (st: any) => {
+              const stockTakeId = String(st.id)
+              try {
+                const summary = await inventoryService.getStockTakeSummary(stockTakeId)
+                summaryById.set(stockTakeId, {
+                  totalItems: Number(summary.total_items || 0),
+                  countedItems: Number(summary.counted_items || 0),
+                  progress: Number(summary.completion_percent || 0),
+                })
+              } catch {
+                // Fallback to local snapshot math when summary endpoint is unavailable.
+              }
+            })
+          )
           
-          // Transform all stock takes into unified format with actual inventory count
+          // Transform using each stock-take snapshot lines to avoid catalog-size drift.
           const transformed = stockTakes.map((st: any) => {
             const isRunning = st.status === 'running'
             const items = st.items || []
-            const countedItems = items.filter((i: any) => i.counted_quantity > 0).length
-            
-            // Use actual inventory count instead of session items count
-            const totalItems = actualInventoryCount
-            const progress = totalItems > 0 
-              ? Math.round((countedItems / totalItems) * 100) 
+            const localTotalItems = items.length
+            const localCountedItems = items.filter((i: any) => isStockTakeItemCounted(i)).length
+            const localProgress = localTotalItems > 0
+              ? Math.round((localCountedItems / localTotalItems) * 100)
               : 0
 
+            const summary = summaryById.get(String(st.id))
+            const listTotalItems = Number(st.total_items || 0)
+            const listCountedItems = Number(st.counted_items || 0)
+            const listProgress = Number(st.completion_percent || 0)
+
+            const totalItems = summary?.totalItems ?? (listTotalItems > 0 ? listTotalItems : localTotalItems)
+            const countedItems = summary?.countedItems ?? (listTotalItems > 0 ? listCountedItems : localCountedItems)
+            const progress = summary?.progress ?? (listTotalItems > 0 ? listProgress : localProgress)
+            
             return {
               id: String(st.id),
               outletId: String(st.outlet?.id || st.outlet || ""),
@@ -325,9 +354,9 @@ export default function StockTakingHistoryPage() {
               createdAt: st.created_at,
               description: st.description || "",
               status: isRunning ? "RUNNING" as const : "FINISHED" as const,
-              progress: isRunning ? progress : 100,
+              progress,
               totalItems,
-              countedItems: isRunning ? countedItems : totalItems,
+              countedItems,
               startedBy: st.user_name || st.user?.name || st.user?.email || "System",
               participants: 1,
               completedAt: st.completed_at,
@@ -394,6 +423,8 @@ export default function StockTakingHistoryPage() {
     }
   }
 
+
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0]
@@ -441,15 +472,13 @@ export default function StockTakingHistoryPage() {
         title={t("inventory.menu.stock_taking")}
         description={t("inventory.stock_take.description")}
         actions={
-          <div className="flex items-center gap-2">
-            <Button 
-              onClick={() => setShowStartModal(true)}
-              className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
-            >
-              <Plus className="mr-2 h-4 w-4" />
-              Start New Stock Take
-            </Button>
-          </div>
+          <Button 
+            onClick={() => setShowStartModal(true)}
+            className="bg-white border-white text-[#1e3a8a] hover:bg-blue-50 hover:border-blue-50"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Start New Stock Take
+          </Button>
         }
       >
         {/* Unified Stock Takes Table */}

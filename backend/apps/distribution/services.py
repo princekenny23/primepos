@@ -5,7 +5,7 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
-from apps.inventory.models import StockMovement
+from apps.inventory.stock_helpers import deduct_stock, get_sellable_stock
 
 from .models import DeliveryOrder, DeliveryOrderItem, Driver, Trip, Vehicle
 
@@ -58,7 +58,7 @@ class DistributionService:
                 product=product,
                 exclude_order_id=delivery_order.id,
             )
-            available_for_reserve = int(product.stock) - int(reserved_qty)
+            available_for_reserve = int(get_sellable_stock(product, delivery_order.warehouse)) - int(reserved_qty)
             if available_for_reserve < required_qty:
                 raise serializers.ValidationError(
                     {
@@ -167,25 +167,20 @@ class DistributionService:
 
         for item in items:
             product = item.product
-            if int(product.stock) < int(item.quantity):
+            if int(get_sellable_stock(product, delivery_order.warehouse)) < int(item.quantity):
                 raise serializers.ValidationError(
                     {
                         'stock': (
                             f'Insufficient stock at confirmation for {product.name}. '
-                            f'Available: {product.stock}, Required: {item.quantity}.'
+                            f'Available: {get_sellable_stock(product, delivery_order.warehouse)}, Required: {item.quantity}.'
                         )
                     }
                 )
 
-            product.stock = int(product.stock) - int(item.quantity)
-            product.save(update_fields=['stock'])
-
-            StockMovement.objects.create(
-                tenant=delivery_order.tenant,
+            deduct_stock(
                 product=product,
                 outlet=delivery_order.warehouse,
                 user=user,
-                movement_type='sale',
                 quantity=item.quantity,
                 reference_id=f'delivery-order:{delivery_order.id}',
                 reason=f'Delivery confirmation for sale {delivery_order.sales_order.receipt_number}',

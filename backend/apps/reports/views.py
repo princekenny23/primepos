@@ -812,6 +812,35 @@ def inventory_valuation_report(request):
         (row['product_id'], row['movement_type']): row['qty']
         for row in pre_period_movements.values('product_id', 'movement_type').annotate(qty=Sum('quantity'))
     }
+    period_movement_deltas = {
+        (row['product_id'], row['movement_type']): row['qty']
+        for row in movements.values('product_id', 'movement_type').annotate(qty=Sum('quantity_delta'))
+    }
+    pre_period_stock_totals = {
+        row['product_id']: row['qty']
+        for row in pre_period_movements.values('product_id').annotate(qty=Sum('quantity_delta'))
+    }
+    period_stock_totals = {
+        row['product_id']: row['qty']
+        for row in movements.values('product_id').annotate(qty=Sum('quantity_delta'))
+    }
+    acquisition_cost_totals = {
+        row['product_id']: (row['quantity'] or 0, row['value'] or Decimal('0'))
+        for row in StockMovement.objects.filter(
+            tenant=tenant,
+            outlet_id=outlet_id,
+            created_at__date__lte=end_dt,
+            quantity_delta__gt=0,
+        ).values('product_id').annotate(
+            quantity=Sum('quantity_delta'),
+            value=Sum(
+                ExpressionWrapper(
+                    F('quantity_delta') * Coalesce(F('unit_cost'), Decimal('0.00')),
+                    output_field=DecimalField(max_digits=20, decimal_places=2),
+                )
+            ),
+        )
+    }
     
     # Get latest stock take (if any)
     latest_stock_take = StockTake.objects.filter(
@@ -850,7 +879,11 @@ def inventory_valuation_report(request):
 
     for product in products:
         retail_price = product.retail_price or Decimal('0')
-        cost_price = product.cost or retail_price  # Use cost if available, else retail
+        acquired_quantity, acquired_value = acquisition_cost_totals.get(product.id, (0, Decimal('0')))
+        cost_price = (
+            (Decimal(acquired_value) / Decimal(acquired_quantity)).quantize(Decimal('0.01'))
+            if acquired_quantity else product.cost or retail_price
+        )
 
         # Opening stock from ledger before start date.
         pre_received = movement_qty(pre_period_movement_totals, product.id, 'purchase')
@@ -862,10 +895,7 @@ def inventory_valuation_report(request):
         pre_damage = movement_qty(pre_period_movement_totals, product.id, 'damage')
         pre_expiry = movement_qty(pre_period_movement_totals, product.id, 'expiry')
 
-        opening_stock = (
-            pre_received + pre_transferred_in + pre_returns + pre_adjusted
-            - pre_sold - pre_transferred_out - pre_damage - pre_expiry
-        )
+        opening_stock = pre_period_stock_totals.get(product.id, 0) or 0
         
         # Calculate quantities by movement type
         received = movement_qty(period_movement_totals, product.id, 'purchase')
@@ -873,27 +903,16 @@ def inventory_valuation_report(request):
         transferred_out = movement_qty(period_movement_totals, product.id, 'transfer_out')
         transferred = transferred_in - transferred_out
 
-        adjusted = movement_qty(period_movement_totals, product.id, 'adjustment')
+        adjusted = movement_qty(period_movement_deltas, product.id, 'adjustment')
         sold = movement_qty(period_movement_totals, product.id, 'sale')
         returns = movement_qty(period_movement_totals, product.id, 'return')
         damage = movement_qty(period_movement_totals, product.id, 'damage')
         expiry = movement_qty(period_movement_totals, product.id, 'expiry')
 
-        period_net_movement = (
-            received + transferred_in + returns + adjusted
-            - sold - transferred_out - damage - expiry
-        )
+        period_net_movement = period_stock_totals.get(product.id, 0) or 0
         
-        # Closing stock should prefer physical sellable inventory when it exists,
-        # but fall back to the ledger-derived balance when no physical stock is recorded.
-        physical_stock = max(0, get_sellable_stock(product, outlet))
-        ledger_stock = max(0, opening_stock + period_net_movement)
-        current_stock = physical_stock if physical_stock > 0 else ledger_stock
-
-        if opening_stock == 0 and physical_stock > 0:
-            opening_stock = max(0, physical_stock - period_net_movement)
-        elif opening_stock == 0 and ledger_stock > 0:
-            opening_stock = max(0, ledger_stock - period_net_movement)
+        # A dated report must never read today's mutable batch/projection state.
+        current_stock = max(0, opening_stock + period_net_movement)
         
         # Get stock take data if available
         counted_qty = 0

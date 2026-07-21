@@ -1,0 +1,6 @@
+product_name,sku,barcode,category,retail_price,wholesale_price,cost,initial_stock_qty,low_stock_threshold,batch_expiry_date,description,is_active
+Coca Cola 500ml,COKE-500,5901234123457,Beverages,2500,2200,1800,120,20,2027-12-31,Soft drink bottle,yes
+Fanta Orange 300ml,FANTA-300,5901234123458,Beverages,1800,1600,1200,80,15,2027-10-15,Orange flavored soda,yes
+Maize Flour 2kg,MAIZE-2KG,5901234123459,Groceries,9500,9000,7600,40,10,2028-06-30,Staple food product,yes
+Sugar 1kg,SUGAR-1KG,5901234123460,Groceries,4200,3900,3200,60,12,2028-05-31,Refined white sugar,yes
+Cooking Oil 2L,OIL-2L,5901234123461,Groceries,15000,14500,12800,35,8,2028-09-30,Vegetable cooking oil,yes

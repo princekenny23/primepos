@@ -59,6 +59,11 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
+  // Bypass service worker for remote script loads like QZ Tray CDN assets.
+  if (request.destination === "script" && url.origin !== self.location.origin) {
+    return
+  }
+
   // For same-origin assets (JS/CSS/HTML): cache-first, then network, then offline fallback
   const isSameOrigin = url.origin === self.location.origin
   if (isSameOrigin) {

@@ -12,14 +12,16 @@ class ExpenseSerializer(serializers.ModelSerializer):
     shift = serializers.PrimaryKeyRelatedField(read_only=True)
     shift_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     outlet_name = serializers.CharField(source='outlet.name', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+    shift_status = serializers.CharField(source='shift.status', read_only=True)
     approved_by_name = serializers.CharField(source='approved_by.get_full_name', read_only=True)
     rejected_by_name = serializers.CharField(source='rejected_by.get_full_name', read_only=True)
     
     class Meta:
         model = Expense
         fields = (
-            'id', 'tenant', 'outlet', 'outlet_id', 'outlet_name', 'user',
-            'shift', 'shift_id',
+            'id', 'tenant', 'outlet', 'outlet_id', 'outlet_name', 'user', 'created_by_name',
+            'shift', 'shift_id', 'shift_status',
             'expense_number', 'title', 'vendor', 'description',
             'amount', 'payment_method', 'payment_reference', 'expense_date',
             'status', 'approved_by', 'approved_by_name', 'approved_at', 
@@ -27,10 +29,15 @@ class ExpenseSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at'
         )
         read_only_fields = (
-            'id', 'tenant', 'user', 'expense_number', 
+            'id', 'tenant', 'user', 'expense_number',
             'approved_by', 'approved_at', 'rejected_by', 'rejected_at',
             'created_at', 'updated_at'
         )
+
+    def get_created_by_name(self, obj):
+        if not obj.user:
+            return "System"
+        return obj.user.get_full_name() or obj.user.email or obj.user.username
     
     def validate_outlet_id(self, value):
         """Validate that outlet belongs to tenant"""

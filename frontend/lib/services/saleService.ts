@@ -419,9 +419,14 @@ export const saleService = {
           other_payment_method_name?: string
         }
   ): Promise<SaleWithMetadata> {
+    const normalizeReason = (value?: string) => {
+      const trimmed = String(value || "").trim()
+      return trimmed.length > 0 ? trimmed : "Refund"
+    }
+
     const payload = typeof options === "string"
-      ? { reason: options }
-      : (options || {})
+      ? { reason: normalizeReason(options) }
+      : { ...(options || {}), reason: normalizeReason(options && typeof options !== "string" ? options.reason : undefined) }
 
     const response = await api.post<any>(`${apiEndpoints.sales.get(id)}refund/`, payload)
     return transformSale(response)

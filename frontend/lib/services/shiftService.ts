@@ -142,9 +142,13 @@ export const shiftService = {
   },
 
   async listOpen(filters?: { outlet?: string; till?: string }): Promise<Shift[]> {
+    return this.list({ ...filters, status: "OPEN" })
+  },
+
+  async list(filters?: { outlet?: string; till?: string; status?: "OPEN" | "CLOSED" }): Promise<Shift[]> {
     try {
       const params = new URLSearchParams()
-      params.append("status", "OPEN")
+      if (filters?.status) params.append("status", filters.status)
       if (filters?.outlet) params.append("outlet", String(filters.outlet))
       if (filters?.till) params.append("till", String(filters.till))
       
@@ -153,7 +157,7 @@ export const shiftService = {
       const shifts = Array.isArray(response) ? response : (response.results || [])
       return shifts.map(transformShift)
     } catch (error) {
-      console.error("Error loading open shifts:", error)
+      console.error("Error loading shifts:", error)
       return []
     }
   },

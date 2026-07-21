@@ -44,30 +44,38 @@ def _resolve_product(product=None, variation=None):
 
 
 def _get_ledger_quantity_and_cost(product, outlet):
-    """Return the current stock quantity and weighted-average acquisition cost from the movement ledger."""
-    from django.db.models import Sum
-
-    positive_movements = StockMovement.objects.filter(
+    """Return current stock quantity and positive-flow acquisition basis from immutable movement deltas."""
+    movements = StockMovement.objects.filter(
         product=product,
         outlet=outlet,
-        movement_type__in=['purchase', 'adjustment', 'return', 'transfer_in'],
-    ).order_by('created_at')
-    negative_movements = StockMovement.objects.filter(
-        product=product,
-        outlet=outlet,
-        movement_type__in=['sale', 'transfer_out', 'damage', 'expiry'],
     ).order_by('created_at')
 
-    total_acquired_qty = int(positive_movements.aggregate(total=Sum('quantity'))['total'] or 0)
+    total_quantity_delta = 0
+    total_acquired_qty = 0
     total_acquired_cost = Decimal('0.00')
-    for movement in positive_movements:
-        unit_cost = _coerce_decimal(
-            movement.batch.cost_price if movement.batch_id and movement.batch and movement.batch.cost_price is not None else product.cost
-        )
-        total_acquired_cost += unit_cost * Decimal(int(movement.quantity or 0))
+    negative_types = {'sale', 'transfer_out', 'damage', 'expiry'}
 
-    sold_qty = int(negative_movements.aggregate(total=Sum('quantity'))['total'] or 0)
-    current_qty = max(0, total_acquired_qty - sold_qty)
+    for movement in movements:
+        quantity = int(movement.quantity or 0)
+        quantity_delta = movement.quantity_delta
+        if quantity_delta is None:
+            # Backward-compatible fallback for very old rows.
+            quantity_delta = -quantity if movement.movement_type in negative_types else quantity
+
+        quantity_delta = int(quantity_delta)
+        total_quantity_delta += quantity_delta
+
+        if quantity_delta > 0:
+            unit_cost = _coerce_decimal(
+                movement.unit_cost
+                if movement.unit_cost is not None
+                else movement.batch.cost_price if movement.batch_id and movement.batch and movement.batch.cost_price is not None
+                else product.cost
+            )
+            total_acquired_qty += quantity_delta
+            total_acquired_cost += unit_cost * Decimal(quantity_delta)
+
+    current_qty = max(0, total_quantity_delta)
     return current_qty, total_acquired_cost, total_acquired_qty
 
 
@@ -330,6 +338,8 @@ def deduct_stock(product=None, outlet=None, quantity=None, user=None, reference_
                 user=user,
                 movement_type=movement_type,
                 quantity=deduct_qty,
+                quantity_delta=-deduct_qty,
+                unit_cost=_coerce_decimal(batch.cost_price if batch.cost_price is not None else product.cost),
                 reference_id=reference_id,
                 reason=reason or f"{movement_type.title()} {reference_id}"
             )
@@ -352,7 +362,7 @@ def deduct_stock(product=None, outlet=None, quantity=None, user=None, reference_
 
 
 @transaction.atomic
-def add_stock(product=None, outlet=None, quantity=None, batch_number=None, expiry_date=None, cost_price=None, user=None, reason='', movement_type='purchase', variation=None):
+def add_stock(product=None, outlet=None, quantity=None, batch_number=None, expiry_date=None, cost_price=None, user=None, reason='', movement_type='purchase', reference_id='', variation=None):
     """
     Add stock to a batch (creates batch if doesn't exist)
     UNITS ONLY ARCHITECTURE: Changed from variation-based to product-based
@@ -409,6 +419,7 @@ def add_stock(product=None, outlet=None, quantity=None, batch_number=None, expir
         user=user,
         movement_type=movement_type,
         quantity=quantity,
+        reference_id=reference_id,
         reason=reason or f"{movement_type.title()} - Batch {batch_number}"
     )
     
@@ -577,7 +588,7 @@ def get_expiring_soon(days=30, product=None, outlet=None, variation=None):
 
 
 @transaction.atomic
-def restore_stock_for_refund(product, outlet, quantity, user, reference_id, reason='Refund'):
+def restore_stock_for_refund(product, outlet, quantity, user, reference_id, reason='Refund', unit_cost=None):
     """
     Return stock to inventory after a refund.  Creates a StockMovement of type
     'return' and updates Product.stock.  If an active batch exists we bump its
@@ -631,6 +642,7 @@ def restore_stock_for_refund(product, outlet, quantity, user, reference_id, reas
         user=user,
         movement_type='return',
         quantity=quantity,
+        unit_cost=_coerce_decimal(unit_cost) if unit_cost is not None else None,
         reference_id=reference_id,
         reason=reason,
     )

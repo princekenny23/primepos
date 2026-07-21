@@ -54,6 +54,20 @@ export interface StockTakeItemData {
   notes?: string
 }
 
+export interface StockTakeSummary {
+  stock_take_id: number
+  status: string
+  total_items: number
+  counted_items: number
+  completion_percent: number
+  expected_total_quantity: number
+  counted_total_quantity: number
+  variance_total_quantity: number
+  absolute_variance_total_quantity: number
+  accuracy_percent: number
+  valuation_difference: string
+}
+
 export const inventoryService = {
   async adjust(data: StockAdjustmentData): Promise<any> {
     return api.post(apiEndpoints.inventory.adjust, data)
@@ -172,6 +186,10 @@ export const inventoryService = {
 
   async getStockTake(id: string): Promise<any> {
     return api.get(`${apiEndpoints.inventory.stockTakes}${id}/`)
+  },
+
+  async getStockTakeSummary(id: string): Promise<StockTakeSummary> {
+    return api.get(apiEndpoints.inventory.stockTakeSummary(id))
   },
 
   async createStockTake(data: StockTakeData): Promise<any> {

@@ -151,7 +151,7 @@ class ReportingLogicTestCase(TestCase):
         start_date = today - timedelta(days=7)
         end_date = today
 
-        Batch.objects.create(
+        batch = Batch.objects.create(
             tenant=self.tenant,
             outlet=self.outlet,
             product=self.product,
@@ -161,6 +161,20 @@ class ReportingLogicTestCase(TestCase):
             cost_price=Decimal("8.00"),
         )
 
+        # Opening inventory must be represented in the ledger; the batch is only
+        # the current operational projection of that movement.
+        opening_movement = StockMovement.objects.create(
+            tenant=self.tenant,
+            product=self.product,
+            outlet=self.outlet,
+            user=self.user,
+            batch=batch,
+            movement_type="purchase",
+            quantity=15,
+        )
+        StockMovement.objects.filter(pk=opening_movement.pk).update(
+            created_at=timezone.now() - timedelta(days=10)
+        )
         self._create_movement("sale", 10, 2)
 
         response = self.client.get(
@@ -175,9 +189,9 @@ class ReportingLogicTestCase(TestCase):
         self.assertEqual(response.status_code, 200)
         item = response.json()["items"][0]
         self.assertEqual(item["stock_qty"], 5)
-        self.assertEqual(item["stock_value"], 50.0)
+        self.assertEqual(item["stock_value"], 40.0)
         self.assertEqual(item["open_qty"], 15)
-        self.assertEqual(item["open_value"], 150.0)
+        self.assertEqual(item["open_value"], 120.0)
 
     def test_reports_reject_outlet_from_another_tenant(self):
         response = self.client.get(

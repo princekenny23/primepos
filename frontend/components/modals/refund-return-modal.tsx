@@ -196,7 +196,7 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
         }))
 
       await saleService.refund(String(saleId), {
-        reason: reason.trim() || undefined,
+        reason: reason.trim() || "Refund",
         restock,
         refund_method: refundMethod,
         refund_amount: refundAmount,

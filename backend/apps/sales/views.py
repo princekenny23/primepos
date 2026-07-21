@@ -840,9 +840,12 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             )
 
         # --- Validate request body ----------------------------------------
-        reason = (request.data.get('reason') or '').strip()
-        if not reason:
-            return Response({"detail": "reason is required."}, status=status.HTTP_400_BAD_REQUEST)
+        reason = (
+            request.data.get('reason') or
+            request.data.get('refund_reason') or
+            'Refund'
+        )
+        reason = str(reason).strip() or 'Refund'
 
         payment_method = request.data.get('payment_method', 'cash')
         valid_payment_methods = [choice[0] for choice in Sale.PAYMENT_METHODS]
@@ -874,6 +877,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         refunded_qty_by_item = {r['original_item_id']: r['total_qty'] for r in already_refunded}
 
         parsed_refund_items = []
+        requested_item_ids = set()
         subtotal = Decimal('0')
         tax_portion = Decimal('0')
         discount_portion = Decimal('0')
@@ -881,6 +885,13 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         for entry in item_input_serializer.validated_data:
             sale_item_id = entry['sale_item_id']
             refund_qty = entry['quantity']
+
+            if sale_item_id in requested_item_ids:
+                return Response(
+                    {"detail": f"SaleItem {sale_item_id} is listed more than once."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            requested_item_ids.add(sale_item_id)
 
             try:
                 sale_item = SaleItem.objects.get(pk=sale_item_id, sale=sale)
@@ -984,30 +995,33 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             for entry in parsed_refund_items:
                 si = entry['sale_item']
                 if si.product and entry['base_units'] > 0:
-                    try:
-                        restore_stock_for_refund(
-                            product=si.product,
-                            outlet=sale.outlet,
-                            quantity=entry['base_units'],
-                            user=request.user,
-                            reference_id=str(refund.id),
-                            reason=f"Refund {refund_number}",
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            f"Stock restore failed for SaleItem {si.id} in refund {refund.id}: {exc}"
-                        )
+                    restore_stock_for_refund(
+                        product=si.product,
+                        outlet=sale.outlet,
+                        quantity=entry['base_units'],
+                        user=request.user,
+                        reference_id=str(refund.id),
+                        reason=f"Refund {refund_number}",
+                        unit_cost=entry['unit_cost'],
+                    )
             refund.stock_restored = True
             refund.save(update_fields=['stock_restored'])
 
         # --- Flip original sale status if fully refunded ------------------
-        all_item_ids = set(sale.items.values_list('id', flat=True))
-        fully_refunded_ids = set(
-            RefundItem.objects
-            .filter(refund__original_sale=sale, refund__status='approved')
-            .values_list('original_item_id', flat=True)
+        fully_refunded_quantities = {
+            row['original_item_id']: row['total_qty']
+            for row in (
+                RefundItem.objects
+                .filter(refund__original_sale=sale, refund__status='approved')
+                .values('original_item_id')
+                .annotate(total_qty=DjSum('quantity'))
+            )
+        }
+        is_fully_refunded = all(
+            fully_refunded_quantities.get(sale_item.id, 0) >= sale_item.quantity
+            for sale_item in sale.items.all()
         )
-        if all_item_ids == fully_refunded_ids:
+        if is_fully_refunded:
             Sale.objects.filter(pk=sale.pk).update(status='refunded')
 
         # --- Audit log ----------------------------------------------------
@@ -1768,98 +1782,6 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
         raise serializers.ValidationError("Could not generate a unique receipt number. Please retry.")
     
-    @action(detail=True, methods=['post'])
-    def refund(self, request, pk=None):
-        """Process refund for a sale"""
-        sale = self.get_object()
-        tenant = getattr(request, 'tenant', None) or request.user.tenant
-        
-        # Verify tenant matches (unless SaaS admin)
-        from apps.tenants.permissions import is_admin_user
-        if not is_admin_user(request.user) and tenant and sale.tenant != tenant:
-            return Response(
-                {"detail": "You do not have permission to refund this sale."},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        if sale.status == 'refunded':
-            return Response(
-                {"detail": "Sale is already refunded"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        refund_reason = request.data.get('reason', '')
-        refund_method = request.data.get('refund_method')
-        restock = request.data.get('restock', True)
-        if isinstance(restock, str):
-            restock = restock.strip().lower() in ['true', '1', 'yes', 'y']
-        items_data = request.data.get('items') or []
-        
-        with transaction.atomic():
-            refund_amount = Decimal('0')
-            refund_items = []
-
-            if items_data:
-                items_map = {}
-                for entry in items_data:
-                    if not isinstance(entry, dict):
-                        continue
-                    item_id = entry.get('item_id') or entry.get('sale_item_id') or entry.get('id')
-                    if not item_id:
-                        continue
-                    try:
-                        quantity = Decimal(str(entry.get('quantity', 0)))
-                    except (InvalidOperation, TypeError, ValueError):
-                        quantity = Decimal('0')
-                    items_map[str(item_id)] = quantity
-
-                for item in sale.items.all():
-                    qty = items_map.get(str(item.id))
-                    if qty and qty > 0:
-                        qty = min(qty, Decimal(item.quantity))
-                        refund_items.append((item, qty))
-            else:
-                for item in sale.items.all():
-                    refund_items.append((item, Decimal(item.quantity)))
-
-            # Restore stock for selected items (if enabled) and compute refund amount
-            for item, qty in refund_items:
-                if qty <= 0:
-                    continue
-
-                per_unit = Decimal('0')
-                if item.quantity:
-                    per_unit = (item.total / Decimal(item.quantity))
-                elif item.price:
-                    per_unit = item.price
-
-                refund_amount += (per_unit * qty)
-
-                if restock and item.product:
-                    product = Product.objects.select_for_update().get(id=item.product.id, tenant=sale.tenant)
-                    reason_parts = [f"Refund for sale {sale.receipt_number}"]
-                    if refund_reason:
-                        reason_parts.append(str(refund_reason))
-                    if refund_method:
-                        reason_parts.append(f"Method: {refund_method}")
-
-                    restore_stock_for_refund(
-                        product=product,
-                        outlet=sale.outlet,
-                        quantity=int(qty),
-                        user=request.user,
-                        reference_id=str(sale.id),
-                        reason=": ".join(reason_parts),
-                    )
-            
-            # Update sale status
-            sale.status = 'refunded'
-            sale.save()
-            
-
-        serializer = self.get_serializer(sale)
-        return Response(serializer.data)
-
     @action(detail=True, methods=['post'], url_path='generate-receipt')
     def generate_receipt(self, request, pk=None):
         """Generate a receipt for this sale on-demand.

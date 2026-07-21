@@ -410,6 +410,11 @@ export class ApiClient {
             String(errorMessage).toLowerCase().includes("cannot delete product")
           )
 
+        const isNoActiveShiftNotFound =
+          response.status === 404 &&
+          url.includes('/shifts/active/') &&
+          String(errorMessage).toLowerCase().includes('no active shift')
+
         const logPayload = {
           status: response.status,
           statusText: response.statusText,
@@ -420,7 +425,7 @@ export class ApiClient {
           // Don't log request body (may contain credentials)
         }
 
-        if (isProtectedReferenceConflict) {
+        if (isProtectedReferenceConflict || isNoActiveShiftNotFound) {
           console.warn("API Business Conflict:", logPayload)
         } else {
           console.error("API Error:", logPayload)
@@ -831,6 +836,17 @@ export const apiEndpoints = {
     stockTakes: "/inventory/stock-take/",
     stockTakeItems: (id: string) => `/inventory/stock-take/${id}/items/`,
     stockTakeComplete: (id: string) => `/inventory/stock-take/${id}/complete/`,
+    stockTakeSummary: (id: string) => `/inventory/stock-take/${id}/summary/`,
+  },
+  // Import Engine (Phase 1)
+  imports: {
+    productsHistory: "/imports/products/history/",
+    productsPreview: "/imports/products/preview/",
+    productsApprove: (batchId: string) => `/imports/products/${batchId}/approve/`,
+    productsApply: (batchId: string) => `/imports/products/${batchId}/apply/`,
+    productsStatus: (batchId: string) => `/imports/products/${batchId}/status/`,
+    productsErrors: (batchId: string) => `/imports/products/${batchId}/errors/`,
+    productsRows: (batchId: string) => `/imports/products/${batchId}/rows/`,
   },
   // Shifts
   shifts: {

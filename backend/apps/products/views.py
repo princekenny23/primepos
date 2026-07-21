@@ -62,10 +62,11 @@ class CategoryViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             else:
                 return queryset.none()
 
+        # If outlet context is provided, scope categories to those used by that outlet's products.
         outlet = self.get_outlet_for_request(self.request)
         if outlet:
             queryset = queryset.filter(products__outlet=outlet).distinct()
-        
+
         return queryset
     
     def perform_create(self, serializer):

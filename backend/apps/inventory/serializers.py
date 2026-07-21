@@ -1,4 +1,5 @@
 from rest_framework import serializers  # pyright: ignore[reportMissingImports]
+from django.utils import timezone
 from .models import StockMovement, StockTake, StockTakeItem, LocationStock, Batch
 from apps.products.serializers import ProductSerializer
 from apps.products.models import Product
@@ -84,7 +85,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
         model = StockMovement
         fields = ('id', 'tenant', 'batch', 'batch_id', 'product', 'product_id', 'product_name', 
                   'outlet', 'outlet_id', 'outlet_name', 'user', 'user_name', 
-                  'movement_type', 'quantity', 'reason', 'reference_id', 'created_at')
+                  'movement_type', 'quantity', 'quantity_delta', 'unit_cost', 'reason', 'reference_id', 'created_at')
         read_only_fields = ('id', 'tenant', 'user', 'created_at', 'product_name', 'user_name', 'outlet_name', 'batch', 'outlet')
 
 
@@ -109,13 +110,35 @@ class StockTakeItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("product is required")
 
         return attrs
+
+    def create(self, validated_data):
+        if 'counted_quantity' in validated_data:
+            validated_data['is_counted'] = True
+            validated_data.setdefault('counted_at', timezone.now())
+            request = self.context.get('request')
+            user = getattr(request, 'user', None)
+            if user and user.is_authenticated:
+                validated_data.setdefault('counted_by', user)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'counted_quantity' in validated_data:
+            validated_data['is_counted'] = True
+            if instance.counted_at is None:
+                validated_data.setdefault('counted_at', timezone.now())
+            if instance.counted_by_id is None:
+                request = self.context.get('request')
+                user = getattr(request, 'user', None)
+                if user and user.is_authenticated:
+                    validated_data.setdefault('counted_by', user)
+        return super().update(instance, validated_data)
     
     class Meta:
         model = StockTakeItem
         fields = ('id', 'stock_take', 'product', 'product_id', 'product_name', 
-                  'expected_quantity', 'counted_quantity',
+                  'expected_quantity', 'counted_quantity', 'is_counted', 'counted_at', 'counted_by',
                   'difference', 'notes', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'stock_take', 'difference', 'product_name', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'stock_take', 'difference', 'product_name', 'counted_at', 'counted_by', 'created_at', 'updated_at')
 
 
 class LocationStockSerializer(serializers.ModelSerializer):
@@ -174,4 +197,40 @@ class StockTakeSerializer(serializers.ModelSerializer):
                 from rest_framework.exceptions import ValidationError  # pyright: ignore[reportMissingImports]
                 raise ValidationError("Outlet does not belong to your tenant")
         return value
+
+
+class StockTakeListSerializer(serializers.ModelSerializer):
+    """Lightweight stock take serializer for list views."""
+    user_name = serializers.SerializerMethodField()
+    outlet_name = serializers.SerializerMethodField()
+    total_items = serializers.IntegerField(read_only=True)
+    counted_items = serializers.IntegerField(read_only=True)
+    completion_percent = serializers.SerializerMethodField()
+
+    def get_user_name(self, obj):
+        if obj.user:
+            return obj.user.name if hasattr(obj.user, 'name') else (obj.user.email if hasattr(obj.user, 'email') else str(obj.user))
+        return "System"
+
+    def get_outlet_name(self, obj):
+        if obj.outlet:
+            return obj.outlet.name if hasattr(obj.outlet, 'name') else str(obj.outlet)
+        return "Unknown Outlet"
+
+    def get_completion_percent(self, obj):
+        total = int(getattr(obj, 'total_items', 0) or 0)
+        counted = int(getattr(obj, 'counted_items', 0) or 0)
+        if total <= 0:
+            return 0.0
+        return round((counted / total) * 100, 2)
+
+    class Meta:
+        model = StockTake
+        fields = (
+            'id', 'tenant', 'outlet', 'outlet_name', 'user', 'user_name',
+            'operating_date', 'status', 'description',
+            'created_at', 'completed_at',
+            'total_items', 'counted_items', 'completion_percent',
+        )
+        read_only_fields = fields
 

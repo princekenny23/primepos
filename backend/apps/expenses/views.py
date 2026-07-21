@@ -14,7 +14,7 @@ from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 
 class ExpenseViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Expense ViewSet with tenant filtering"""
-    queryset = Expense.objects.select_related('tenant', 'outlet', 'user').all()
+    queryset = Expense.objects.select_related('tenant', 'outlet', 'user', 'shift').all()
     serializer_class = ExpenseSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_office']

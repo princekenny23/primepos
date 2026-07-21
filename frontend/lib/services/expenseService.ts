@@ -13,6 +13,8 @@ export interface Expense {
   outlet_id?: string
   outlet_name?: string
   shift_id?: string
+  shift_status?: "OPEN" | "CLOSED"
+  created_by_name?: string
   status: "pending" | "approved" | "rejected"
   created_at: string
   updated_at: string

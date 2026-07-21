@@ -203,10 +203,10 @@ class ProductSerializer(serializers.ModelSerializer):
         return product
     
     def update(self, instance, validated_data):
-        """Update product (note: units are updated separately)"""
-        selling_units_data = validated_data.pop('selling_units_data', None)
+        """Update product (units are updated separately via ProductUnitSerializer)"""
+        validated_data.pop('selling_units_data', None)
         
-        # Update product fields
+        # Update product fields - DRF handles foreign key conversion automatically
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -265,30 +265,3 @@ class ProductSerializer(serializers.ModelSerializer):
         
         return str(value).strip()
 
-    def create(self, validated_data):
-        """Create product with units"""
-        selling_units_data = validated_data.pop('selling_units_data', [])
-        
-        # Create product
-        product = Product.objects.create(**validated_data)
-        
-        # Create units if provided
-        if selling_units_data:
-            for unit_data in selling_units_data:
-                ProductUnit.objects.create(product=product, **unit_data)
-        
-        return product
-    
-    def update(self, instance, validated_data):
-        """Update product (units are updated separately via ProductUnitSerializer)"""
-        selling_units_data = validated_data.pop('selling_units_data', None)
-        
-        # Update product fields - DRF handles foreign key conversion automatically
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        
-        # Note: Unit updates should be done through ProductUnitSerializer
-        # This prevents accidental unit loss in product update
-        
-        return instance

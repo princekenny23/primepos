@@ -5,6 +5,7 @@ import { PageLayout } from "@/components/layouts/page-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import {
   Table,
@@ -22,8 +23,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
-import { Plus, Search, Upload, Filter, Folder, Trash2, RefreshCw, AlertTriangle, Package, AlertCircle, Clock, Download, Edit, Menu, ShoppingCart } from "lucide-react"
+import { Plus, Search, Upload, Filter, Folder, Trash2, RefreshCw, AlertTriangle, Package, AlertCircle, Clock, Download, Edit, Menu, ShoppingCart, SlidersHorizontal } from "lucide-react"
 import { OrderProductModal } from "@/components/modals/order-product-modal"
+import { StockAdjustmentModal } from "@/components/modals/stock-adjustment-modal"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,6 +41,7 @@ import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 import { DataExchangeModal } from "@/components/modals/data-exchange-modal"
 import { dataExchangeConfigs } from "@/lib/utils/data-exchange-config"
 import { productService, categoryService } from "@/lib/services/productService"
+import { inventoryService } from "@/lib/services/inventoryService"
 import { useBarcodeScanner } from "@/lib/hooks/useBarcodeScanner"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useToast } from "@/components/ui/use-toast"
@@ -59,7 +63,6 @@ export default function ProductsPage() {
   const { t } = useI18n()
   const { outlets, currentOutlet: tenantOutlet } = useTenant()
   const [showAddProduct, setShowAddProduct] = useState(false)
-  const [showImport, setShowImport] = useState(false)
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [initialBarcode, setInitialBarcode] = useState<string | undefined>(undefined)
 
@@ -109,6 +112,11 @@ export default function ProductsPage() {
   const [productToDelete, setProductToDelete] = useState<any>(null)
   const [showOrderModal, setShowOrderModal] = useState(false)
   const [productToOrder, setProductToOrder] = useState<any>(null)
+  const [showStockAdjustment, setShowStockAdjustment] = useState(false)
+  const [showLowStockCountDialog, setShowLowStockCountDialog] = useState(false)
+  const [selectedLowStockProduct, setSelectedLowStockProduct] = useState<any>(null)
+  const [lowStockNewCount, setLowStockNewCount] = useState<string>("")
+  const [isSavingLowStockCount, setIsSavingLowStockCount] = useState(false)
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { toast } = useToast()
   const outlet = tenantOutlet || currentOutlet
@@ -556,9 +564,17 @@ export default function ProductsPage() {
                     Add Product
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setShowImport(true)}>
-                    <Upload className="mr-2 h-4 w-4" />
-                    Import / Export
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/inventory/products/import">
+                      <Upload className="mr-2 h-4 w-4" />
+                      Import Initial Stock
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/inventory/products/import?mode=sync">
+                      <SlidersHorizontal className="mr-2 h-4 w-4" />
+                      Product & Inventory Sync
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setShowExport(true)} disabled={products.length === 0}>
                     <Download className="mr-2 h-4 w-4" />
@@ -926,6 +942,23 @@ export default function ProductsPage() {
                                     <ShoppingCart className="mr-2 h-4 w-4" />
                                     Order
                                   </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => {
+                                    setSelectedLowStockProduct(product)
+                                    setLowStockNewCount(String(stock))
+                                    setShowLowStockCountDialog(true)
+                                  }}>
+                                    <SlidersHorizontal className="mr-2 h-4 w-4" />
+                                    Adjust Stock
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => handleDeleteClick(product)}
+                                    disabled={deletingProductId === product.id}
+                                    className="text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete Product
+                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </TableCell>
@@ -1116,18 +1149,6 @@ export default function ProductsPage() {
         }}
       />
       <DataExchangeModal
-        open={showImport}
-        onOpenChange={setShowImport}
-        type="import"
-        config={dataExchangeConfigs.products}
-        outlets={outlets}
-        categories={categories}
-        onSuccess={() => {
-          handleProductSaved()
-        }}
-      />
-
-      <DataExchangeModal
         open={showExport}
         onOpenChange={setShowExport}
         type="export"
@@ -1152,6 +1173,110 @@ export default function ProductsPage() {
           handleProductSaved()
         }}
       />
+
+      <StockAdjustmentModal
+        open={showStockAdjustment}
+        onOpenChange={setShowStockAdjustment}
+        onSuccess={handleProductSaved}
+      />
+
+      <Dialog open={showLowStockCountDialog} onOpenChange={setShowLowStockCountDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Update stock count</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <p className="text-sm text-gray-600">
+                Set the current count for <strong>{selectedLowStockProduct?.name}</strong>.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="low-stock-count">Count</Label>
+              <Input
+                id="low-stock-count"
+                type="number"
+                min="0"
+                value={lowStockNewCount}
+                onChange={(e) => setLowStockNewCount(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLowStockCountDialog(false)} disabled={isSavingLowStockCount}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!selectedLowStockProduct) return
+                const currentStock = getDisplayStock(selectedLowStockProduct)
+                const parsedCount = parseInt(lowStockNewCount, 10)
+                if (Number.isNaN(parsedCount) || parsedCount < 0) {
+                  toast({
+                    title: "Invalid count",
+                    description: "Enter a valid stock count.",
+                    variant: "destructive",
+                  })
+                  return
+                }
+
+                const delta = parsedCount - currentStock
+                if (delta === 0) {
+                  toast({
+                    title: "No change",
+                    description: "The stock count is already up to date.",
+                  })
+                  setShowLowStockCountDialog(false)
+                  return
+                }
+
+                if (!outlet && !selectedLowStockProduct?.outlet_id && !selectedLowStockProduct?.outlet) {
+                  toast({
+                    title: "Outlet required",
+                    description: "Please select an outlet before adjusting stock.",
+                    variant: "destructive",
+                  })
+                  return
+                }
+
+                setIsSavingLowStockCount(true)
+                try {
+                  await inventoryService.adjust({
+                    product_id: String(selectedLowStockProduct.id),
+                    outlet_id: String(selectedLowStockProduct.outlet_id || selectedLowStockProduct.outlet || outlet?.id),
+                    quantity: delta,
+                    type: "adjustment",
+                    reason: "Low stock count update",
+                  })
+                  toast({
+                    title: "Stock updated",
+                    description: `Stock count updated to ${parsedCount} for ${selectedLowStockProduct.name}.`,
+                  })
+                  setShowLowStockCountDialog(false)
+                  setSelectedLowStockProduct(null)
+                  setLowStockNewCount("")
+                  await handleProductSaved()
+                } catch (error: any) {
+                  console.error("Failed to update low stock count:", error)
+                  toast({
+                    title: "Update failed",
+                    description: error?.message || "Unable to update stock count.",
+                    variant: "destructive",
+                  })
+                } finally {
+                  setIsSavingLowStockCount(false)
+                }
+              }}
+              disabled={isSavingLowStockCount}
+            >
+              {isSavingLowStockCount ? "Saving..." : "Save Count"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>

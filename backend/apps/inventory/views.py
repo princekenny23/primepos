@@ -5,13 +5,13 @@ from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Sum, Count, Q
 from django.utils import timezone
-from decimal import Decimal
-from datetime import timedelta
+from decimal import Decimal, InvalidOperation
+from datetime import datetime, timedelta
 import logging
 from .models import StockMovement, StockTake, StockTakeItem, LocationStock, Batch
-from .serializers import StockMovementSerializer, StockTakeSerializer, StockTakeItemSerializer, LocationStockSerializer, BatchSerializer
+from .serializers import StockMovementSerializer, StockTakeSerializer, StockTakeListSerializer, StockTakeItemSerializer, LocationStockSerializer, BatchSerializer
 from .stock_helpers import get_available_stock, deduct_stock, add_stock, adjust_stock, mark_expired_batches, get_expiring_soon
 from apps.products.models import Product
 from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
@@ -19,7 +19,7 @@ from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
 logger = logging.getLogger(__name__)
 
 
-class StockMovementViewSet(viewsets.ModelViewSet, TenantFilterMixin):
+class StockMovementViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
     """Stock movement ViewSet - tracks inventory movements"""
     queryset = StockMovement.objects.select_related('product', 'outlet', 'user')
     serializer_class = StockMovementSerializer
@@ -347,6 +347,11 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     filterset_fields = ['tenant', 'outlet', 'status', 'operating_date']
     ordering_fields = ['created_at', 'operating_date']
     ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return StockTakeListSerializer
+        return StockTakeSerializer
     
     def get_queryset(self):
         """Ensure tenant filtering is applied correctly"""
@@ -368,7 +373,7 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         tenant = request_tenant or user_tenant
         
         # Get base queryset
-        queryset = StockTake.objects.select_related('tenant', 'outlet', 'user').prefetch_related('items').all()
+        queryset = StockTake.objects.select_related('tenant', 'outlet', 'user').all()
         
         # Apply tenant filter - CRITICAL for security
         if not is_saas_admin:
@@ -387,6 +392,22 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             if outlet:
                 queryset = queryset.filter(outlet=outlet)
         
+        if self.action == 'list':
+            queryset = queryset.annotate(
+                total_items=Count('items', distinct=True),
+                counted_items=Count(
+                    'items',
+                    filter=(
+                        Q(items__is_counted=True)
+                        | Q(items__counted_at__isnull=False)
+                        | Q(items__counted_quantity__gt=0)
+                    ),
+                    distinct=True,
+                ),
+            )
+        else:
+            queryset = queryset.prefetch_related('items')
+
         return queryset
     
     def get_serializer_context(self):
@@ -573,7 +594,9 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         with transaction.atomic():
             # Apply adjustments
             for item in stock_take.items.all():
-                difference = item.difference
+                difference = item.counted_quantity - item.expected_quantity
+                if item.difference != difference:
+                    StockTakeItem.objects.filter(id=item.id).update(difference=difference)
                 if difference == 0:
                     continue
 
@@ -593,58 +616,17 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     logger.warning(f"Tenant mismatch for StockTakeItem {item.id} in stock_take {stock_take.id}")
                     continue
 
-                # UNITS ONLY ARCHITECTURE: Update product.stock, LocationStock, and batches
-                if not variation or not variation.track_inventory:
-                    # Fix: Set to counted value (absolute), not += difference
-                    product.stock = max(0, item.counted_quantity)
-                    product.save(update_fields=['stock'])
-
-                    # Fix: Update LocationStock so sale checks see current stock
-                    location_stock, _ = LocationStock.objects.get_or_create(
-                        tenant=stock_take.tenant,
-                        product=product,
-                        outlet=stock_take.outlet,
-                        defaults={'quantity': 0}
-                    )
-                    location_stock.quantity = max(0, item.counted_quantity)
-                    location_stock.save(update_fields=['quantity'])
-
-                    # Fix: Create/adjust batch so get_available_stock() returns correct count
-                    try:
-                        adjust_stock(
-                            product=product,
-                            outlet=stock_take.outlet,
-                            new_quantity=item.counted_quantity,
-                            user=request.user,
-                            reason=f"Stock take {stock_take.id}: Expected {item.expected_quantity}, Counted {item.counted_quantity}"
-                        )
-                        logger.info(
-                            f"Stock take adjusted for {product.name}: "
-                            f"{item.expected_quantity} -> {item.counted_quantity} (product.stock, LocationStock, and batch updated)"
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to adjust batch stock for product {product.id}: {str(e)}")
-                        # LocationStock already updated so sales can proceed
-
-                # Update batches if variation tracks inventory
-                elif variation and variation.track_inventory:
-                    try:
-                        adjust_stock(
-                            product=product,
-                            outlet=stock_take.outlet,
-                            new_quantity=item.counted_quantity,
-                            user=request.user,
-                            reason=f"Stock take {stock_take.id}: Expected {item.expected_quantity}, Counted {item.counted_quantity}"
-                        )
-                        
-                        logger.info(
-                            f"Stock adjusted for {product.name}: "
-                            f"{item.expected_quantity} -> {item.counted_quantity}"
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to adjust stock for product {product.id}: {str(e)}")
-                        # Continue with other items even if one fails
-                        continue
+                adjust_stock(
+                    product=product,
+                    outlet=stock_take.outlet,
+                    new_quantity=item.counted_quantity,
+                    user=request.user,
+                    reason=f"Stock take {stock_take.id}: Expected {item.expected_quantity}, Counted {item.counted_quantity}",
+                )
+                logger.info(
+                    f"Stock take adjusted for {product.name}: "
+                    f"{item.expected_quantity} -> {item.counted_quantity}"
+                )
 
             # Complete the stock take
             stock_take.status = 'completed'
@@ -653,6 +635,65 @@ class StockTakeViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
         serializer = self.get_serializer(stock_take)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def summary(self, request, pk=None):
+        """Return Odoo-style stock take KPIs based on stock take line snapshots."""
+        stock_take = self.get_object()
+        tenant = getattr(request, 'tenant', None) or request.user.tenant
+
+        from apps.tenants.permissions import is_admin_user
+        if not is_admin_user(request.user) and tenant and stock_take.tenant != tenant:
+            return Response(
+                {"detail": "You do not have permission to view this stock take."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        items = list(stock_take.items.select_related('product').all())
+        total_items = len(items)
+
+        def is_counted(item):
+            if getattr(item, 'is_counted', False):
+                return True
+            if getattr(item, 'counted_at', None):
+                return True
+            return False
+
+        counted_items = sum(1 for item in items if is_counted(item))
+        completion_percent = round((counted_items / total_items) * 100, 2) if total_items > 0 else 0.0
+
+        expected_total = sum(int(item.expected_quantity or 0) for item in items)
+        counted_total = sum(int(item.counted_quantity or 0) for item in items)
+        variance_total = counted_total - expected_total
+        absolute_variance_total = sum(abs(int(item.counted_quantity or 0) - int(item.expected_quantity or 0)) for item in items)
+
+        if expected_total > 0:
+            accuracy_percent = round(max(0.0, (1 - (absolute_variance_total / expected_total)) * 100), 2)
+        else:
+            accuracy_percent = 100.0
+
+        valuation_difference = Decimal('0.00')
+        for item in items:
+            product = item.product
+            if not product:
+                continue
+            unit_cost = product.cost if product.cost is not None else Decimal('0.00')
+            difference = Decimal(int(item.counted_quantity or 0) - int(item.expected_quantity or 0))
+            valuation_difference += difference * unit_cost
+
+        return Response({
+            'stock_take_id': stock_take.id,
+            'status': stock_take.status,
+            'total_items': total_items,
+            'counted_items': counted_items,
+            'completion_percent': completion_percent,
+            'expected_total_quantity': expected_total,
+            'counted_total_quantity': counted_total,
+            'variance_total_quantity': variance_total,
+            'absolute_variance_total_quantity': absolute_variance_total,
+            'accuracy_percent': accuracy_percent,
+            'valuation_difference': str(valuation_difference.quantize(Decimal('0.01'))),
+        })
 
 
 
@@ -700,40 +741,28 @@ def adjust(request):
             return Response({"detail": "Outlet not found"}, status=status.HTTP_404_NOT_FOUND)
         
         # UNITS ONLY ARCHITECTURE: No variations — track per-Product and Batch
-        # Update LocationStock (product-based)
-        location_stock, created = LocationStock.objects.get_or_create(
-            tenant=tenant,
+        try:
+            quantity = int(quantity)
+        except (TypeError, ValueError):
+            return Response({"detail": "quantity must be a valid integer"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if movement_type != 'adjustment':
+            return Response({"detail": "Only adjustment movements are allowed here."}, status=status.HTTP_400_BAD_REQUEST)
+
+        current_quantity = get_available_stock(product, outlet)
+        target_quantity = max(0, current_quantity + quantity)
+        adjust_stock(
             product=product,
             outlet=outlet,
-            defaults={'quantity': 0}
+            new_quantity=target_quantity,
+            user=request.user,
+            reason=reason or "Manual stock adjustment",
         )
-
-        old_quantity = location_stock.quantity
-        location_stock.quantity = max(0, location_stock.quantity + quantity)
-        location_stock.save()
-        logger.info(f"LocationStock updated: {old_quantity} -> {location_stock.quantity} for product {product.id} at outlet {outlet.id}")
-        
-        # Also update legacy Product.stock field for backward compatibility
-        old_stock = product.stock
-        product.stock = max(0, product.stock + quantity)
-        product.save()
-        logger.info(f"Product stock updated: {old_stock} -> {product.stock}")
-        
-        # Record movement (product-based)
-        try:
-            movement = StockMovement.objects.create(
-                tenant=tenant,
-                product=product,
-                outlet=outlet,
-                user=request.user,
-                movement_type=movement_type,
-                quantity=abs(quantity),
-                reason=reason
-            )
-            logger.info(f"StockMovement created: id={movement.id}, type={movement_type}, quantity={movement.quantity}, product={product.id}")
-        except Exception as e:
-            logger.error(f"Failed to create StockMovement: {e}", exc_info=True)
-            raise
+        movement = StockMovement.objects.filter(
+            product=product,
+            outlet=outlet,
+            movement_type='adjustment',
+        ).latest('created_at')
     
     serializer = StockMovementSerializer(movement)
     logger.info(f"Returning movement data: {serializer.data}")
@@ -775,42 +804,39 @@ def transfer(request):
             product = Product.objects.select_for_update().get(id=product_id, tenant=tenant)
         except Product.DoesNotExist:
             return Response({"detail": "Product not found"}, status=status.HTTP_404_NOT_FOUND)
-        # Note: In a real system, you'd track stock per outlet
-        # For now, we just record the movement
-        StockMovement.objects.create(
-            tenant=tenant,
-            product=product,
-            outlet_id=from_outlet_id,
-            user=request.user,
-            movement_type='transfer_out',
-            quantity=quantity,
-            reason=reason,
-            reference_id=to_outlet_id
-        )
-        
-        StockMovement.objects.create(
-            tenant=tenant,
-            product=product,
-            outlet_id=to_outlet_id,
-            user=request.user,
-            movement_type='transfer_in',
-            quantity=quantity,
-            reason=reason,
-            reference_id=from_outlet_id
-        )
+        from apps.outlets.models import Outlet
+        try:
+            source_outlet = Outlet.objects.get(id=from_outlet_id, tenant=tenant)
+            destination_outlet = Outlet.objects.get(id=to_outlet_id, tenant=tenant)
+            quantity = int(quantity)
+            if quantity <= 0:
+                raise ValueError
+        except (Outlet.DoesNotExist, TypeError, ValueError):
+            return Response({"detail": "Valid tenant outlets and a positive quantity are required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        if is_return:
-            if not return_number:
-                return_number = f"OUTLET-RET-{timezone.now().strftime('%Y%m%d%H%M%S')}"
-            StockMovement.objects.create(
-                tenant=tenant,
+        transfer_reference = return_number or f"TRF-{timezone.now().strftime('%Y%m%d%H%M%S')}-{product.id}"
+        transfer_reason = reason or ('Outlet return' if is_return else 'Outlet transfer')
+        deductions = deduct_stock(
+            product=product,
+            outlet=source_outlet,
+            quantity=quantity,
+            user=request.user,
+            reference_id=transfer_reference,
+            reason=transfer_reason,
+            movement_type='transfer_out',
+        )
+        for batch, moved_quantity in deductions:
+            add_stock(
                 product=product,
-                outlet_id=from_outlet_id,
+                outlet=destination_outlet,
+                quantity=moved_quantity,
+                batch_number=batch.batch_number if batch else f"{transfer_reference}-{product.id}",
+                expiry_date=batch.expiry_date if batch else timezone.now().date() + timedelta(days=365),
+                cost_price=batch.cost_price if batch else product.cost,
                 user=request.user,
-                movement_type='return',
-                quantity=quantity,
-                reason=reason or 'Outlet return',
-                reference_id=return_number
+                movement_type='transfer_in',
+                reference_id=transfer_reference,
+                reason=transfer_reason,
             )
     
     return Response({"message": "Stock transfer recorded"}, status=status.HTTP_201_CREATED)
@@ -902,47 +928,36 @@ def receive(request):
                 })
                 continue
             
-            # UNITS ONLY ARCHITECTURE: No variations needed, use Product directly
-            # Removed: variation creation block as per architecture migration
-            
-            # UNITS ONLY ARCHITECTURE: Use Batch for inventory tracking instead of variations
-            
-            # Also update legacy Product.stock field for backward compatibility
-            old_stock = product.stock
-            product.stock += quantity
-            product.save()
-            logger.info(f"Product stock updated: {old_stock} -> {product.stock}")
-            
-            # Update cost if provided
+            # Validate the purchase cost before creating the batch/movement snapshot.
+            cost_decimal = None
             if cost is not None:
                 try:
                     cost_decimal = Decimal(str(cost))
-                    if cost_decimal >= 0:
-                        product.cost = cost_decimal
-                        product.save()
-                        logger.info(f"Product cost updated: {product.cost}")
-                except (ValueError, TypeError):
-                    logger.warning(f"Invalid cost value: {cost}, skipping cost update")
+                    if cost_decimal < 0:
+                        raise ValueError("cost must not be negative")
+                except (InvalidOperation, ValueError, TypeError):
+                    errors.append({"product_id": product_id, "error": "cost must be a valid non-negative decimal"})
+                    continue
             
-            # Record movement without variation (UNITS ONLY ARCHITECTURE)
             try:
                 movement_reason = reason or (f"Purchase from {supplier}" if supplier else "Purchase")
-                movement = StockMovement.objects.create(
-                    tenant=tenant,
+                batch_number = item.get('batch_number') or f"PUR-{timezone.now().strftime('%Y%m%d%H%M%S')}-{product.id}"
+                expiry_date = item.get('expiry_date') or (timezone.now().date() + timedelta(days=365))
+                if isinstance(expiry_date, str):
+                    expiry_date = datetime.strptime(expiry_date, '%Y-%m-%d').date()
+
+                batch = add_stock(
                     product=product,
                     outlet=outlet,
+                    quantity=quantity,
+                    batch_number=batch_number,
+                    expiry_date=expiry_date,
                     user=request.user,
                     movement_type='purchase',
-                    quantity=quantity,
                     reason=movement_reason,
-                    reference_id=supplier if supplier else ''
+                    cost_price=cost_decimal,
                 )
-                logger.info(f"StockMovement created successfully: id={movement.id}, type=purchase, product={product.name}, quantity={movement.quantity}, tenant={tenant.id}, outlet={outlet_id}, supplier={supplier}")
-                
-                # Verify the record was created
-                verify_movement = StockMovement.objects.get(id=movement.id)
-                logger.info(f"Verified StockMovement exists: id={verify_movement.id}, movement_type={verify_movement.movement_type}, tenant={verify_movement.tenant.id}")
-                
+                movement = StockMovement.objects.filter(batch=batch, movement_type='purchase').latest('created_at')
                 serializer = StockMovementSerializer(movement)
                 results.append(serializer.data)
             except Exception as e:
@@ -974,7 +989,7 @@ def receive(request):
     return Response(response_data, status=status.HTTP_201_CREATED)
 
 
-class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
+class LocationStockViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
     """Location Stock ViewSet - per-location inventory tracking"""
     queryset = LocationStock.objects.select_related('product', 'outlet', 'tenant')
     serializer_class = LocationStockSerializer
@@ -1167,7 +1182,7 @@ class LocationStockViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         }, status=status.HTTP_200_OK)
 
 
-class BatchViewSet(viewsets.ModelViewSet, TenantFilterMixin):
+class BatchViewSet(viewsets.ReadOnlyModelViewSet, TenantFilterMixin):
     """
     Batch ViewSet for expiry tracking
     Provides CRUD operations and expiry monitoring

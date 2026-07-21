@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'apps.tenants',
     'apps.outlets',
     'apps.products',
+    'apps.imports',
     'apps.inventory',
     'apps.sales',
     'apps.customers',
@@ -249,6 +250,7 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'x-idempotency-key',  # Idempotent preview/apply import requests
     'x-outlet-id',  # Custom header for outlet data isolation
     'x-tenant-id',  # Custom header for tenant context
     'x-tenant-host',  # Browser host forwarded for tenant URL resolution

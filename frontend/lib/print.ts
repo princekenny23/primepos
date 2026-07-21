@@ -18,6 +18,7 @@ type ReceiptPayload = {
 
 const PRINT_CHANNEL_STORAGE_KEY = "printChannel"
 const PRINT_DEVICE_ID_STORAGE_KEY = "printDeviceId"
+const QZ_TRAY_ENABLED_STORAGE_KEY = "primepos.qzTrayEnabled"
 const PA_HEARTBEAT_WINDOW_MS = 90_000
 const LOCAL_PRINT_AGENT_URL =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_URL || "http://127.0.0.1:7310"
@@ -25,7 +26,7 @@ const LOCAL_PRINT_PROXY_BASE = "/api/local-print"
 const LOCAL_PRINT_AGENT_TOKEN =
   process.env.NEXT_PUBLIC_LOCAL_PRINT_AGENT_TOKEN || ""
 
-type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus"
+type PrintChannel = "auto" | "agent" | "bluetooth_usb_thermal_printer_plus" | "qztray"
 
 type EscposPrintJob = {
   printerName: string
@@ -52,8 +53,8 @@ function getPrintChannelPreference(): PrintChannel {
   if (typeof window === "undefined") return "auto"
   try {
     const saved = String(localStorage.getItem(PRINT_CHANNEL_STORAGE_KEY) || "auto").toLowerCase()
-    if (saved === "agent" || saved === "bluetooth_usb_thermal_printer_plus" || saved === "auto") {
-      return saved
+    if (saved === "agent" || saved === "bluetooth_usb_thermal_printer_plus" || saved === "auto" || saved === "qztray") {
+      return saved as PrintChannel
     }
   } catch {
     // ignore localStorage failures
@@ -65,6 +66,37 @@ function shouldUseBluetoothUsbThermalPrinterPlus(channel: PrintChannel): boolean
   if (channel === "bluetooth_usb_thermal_printer_plus") return true
   if (channel === "agent") return false
   return isAndroidMobileDevice()
+}
+
+function isQzTrayEnabled(): boolean {
+  if (typeof window === "undefined") return false
+  try {
+    const enabled = localStorage.getItem(QZ_TRAY_ENABLED_STORAGE_KEY) === "true"
+    const channel = localStorage.getItem(PRINT_CHANNEL_STORAGE_KEY) || ""
+    return enabled || channel === "qztray"
+  } catch {
+    return false
+  }
+}
+
+async function printViaQzTray(printerName: string | null, plainTextReceipt: string): Promise<void> {
+  if (typeof window === "undefined") throw new Error("QZ Tray printing must be initiated from the browser")
+  if (!isQzTrayEnabled()) throw new Error("QZ Tray is not enabled")
+
+  const qz = (window as Window & typeof globalThis & { qz?: any }).qz
+  if (!qz?.websocket?.connect || !qz?.print || !qz?.printers?.find) {
+    throw new Error("QZ Tray is not ready")
+  }
+
+  await qz.websocket.connect({ reconnect: true, attempts: 1 })
+  const printer = printerName || ""
+  const config = {
+    data: plainTextReceipt,
+    type: "RAW",
+    format: "plain",
+    printer,
+  }
+  await qz.print(config)
 }
 
 function isLocalhostBrowser(): boolean {
@@ -390,6 +422,7 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
 
   const channel = getPrintChannelPreference()
   const useMobileFlow = shouldUseBluetoothUsbThermalPrinterPlus(channel)
+  const useQzTray = !useMobileFlow && isQzTrayEnabled() && channel === "qztray"
   const isOfflineBrowser = typeof navigator !== "undefined" && navigator.onLine === false
   // Force local agent path for offline sales even when the browser reports online (backend may be 503).
   const shouldUseDirectLocalAgent = !useMobileFlow && (isLocalhostBrowser() || isOfflineBrowser || isOfflineSale)
@@ -497,6 +530,12 @@ export async function printReceipt(payload: ReceiptPayload, outletId?: number | 
     console.log("[Print] Sending receipt to Bluetooth-USB Thermal Printer+:", { channel })
     const printableText = escposBase64ToPrintableText(contentBase64) || buildPlainTextReceipt(payload)
     await printViaBluetoothUsbThermalPrinterPlus(printableText)
+    return
+  }
+
+  if (useQzTray) {
+    const printableText = escposBase64ToPrintableText(contentBase64) || buildPlainTextReceipt(payload)
+    await printViaQzTray(printerName, printableText)
     return
   }
 

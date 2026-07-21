@@ -24,6 +24,7 @@ import { useToast } from "@/components/ui/use-toast"
 import * as XLSX from "xlsx"
 import { DataExchangeConfig } from "@/lib/utils/data-exchange-config"
 import { exportToXLSX, exportToCSV, ExportColumn } from "@/lib/services/exportService"
+import { productService } from "@/lib/services/productService"
 
 interface DataExchangeModalProps {
   open: boolean
@@ -52,14 +53,48 @@ export function DataExchangeModal({
   const [format, setFormat] = useState<"xlsx" | "csv">(config.defaultFormat)
   const [selectedFilters, setSelectedFilters] = useState<Record<string, any>>({})
   const [result, setResult] = useState<any>(null)
+  const [importBatchId, setImportBatchId] = useState<string | null>(null)
+  const [previewErrors, setPreviewErrors] = useState<Array<{ row_number: number; errors: string[] }>>([])
+  const [applyErrors, setApplyErrors] = useState<Array<{ row_number: number; message: string; error_code?: string }>>([])
+  const [chunkSize, setChunkSize] = useState(100)
+  const [continueOnError, setContinueOnError] = useState(true)
+  const [showPreviewPopup, setShowPreviewPopup] = useState(false)
+  const [showApprovalPopup, setShowApprovalPopup] = useState(false)
+  const [showInvalidPopup, setShowInvalidPopup] = useState(false)
+
+  const isProductsImportFlow = type === "import" && config.entityType === "products"
 
   const resetFileHandlingState = useCallback(() => {
     setFile(null)
     setResult(null)
+    setImportBatchId(null)
+    setPreviewErrors([])
+    setApplyErrors([])
+    setChunkSize(100)
+    setContinueOnError(true)
+    setShowPreviewPopup(false)
+    setShowApprovalPopup(false)
+    setShowInvalidPopup(false)
     setSelectedFilters({})
     setFormat(config.defaultFormat)
     setIsLoading(false)
   }, [config.defaultFormat])
+
+  const resolveSelectedOutlet = useCallback(() => {
+    if (selectedFilters.outlet_id && selectedFilters.outlet_id !== "all") {
+      return String(selectedFilters.outlet_id)
+    }
+
+    if (selectedFilters.outlet && selectedFilters.outlet !== "all") {
+      return String(selectedFilters.outlet)
+    }
+
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("currentOutletId") || undefined
+    }
+
+    return undefined
+  }, [selectedFilters])
 
   useEffect(() => {
     const handleSubnavRefresh = () => {
@@ -137,58 +172,87 @@ export function DataExchangeModal({
     setIsLoading(true)
 
     try {
-      const formData = new FormData()
-      formData.append("file", file)
+      let data: any
 
-      Object.entries(selectedFilters).forEach(([key, value]) => {
-        if (value && value !== "all") {
-          formData.append(key, String(value))
+      if (config.entityType === "products") {
+        const selectedOutlet = resolveSelectedOutlet()
+        if (!selectedOutlet) {
+          throw new Error("Select an outlet before importing products")
         }
-      })
 
-      // Get auth token from localStorage
-      const token = typeof window !== "undefined" 
-        ? localStorage.getItem("authToken") 
-        : null
-      
-      // Get current outlet ID if available
-      const outletId = typeof window !== "undefined"
-        ? localStorage.getItem("currentOutletId")
-        : null
+        const previewIdempotencyKey = `preview-${file.name}-${file.size}-${file.lastModified}-${selectedOutlet}`
+        const preview = await productService.previewImport(file, selectedOutlet, previewIdempotencyKey)
 
-      // Build headers
-      const headers: Record<string, string> = {}
-      if (token) {
-        headers["Authorization"] = `Bearer ${token}`
-      }
-      if (outletId) {
-        headers["X-Outlet-ID"] = outletId
-      }
+        setImportBatchId(preview.batch_id)
+        setPreviewErrors([])
+        setApplyErrors([])
 
-      // Build full URL
-      const baseURL = process.env.NEXT_PUBLIC_API_URL || "https://primepos-5mf6.onrender.com/api/v1"
-      const importPath = config.apiEndpoints.import.startsWith("/api/v1") 
-        ? config.apiEndpoints.import.replace("/api/v1", "")
-        : config.apiEndpoints.import
-      const importUrl = `${baseURL}${importPath}`
+        try {
+          const errorsPayload = await productService.getImportErrors(preview.batch_id)
+          setPreviewErrors(errorsPayload.preview_errors || [])
+        } catch (errorsLoadError) {
+          console.warn("Failed to fetch preview errors:", errorsLoadError)
+        }
 
-      console.log("Import URL debug:", {
-        baseURL,
-        configEndpoint: config.apiEndpoints.import,
-        importPath,
-        finalUrl: importUrl
-      })
+        data = {
+          mode: "preview",
+          ...preview,
+        }
 
-      const response = await fetch(importUrl, {
-        method: "POST",
-        body: formData,
-        headers,
-      })
+        setResult(data)
+        setShowPreviewPopup(true)
+        toast({
+          title: "Preview Ready",
+          description: `${preview.summary.valid_rows}/${preview.summary.total_rows} rows valid. Review then approve/apply.`,
+        })
+        return
+      } else {
+        const formData = new FormData()
+        formData.append("file", file)
 
-      const data = await response.json()
+        Object.entries(selectedFilters).forEach(([key, value]) => {
+          if (value && value !== "all") {
+            formData.append(key, String(value))
+          }
+        })
 
-      if (!response.ok) {
-        throw new Error(data.error || `Import failed: ${response.status}`)
+        // Get auth token from localStorage
+        const token = typeof window !== "undefined" 
+          ? localStorage.getItem("authToken") 
+          : null
+        
+        // Get current outlet ID if available
+        const outletId = typeof window !== "undefined"
+          ? localStorage.getItem("currentOutletId")
+          : null
+
+        // Build headers
+        const headers: Record<string, string> = {}
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`
+        }
+        if (outletId) {
+          headers["X-Outlet-ID"] = outletId
+        }
+
+        // Build full URL
+        const baseURL = process.env.NEXT_PUBLIC_API_URL || "https://primepos-5mf6.onrender.com/api/v1"
+        const importPath = config.apiEndpoints.import.startsWith("/api/v1") 
+          ? config.apiEndpoints.import.replace("/api/v1", "")
+          : config.apiEndpoints.import
+        const importUrl = `${baseURL}${importPath}`
+
+        const response = await fetch(importUrl, {
+          method: "POST",
+          body: formData,
+          headers,
+        })
+
+        data = await response.json()
+
+        if (!response.ok) {
+          throw new Error(data.error || `Import failed: ${response.status}`)
+        }
       }
 
       setResult(data)
@@ -215,6 +279,130 @@ export function DataExchangeModal({
         variant: "destructive",
       })
       console.error("Import error:", error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleApproveImport = async () => {
+    if (!importBatchId) return
+
+    if (result?.status === "applied" || result?.apply_summary) {
+      toast({
+        title: "Already Applied",
+        description: "This batch is already applied. No approval needed.",
+      })
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const approved = await productService.approveImport(importBatchId)
+      setResult((prev: any) => ({
+        ...(prev || {}),
+        ...approved,
+        mode: "approved",
+      }))
+      setShowApprovalPopup(true)
+
+      toast({
+        title: "Import Approved",
+        description: "Batch approved. You can now apply import safely.",
+      })
+    } catch (error: any) {
+      const isAlreadyAppliedConflict =
+        error?.status === 409 &&
+        String(error?.message || "").toLowerCase().includes("status: applied")
+
+      if (isAlreadyAppliedConflict) {
+        try {
+          const statusPayload = await productService.getImportStatus(importBatchId)
+          setResult((prev: any) => ({
+            ...(prev || {}),
+            ...statusPayload,
+            mode: statusPayload?.status === "applied" ? "applied" : (prev?.mode || "preview"),
+          }))
+        } catch (statusError) {
+          // Ignore secondary status load errors and still present a stable message.
+        }
+
+        toast({
+          title: "Already Applied",
+          description: "This batch was already applied in a previous action.",
+        })
+        return
+      }
+
+      toast({
+        title: "Approval Failed",
+        description: error.message || "Failed to approve import batch",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleApplyImport = async () => {
+    if (!importBatchId) return
+
+    setIsLoading(true)
+    try {
+      const apply = await productService.applyImportWithOptions(importBatchId, {
+        chunkSize,
+        continueOnError,
+        idempotencyKey: `apply-${importBatchId}`,
+      })
+
+      let resolvedApplyErrors: Array<{ row_number: number; message: string; error_code?: string }> = []
+      try {
+        const errorsPayload = await productService.getImportErrors(importBatchId)
+        resolvedApplyErrors = (errorsPayload.apply_errors || []).map((err: any) => ({
+          row_number: err.row_number,
+          message: err.message,
+          error_code: err.error_code,
+        }))
+        setApplyErrors(resolvedApplyErrors)
+      } catch (errorsLoadError) {
+        console.warn("Failed to fetch apply errors:", errorsLoadError)
+      }
+
+      const applySummary = apply.apply_summary || {}
+      const imported = Number(applySummary.imported || 0)
+      const failed = Number(applySummary.failed || 0)
+
+      const nextResult = {
+        ...(result || {}),
+        ...apply,
+        mode: "applied",
+        imported,
+        failed,
+        errors: resolvedApplyErrors,
+      }
+
+      setResult(nextResult)
+      setShowApprovalPopup(true)
+
+      if (failed > 0) {
+        toast({
+          title: "Import Applied With Errors",
+          description: `${imported} imported, ${failed} failed. Review error rows.`,
+          variant: "destructive",
+        })
+      } else {
+        toast({
+          title: "Import Applied",
+          description: `${imported} records imported successfully.`,
+        })
+      }
+
+      onSuccess?.(nextResult)
+    } catch (error: any) {
+      toast({
+        title: "Apply Failed",
+        description: error.message || "Failed to apply import batch",
+        variant: "destructive",
+      })
     } finally {
       setIsLoading(false)
     }
@@ -397,6 +585,7 @@ export function DataExchangeModal({
     config.entityType === "products" && !hasEnabledFilters && config.showFieldsInfo === false
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={`max-h-[85vh] flex flex-col ${
@@ -578,7 +767,18 @@ export function DataExchangeModal({
           )}
 
           {/* Results */}
-          {result && (
+          {isProductsImportFlow && result?.batch_id && (
+            <div className="border-t pt-2 space-y-2">
+              <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 p-2 rounded">
+                <p className="text-xs font-medium text-blue-900 dark:text-blue-200">Products import batch is ready</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Use Preview, Approval, and Invalid popups from the action buttons below.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!isProductsImportFlow && result && (
             <div className="border-t pt-2 space-y-2">
               {result.imported > 0 || result.exported > 0 ? (
                 <div className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 p-2 rounded space-y-1">
@@ -677,7 +877,9 @@ export function DataExchangeModal({
               <AlertCircle className="w-3 h-3 mt-0.5 flex-shrink-0" />
               <p className="text-muted-foreground leading-tight">
                 {type === "import"
-                  ? "First row must contain headers. Empty cells skipped. Max 10,000 records."
+                  ? (isProductsImportFlow
+                    ? "Products import runs in 3 steps: Preview, Approve, then Apply."
+                    : "First row must contain headers. Empty cells skipped. Max 10,000 records.")
                   : "File will include current filters. Download starts immediately."}
               </p>
             </div>
@@ -701,12 +903,51 @@ export function DataExchangeModal({
                   <Download className="w-4 h-4 mr-1" />
                   Template
                 </Button>
-                <Button
-                  onClick={handleImport}
-                  disabled={!file || isLoading}
-                >
-                  {isLoading ? "Importing..." : "Import"}
-                </Button>
+                {!isProductsImportFlow && (
+                  <Button
+                    onClick={handleImport}
+                    disabled={!file || isLoading}
+                  >
+                    {isLoading ? "Importing..." : "Import"}
+                  </Button>
+                )}
+                {isProductsImportFlow && (
+                  <>
+                    {!importBatchId && (
+                      <Button
+                        onClick={handleImport}
+                        disabled={!file || isLoading}
+                      >
+                        {isLoading ? "Previewing..." : "Preview Import"}
+                      </Button>
+                    )}
+                    {importBatchId && (
+                      <>
+                        <Button
+                          variant="outline"
+                          onClick={() => setShowPreviewPopup(true)}
+                          disabled={isLoading}
+                        >
+                          Preview
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => setShowApprovalPopup(true)}
+                          disabled={isLoading}
+                        >
+                          Approval
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => setShowInvalidPopup(true)}
+                          disabled={isLoading || (previewErrors.length === 0 && applyErrors.length === 0)}
+                        >
+                          Invalid
+                        </Button>
+                      </>
+                    )}
+                  </>
+                )}
               </>
             )}
 
@@ -719,5 +960,124 @@ export function DataExchangeModal({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <Dialog open={showPreviewPopup} onOpenChange={setShowPreviewPopup}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Preview Summary</DialogTitle>
+          <DialogDescription>Review rows before approval.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-2 text-[12px]">
+            <div>Total: <span className="font-medium">{result?.summary?.total_rows || 0}</span></div>
+            <div>Valid: <span className="font-medium text-green-600">{result?.summary?.valid_rows || 0}</span></div>
+            <div>Invalid: <span className="font-medium text-red-600">{result?.summary?.invalid_rows || 0}</span></div>
+            <div>Warnings: <span className="font-medium text-yellow-600">{result?.summary?.warning_rows || 0}</span></div>
+          </div>
+          <div className="text-[11px] text-muted-foreground">Batch status: {result?.status || "preview_ready"}</div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowPreviewPopup(false)}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={showApprovalPopup} onOpenChange={setShowApprovalPopup}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Approval & Apply</DialogTitle>
+          <DialogDescription>Approve batch, then apply with safe options.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="text-[12px] text-muted-foreground">
+            Approved: {result?.is_approved ? "Yes" : "No"}
+          </div>
+          {!result?.apply_summary && (
+            <div className="border rounded p-2 space-y-2">
+              <p className="text-xs font-medium">Apply Options</p>
+              <div className="grid grid-cols-[1fr_auto] items-center gap-2 text-[11px]">
+                <Label className="text-xs">Chunk Size</Label>
+                <input
+                  type="number"
+                  min={1}
+                  max={1000}
+                  value={chunkSize}
+                  onChange={(e) => setChunkSize(Math.max(1, Math.min(1000, Number(e.target.value) || 100)))}
+                  className="h-8 w-20 rounded border px-2 text-xs"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="continue-on-error-popup"
+                  checked={continueOnError}
+                  onCheckedChange={(checked) => setContinueOnError(Boolean(checked))}
+                />
+                <Label htmlFor="continue-on-error-popup" className="text-xs">
+                  Continue on chunk error
+                </Label>
+              </div>
+            </div>
+          )}
+          {result?.apply_summary && (
+            <div className="bg-green-50 border border-green-200 rounded p-2 text-[12px]">
+              Imported: <span className="font-medium text-green-700">{result.apply_summary.imported || 0}</span>
+              <span className="mx-2">|</span>
+              Failed: <span className="font-medium text-red-700">{result.apply_summary.failed || 0}</span>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowApprovalPopup(false)} disabled={isLoading}>Close</Button>
+          <Button
+            variant="outline"
+            onClick={handleApproveImport}
+            disabled={isLoading || !!result?.is_approved || !!result?.apply_summary || result?.status === "applied"}
+          >
+            {result?.is_approved ? "Approved" : (isLoading ? "Approving..." : "Approve")}
+          </Button>
+          <Button
+            onClick={handleApplyImport}
+            disabled={isLoading || !result?.is_approved || !!result?.apply_summary}
+          >
+            {isLoading ? "Applying..." : "Apply Import"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={showInvalidPopup} onOpenChange={setShowInvalidPopup}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Invalid Rows</DialogTitle>
+          <DialogDescription>Rows that failed preview or apply validation.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <p className="text-[11px] font-medium text-red-600 mb-1">Preview Errors ({previewErrors.length})</p>
+            <div className="max-h-32 overflow-y-auto space-y-0.5 text-[10px] text-muted-foreground bg-muted p-1.5 rounded">
+              {previewErrors.length === 0 && <div>No preview errors.</div>}
+              {previewErrors.map((err, idx) => (
+                <div key={`p-${err.row_number}-${idx}`}>Row {err.row_number}: {err.errors.join(", ")}</div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-[11px] font-medium text-red-600 mb-1">Apply Errors ({applyErrors.length})</p>
+            <div className="max-h-32 overflow-y-auto space-y-0.5 text-[10px] text-muted-foreground bg-muted p-1.5 rounded">
+              {applyErrors.length === 0 && <div>No apply errors.</div>}
+              {applyErrors.map((err, idx) => (
+                <div key={`a-${err.row_number}-${idx}`}>
+                  Row {err.row_number}: {err.message}{err.error_code ? ` (${err.error_code})` : ""}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setShowInvalidPopup(false)}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

@@ -76,6 +76,9 @@ interface Expense {
   approval_notes?: string
   rejected_by?: string
   rejected_at?: string
+  shift?: string
+  shift_status?: "OPEN" | "CLOSED"
+  created_by_name?: string
 }
 
 const paymentMethods = [
@@ -363,6 +366,8 @@ export default function ExpensesPage() {
                       <TableHead>Vendor</TableHead>
                       <TableHead>Amount</TableHead>
                       <TableHead>Payment Method</TableHead>
+                      <TableHead>Shift</TableHead>
+                      <TableHead>Created By</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
@@ -379,6 +384,8 @@ export default function ExpensesPage() {
                           {formatCurrency(expense.amount, currentBusiness)}
                         </TableCell>
                         <TableCell className="capitalize">{expense.payment_method.replace("_", " ")}</TableCell>
+                        <TableCell>{expense.shift ? `#${expense.shift} (${expense.shift_status || "-"})` : "-"}</TableCell>
+                        <TableCell>{expense.created_by_name || "System"}</TableCell>
                         <TableCell>{getStatusBadge(expense.status)}</TableCell>
                         <TableCell className="text-right">
                           <DropdownMenu>
