@@ -946,7 +946,6 @@ class ProductImportPreviewView(BaseImportView):
                     sync_mode=batch_sync_mode,
                     status=ImportBatch.STATUS_PREVIEW_READY,
                     source_filename=uploaded_file.name,
-                    source_file=uploaded_file,
                     idempotency_key=idempotency_key,
                     total_rows=preview_data['summary']['total_rows'],
                     valid_rows=preview_data['summary']['valid_rows'],
