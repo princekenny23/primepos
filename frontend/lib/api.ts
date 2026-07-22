@@ -346,6 +346,25 @@ export class ApiClient {
         
         // Try to extract a meaningful error message
         let errorMessage = errorData.detail || errorData.message || errorData.error
+
+        const extractFirstErrorMessage = (value: any): string | null => {
+          if (value === null || value === undefined) return null
+          if (typeof value === 'string') return value
+          if (Array.isArray(value)) {
+            for (const item of value) {
+              const nested = extractFirstErrorMessage(item)
+              if (nested) return nested
+            }
+            return null
+          }
+          if (typeof value === 'object') {
+            for (const key of Object.keys(value)) {
+              const nested = extractFirstErrorMessage(value[key])
+              if (nested) return `${key}: ${nested}`
+            }
+          }
+          return null
+        }
         
         // If no detail, try to get field-specific errors
         if (!errorMessage && typeof errorData === 'object') {
@@ -361,11 +380,7 @@ export class ApiClient {
           
           // If still no message, get first error from any field
           if (!errorMessage) {
-            const firstKey = Object.keys(errorData)[0]
-            if (firstKey) {
-              const firstError = errorData[firstKey]
-              errorMessage = Array.isArray(firstError) ? firstError[0] : firstError
-            }
+            errorMessage = extractFirstErrorMessage(errorData)
           }
         }
         
@@ -852,7 +867,9 @@ export const apiEndpoints = {
     productsStatus: (batchId: string) => `/imports/products/${batchId}/status/`,
     productsErrors: (batchId: string) => `/imports/products/${batchId}/errors/`,
     productsRows: (batchId: string) => `/imports/products/${batchId}/rows/`,
+    productsRowUpdate: (batchId: string, rowNumber: number) => `/imports/products/${batchId}/rows/${rowNumber}/`,
     productsMissing: (batchId: string) => `/imports/products/${batchId}/missing/`,
+    productsSource: (batchId: string) => `/imports/products/${batchId}/source/`,
   },
   // Shifts
   shifts: {

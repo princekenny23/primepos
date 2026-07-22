@@ -26,6 +26,7 @@ export function RegisterClosedScreen() {
   const [selectedShiftId, setSelectedShiftId] = useState<string>("")
   const [isLoadingShifts, setIsLoadingShifts] = useState(true)
   const [isSelectingShift, setIsSelectingShift] = useState(false)
+  const [hasAutoOpenedSingleShift, setHasAutoOpenedSingleShift] = useState(false)
 
   useEffect(() => {
     loadOpenShifts()
@@ -88,6 +89,53 @@ export function RegisterClosedScreen() {
     // For now, just show ID and date
     return `Shift #${shift.id.slice(-6)} - ${format(new Date(shift.operatingDate), "MMM dd, yyyy")}`
   }
+
+  useEffect(() => {
+    if (isLoadingShifts || isSelectingShift || hasAutoOpenedSingleShift || !currentBusiness) {
+      return
+    }
+
+    const shiftsForCurrentOutlet = currentOutlet
+      ? openShifts.filter((shift) => String(shift.outletId) === String(currentOutlet.id))
+      : []
+
+    const shouldAutoOpenCurrentOutlet = shiftsForCurrentOutlet.length === 1
+    const shouldAutoOpenSingleOverall = !currentOutlet && openShifts.length === 1
+
+    if (!shouldAutoOpenCurrentOutlet && !shouldAutoOpenSingleOverall) {
+      return
+    }
+
+    const targetShift = shouldAutoOpenCurrentOutlet
+      ? shiftsForCurrentOutlet[0]
+      : openShifts[0]
+
+    const contextShift = {
+      id: targetShift.id,
+      outletId: targetShift.outletId,
+      tillId: targetShift.tillId,
+      userId: targetShift.userId,
+      operatingDate: targetShift.operatingDate,
+      openingCashBalance: targetShift.openingCashBalance,
+      floatingCash: targetShift.floatingCash,
+      notes: targetShift.notes,
+      status: targetShift.status,
+      startTime: targetShift.startTime,
+      endTime: targetShift.endTime,
+    }
+
+    setHasAutoOpenedSingleShift(true)
+    setActiveShift(contextShift)
+    window.location.reload()
+  }, [
+    currentBusiness,
+    currentOutlet,
+    hasAutoOpenedSingleShift,
+    isLoadingShifts,
+    isSelectingShift,
+    openShifts,
+    setActiveShift,
+  ])
 
   return (
     <div className="flex items-center justify-center min-h-[calc(100vh-8rem)] py-8">

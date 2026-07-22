@@ -100,6 +100,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
     outletId: "",
     opening_stock: "0",
   })
+  const [stockTouched, setStockTouched] = useState(false)
 
   // EXPIRY TAB - Expiry tracking
   const [expiryForm, setExpiryForm] = useState({
@@ -175,6 +176,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         outletId: product.outlet?.id || product.outlet_id || "",
         opening_stock: String(product.stock || 0),
       })
+      setStockTouched(false)
 
       setExpiryForm({
         track_expiration: product.track_expiration || false,
@@ -219,6 +221,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         outletId: "",
         opening_stock: "0",
       })
+      setStockTouched(false)
       setExpiryForm({
         track_expiration: false,
         manufacturing_date: "",
@@ -358,6 +361,15 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
       }
 
       // === STEP 1: CREATE OR UPDATE PRODUCT ===
+      const normalizedOpeningStockRaw = stockForm.opening_stock.trim()
+      const parsedOpeningStock = Number(normalizedOpeningStockRaw)
+      if (stockTouched && (normalizedOpeningStockRaw === "" || !Number.isFinite(parsedOpeningStock) || parsedOpeningStock < 0)) {
+        throw new Error("Opening stock must be a non-negative number")
+      }
+      const normalizedOpeningStock = Number.isFinite(parsedOpeningStock) && parsedOpeningStock >= 0
+        ? Math.floor(parsedOpeningStock)
+        : 0
+
       const productPayload: any = {
         name: basicForm.name,
         sku: basicForm.sku || undefined,
@@ -372,7 +384,6 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         isActive: basicForm.isActive,
         low_stock_threshold: parseInt(stockForm.low_stock_threshold) || 0,
         outletId: outletId,
-        stock: parseInt(stockForm.opening_stock) || 0,
         image: selectedImageFile || undefined,
         track_expiration: expiryForm.track_expiration,
         manufacturing_date: expiryForm.manufacturing_date || undefined,
@@ -380,6 +391,14 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         preparation_time: restaurantForm.preparation_time ? parseInt(restaurantForm.preparation_time) : undefined,
         volume_ml: barForm.volume_ml ? parseFloat(barForm.volume_ml) : undefined,
         alcohol_percentage: barForm.alcohol_percentage ? parseFloat(barForm.alcohol_percentage) : undefined,
+      }
+
+      // Stock should be sent only when creating or when user explicitly changed it while editing.
+      if (!product?.id || stockTouched) {
+        productPayload.stock = normalizedOpeningStock
+      }
+      if (product?.id && stockTouched) {
+        productPayload.stock_update_intent = true
       }
 
       let productId: string
@@ -894,9 +913,10 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                       id="opening_stock"
                       type="number"
                       value={stockForm.opening_stock}
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        setStockTouched(true)
                         setStockForm({ ...stockForm, opening_stock: e.target.value })
-                      }
+                      }}
                       placeholder="0"
                     />
                     <p className="text-xs text-gray-500">Initial quantity in base unit</p>

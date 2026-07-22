@@ -847,7 +847,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         )
         reason = str(reason).strip() or 'Refund'
 
-        payment_method = request.data.get('payment_method', 'cash')
+        payment_method = request.data.get('payment_method') or request.data.get('refund_method') or 'cash'
         valid_payment_methods = [choice[0] for choice in Sale.PAYMENT_METHODS]
         if payment_method not in valid_payment_methods:
             return Response(
@@ -855,8 +855,24 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        restore_stock = request.data.get('restore_stock', True)
+        restore_stock_raw = request.data.get('restore_stock', request.data.get('restock', True))
+        if isinstance(restore_stock_raw, bool):
+            restore_stock = restore_stock_raw
+        else:
+            restore_stock = str(restore_stock_raw).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
+
         items_data = request.data.get('items', [])
+        if isinstance(items_data, list):
+            normalized_items = []
+            for row in items_data:
+                if isinstance(row, dict):
+                    normalized_items.append({
+                        'sale_item_id': row.get('sale_item_id', row.get('item_id')),
+                        'quantity': row.get('quantity'),
+                    })
+                else:
+                    normalized_items.append(row)
+            items_data = normalized_items
 
         if not items_data:
             return Response({"detail": "items list is required."}, status=status.HTTP_400_BAD_REQUEST)

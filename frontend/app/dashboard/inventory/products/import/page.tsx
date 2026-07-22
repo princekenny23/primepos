@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
@@ -37,7 +37,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { productService } from "@/lib/services/productService"
-import { Archive, ArrowLeft, CheckCircle2, Download, Plus, Upload, XCircle } from "lucide-react"
+import { Archive, ArrowLeft, CheckCircle2, Download, Pencil, Plus, Upload, XCircle } from "lucide-react"
 import * as XLSX from "xlsx"
 
 type BatchStatus = {
@@ -106,6 +106,7 @@ type RejectedTableRow = {
   sku: string
   barcode: string
   reason: string
+  rawData?: Record<string, any>
 }
 
 type ImportedProductRow = {
@@ -127,6 +128,17 @@ type ImportedProductRow = {
 type ProductDetailRow = ImportedProductRow & {
   status: "Pending" | "Invalid" | "Ready" | "Imported" | "Failed"
   issue: string
+}
+
+type EditImportRowDraft = {
+  rowNumber: number
+  productName: string
+  sku: string
+  barcode: string
+  category: string
+  retailPrice: string
+  costPrice: string
+  stock: string
 }
 
 type ImportHistoryRow = {
@@ -294,6 +306,24 @@ const cleanBatchValue = (value: string) => {
   return normalized === "-" ? "" : normalized
 }
 
+const mapBatchRowsToImportedRows = (rows: ImportBatchRow[]): ImportedProductRow[] => {
+  return rows.map((row) => ({
+    rowNumber: row.row_number,
+    productName: cleanBatchValue(row.product_name),
+    sku: cleanBatchValue(row.sku),
+    barcode: cleanBatchValue(row.barcode),
+    category: cleanBatchValue(row.category),
+    retailPrice: cleanBatchValue(row.price),
+    wholesalePrice: "",
+    costPrice: cleanBatchValue(row.cost),
+    stock: cleanBatchValue(row.stock),
+    lowStockThreshold: "",
+    batchExpiryDate: "",
+    description: "",
+    isActive: "yes",
+  }))
+}
+
 function parseImportRows(file: File): Promise<ImportedProductRow[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -386,11 +416,12 @@ function ProductsImportPageContent() {
 
   const defaultOutletId = String(tenantOutlet?.id || currentOutlet?.id || "")
   const importMode = searchParams?.get('mode') === 'sync' ? 'inventory_sync' : 'products'
+  const requestedBatchId = String(searchParams?.get('batchId') || "")
   const isSyncMode = importMode === 'inventory_sync'
   const pageTitle = isSyncMode ? "Product & Inventory Sync" : "Import Products"
   const pageDescription = isSyncMode
     ? "Preview, reconcile, and apply product data with inventory adjustments and audit history."
-    : "Preview, approve, and safely apply product imports with full rejection visibility."
+    : "Preview, approve, and safely apply product imports with full rejection visibility. New products are added to your existing catalog."
   const uploadTabLabel = isSyncMode ? "Upload & Preview Sync" : "Upload & Preview"
   const summaryTabLabel = isSyncMode ? "Sync Summary" : "Import Summary"
   const historyTabLabel = isSyncMode ? "Processes" : "Import History"
@@ -433,6 +464,18 @@ function ProductsImportPageContent() {
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createdRowNumbers, setCreatedRowNumbers] = useState<Set<number>>(new Set())
+  const [showEditRowDialog, setShowEditRowDialog] = useState(false)
+  const [editRowSubmitting, setEditRowSubmitting] = useState(false)
+  const [editRowDraft, setEditRowDraft] = useState<EditImportRowDraft>({
+    rowNumber: 0,
+    productName: "",
+    sku: "",
+    barcode: "",
+    category: "",
+    retailPrice: "",
+    costPrice: "",
+    stock: "",
+  })
   const [createDraft, setCreateDraft] = useState<CreateProductDraft>({
     rowNumber: 0,
     productName: "",
@@ -447,6 +490,7 @@ function ProductsImportPageContent() {
     description: "",
     isActive: true,
   })
+  const lastRestoredBatchRef = useRef<string>("")
 
   const syncPhaseIndex = useMemo(() => {
     if (!isSyncMode) return 0
@@ -586,6 +630,7 @@ function ProductsImportPageContent() {
       sku: getRawValue(row.raw_data, ["sku", "code", "product_code"]) || "-",
       barcode: getRawValue(row.raw_data, ["barcode", "bar_code"]) || "-",
       reason: row.errors.join(", "),
+      rawData: row.raw_data,
     }))
 
     const applyRows: RejectedTableRow[] = applyErrors.map((row) => ({
@@ -596,6 +641,7 @@ function ProductsImportPageContent() {
       sku: getRawValue(row.raw_data, ["sku", "code", "product_code"]) || "-",
       barcode: getRawValue(row.raw_data, ["barcode", "bar_code"]) || "-",
       reason: `${row.message}${row.error_code ? ` (${row.error_code})` : ""}`,
+      rawData: row.raw_data,
     }))
 
     return [...previewRows, ...applyRows]
@@ -791,6 +837,7 @@ function ProductsImportPageContent() {
     } while (currentPage <= totalPages)
 
     setBatchRows(collectedRows)
+    return collectedRows
   }, [importMode, selectedSyncStrategy])
 
   const loadMissingProducts = useCallback(async (targetBatchId: string) => {
@@ -836,11 +883,14 @@ function ProductsImportPageContent() {
       }
       setPreviewErrors(errorsPayload.preview_errors || [])
       setApplyErrors(errorsPayload.apply_errors || [])
+      const loadedRows = await loadBatchRows(targetBatchId)
+      if (loadedRows.length > 0) {
+        setImportRows(mapBatchRowsToImportedRows(loadedRows))
+      }
+
       if (isSyncMode) {
-        await loadBatchRows(targetBatchId)
         await loadMissingProducts(targetBatchId)
       } else {
-        setBatchRows([])
         setMissingProducts([])
       }
     } catch (error: any) {
@@ -1007,6 +1057,20 @@ function ProductsImportPageContent() {
   }, [activeTab, loadImportHistory])
 
   useEffect(() => {
+    if (!requestedBatchId) return
+    if (lastRestoredBatchRef.current === requestedBatchId) return
+
+    const restoreBatchFromQuery = async () => {
+      lastRestoredBatchRef.current = requestedBatchId
+      setBatchId(requestedBatchId)
+      await refreshBatch(requestedBatchId)
+      setActiveTab("import-summary")
+    }
+
+    void restoreBatchFromQuery()
+  }, [requestedBatchId, refreshBatch])
+
+  useEffect(() => {
     if (!isSyncMode) return
     loadCategories()
   }, [isSyncMode, loadCategories])
@@ -1108,10 +1172,15 @@ function ProductsImportPageContent() {
 
     setLoadingAction("apply")
     try {
+      if (!batchStatus?.is_approved) {
+        await productService.approveImport(batchId)
+      }
+
+      const applyKey = `apply-${importMode}-${batchId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
       await productService.applyImportWithOptions(batchId, {
         chunkSize,
         continueOnError,
-        idempotencyKey: `apply-${importMode}-${batchId}`,
+        idempotencyKey: applyKey,
         mode: importMode,
         syncStrategy: selectedSyncStrategy,
       })
@@ -1164,6 +1233,112 @@ function ProductsImportPageContent() {
       })
     } finally {
       setLoadingAction("")
+    }
+  }
+
+  const handleDownloadBatchSource = async (targetBatchId?: string) => {
+    const batchToDownload = targetBatchId || batchId
+    if (!batchToDownload) {
+      toast({
+        title: "Batch Required",
+        description: "Select an import batch before downloading source file.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const source = await productService.downloadImportSource(batchToDownload, {
+        mode: importMode,
+        syncStrategy: selectedSyncStrategy,
+      })
+      const link = document.createElement("a")
+      link.href = source.url
+      link.download = source.filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(source.url)
+    } catch (error: any) {
+      toast({
+        title: "Download Failed",
+        description: error?.message || "Unable to download this batch source file.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const openEditRowDialog = (row: ProductDetailRow) => {
+    setEditRowDraft({
+      rowNumber: row.rowNumber,
+      productName: row.productName,
+      sku: row.sku,
+      barcode: row.barcode,
+      category: row.category,
+      retailPrice: row.retailPrice,
+      costPrice: row.costPrice,
+      stock: row.stock,
+    })
+    setShowEditRowDialog(true)
+  }
+
+  const openRejectedRowEditDialog = (row: RejectedTableRow) => {
+    openEditRowDialog({
+      rowNumber: row.rowNumber,
+      productName: getRawValue(row.rawData, ["name", "product_name", "product", "item_name"]) || row.productName,
+      sku: getRawValue(row.rawData, ["sku", "code", "product_code"]) || row.sku,
+      barcode: getRawValue(row.rawData, ["barcode", "bar_code"]) || row.barcode,
+      category: getRawValue(row.rawData, ["category", "category_name", "product_category"]),
+      retailPrice: getRawValue(row.rawData, ["retail_price", "price", "sale_price"]),
+      wholesalePrice: getRawValue(row.rawData, ["wholesale_price", "wholesale"]),
+      costPrice: getRawValue(row.rawData, ["cost_price", "cost"]),
+      stock: getRawValue(row.rawData, ["stock", "quantity", "opening_stock"]),
+      lowStockThreshold: getRawValue(row.rawData, ["low_stock_threshold", "lowStockThreshold"]) || "0",
+      batchExpiryDate: getRawValue(row.rawData, ["batch_expiry_date", "expiry_date", "expiry"]),
+      description: getRawValue(row.rawData, ["description", "notes"]),
+      isActive: getRawValue(row.rawData, ["is_active", "isActive"]) || "true",
+      status: "Invalid",
+      issue: row.reason,
+    })
+  }
+
+  const saveEditedRow = async () => {
+    if (!batchId || editRowDraft.rowNumber <= 0) return
+
+    setEditRowSubmitting(true)
+    try {
+      await productService.updateImportRow(
+        batchId,
+        editRowDraft.rowNumber,
+        {
+          product_name: editRowDraft.productName,
+          sku: editRowDraft.sku,
+          barcode: editRowDraft.barcode,
+          category: editRowDraft.category,
+          price: editRowDraft.retailPrice,
+          cost: editRowDraft.costPrice,
+          stock: editRowDraft.stock,
+        },
+        {
+          mode: importMode,
+          syncStrategy: selectedSyncStrategy,
+        }
+      )
+
+      await refreshBatch(batchId)
+      setShowEditRowDialog(false)
+      toast({
+        title: "Row Updated",
+        description: `Row ${editRowDraft.rowNumber} was updated. Review summary and continue when ready.`,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Row Update Failed",
+        description: error?.message || "Could not save row changes.",
+        variant: "destructive",
+      })
+    } finally {
+      setEditRowSubmitting(false)
     }
   }
 
@@ -1522,6 +1697,15 @@ function ProductsImportPageContent() {
                   <Button variant="outline" className="border-gray-300" onClick={() => batchId && refreshBatch(batchId)} disabled={!batchId || loadingAction !== ""}>
                     {loadingAction === "refresh" ? "Refreshing..." : (isSyncMode ? "Refresh Process" : "Refresh Status")}
                   </Button>
+                  <Button
+                    variant="outline"
+                    className="border-gray-300"
+                    onClick={() => handleDownloadBatchSource()}
+                    disabled={!batchId || loadingAction !== ""}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download Source File
+                  </Button>
                 </div>
 
                 <div className="space-y-2">
@@ -1550,18 +1734,19 @@ function ProductsImportPageContent() {
                         <TableHead className="w-24">Stock</TableHead>
                         <TableHead className="w-28">Status</TableHead>
                         <TableHead>Mismatch / Error</TableHead>
+                        <TableHead className="w-24 text-right">Action</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {isParsingFile ? (
                         <TableRow>
-                          <TableCell colSpan={10} className="text-center text-sm text-gray-600">
+                          <TableCell colSpan={11} className="text-center text-sm text-gray-600">
                             Reading product rows...
                           </TableCell>
                         </TableRow>
                       ) : detailPageRows.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={10} className="text-center text-sm text-gray-600">
+                          <TableCell colSpan={11} className="text-center text-sm text-gray-600">
                             {detailSearchTerm.trim()
                               ? "No matching products found for your search."
                               : "No products loaded yet. Upload a file to see all rows."}
@@ -1593,6 +1778,18 @@ function ProductsImportPageContent() {
                               </Badge>
                             </TableCell>
                             <TableCell>{row.issue}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => openEditRowDialog(row)}
+                                disabled={!batchId || batchStatus?.status === "applied" || batchStatus?.status === "applying" || loadingAction !== ""}
+                              >
+                                <Pencil className="mr-1 h-3 w-3" />
+                                Edit
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         ))
                       )}
@@ -1664,7 +1861,7 @@ function ProductsImportPageContent() {
                   </Button>
                   <Button
                     onClick={handleApply}
-                    disabled={!batchId || loadingAction !== "" || !batchStatus?.is_approved || batchStatus?.status === "applied"}
+                    disabled={!batchId || loadingAction !== "" || batchStatus?.status === "applied"}
                   >
                     {loadingAction === "apply" ? "Applying..." : (isSyncMode ? "Run Sync" : "Apply Import")}
                   </Button>
@@ -1677,7 +1874,7 @@ function ProductsImportPageContent() {
             <Card>
               <CardHeader>
                 <CardTitle>Rejected Products</CardTitle>
-                <CardDescription>Readable product-level rejections from preview and apply phases.</CardDescription>
+                <CardDescription>Readable product-level rejections from preview and apply phases. Use Edit to fill missing fields, revalidate, and move rows back into the import flow.</CardDescription>
               </CardHeader>
               <CardContent>
                 {rejectedRows.length === 0 ? (
@@ -1693,6 +1890,7 @@ function ProductsImportPageContent() {
                           <TableHead className="w-36">SKU</TableHead>
                           <TableHead className="w-36">Barcode</TableHead>
                           <TableHead>Reason</TableHead>
+                          <TableHead className="w-24 text-right">Action</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1704,6 +1902,18 @@ function ProductsImportPageContent() {
                             <TableCell>{row.sku}</TableCell>
                             <TableCell>{row.barcode}</TableCell>
                             <TableCell>{row.reason}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={() => openRejectedRowEditDialog(row)}
+                                disabled={!batchId || batchStatus?.status === "applied" || batchStatus?.status === "applying" || loadingAction !== ""}
+                              >
+                                <Pencil className="mr-1 h-3 w-3" />
+                                Edit
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -2044,6 +2254,14 @@ function ProductsImportPageContent() {
                                     View Full History
                                   </Link>
                                 </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-gray-300"
+                                  onClick={() => handleDownloadBatchSource(row.batch_id)}
+                                >
+                                  Source
+                                </Button>
                               </div>
                             </TableCell>
                           </TableRow>
@@ -2111,6 +2329,104 @@ function ProductsImportPageContent() {
                 disabled={archivingAllMissing || filteredMissingProducts.length === 0}
               >
                 {archivingAllMissing ? "Archiving..." : "Confirm Archive All"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={showEditRowDialog} onOpenChange={setShowEditRowDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Edit Import Row</DialogTitle>
+              <DialogDescription>
+                Update row {editRowDraft.rowNumber} and save changes to refresh validation, summary, and apply readiness.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
+                <Label>Product Name</Label>
+                <input
+                  type="text"
+                  value={editRowDraft.productName}
+                  onChange={(e) => setEditRowDraft((prev) => ({ ...prev, productName: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>SKU</Label>
+                <input
+                  type="text"
+                  value={editRowDraft.sku}
+                  onChange={(e) => setEditRowDraft((prev) => ({ ...prev, sku: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Barcode</Label>
+                <input
+                  type="text"
+                  value={editRowDraft.barcode}
+                  onChange={(e) => setEditRowDraft((prev) => ({ ...prev, barcode: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <input
+                  type="text"
+                  value={editRowDraft.category}
+                  onChange={(e) => setEditRowDraft((prev) => ({ ...prev, category: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Retail Price</Label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editRowDraft.retailPrice}
+                  onChange={(e) => setEditRowDraft((prev) => ({ ...prev, retailPrice: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Cost Price</Label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editRowDraft.costPrice}
+                  onChange={(e) => setEditRowDraft((prev) => ({ ...prev, costPrice: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Stock</Label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={editRowDraft.stock}
+                  onChange={(e) => setEditRowDraft((prev) => ({ ...prev, stock: e.target.value }))}
+                  className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowEditRowDialog(false)} disabled={editRowSubmitting}>
+                Cancel
+              </Button>
+              <Button onClick={saveEditedRow} disabled={editRowSubmitting}>
+                {editRowSubmitting ? "Saving..." : "Save Row Changes"}
               </Button>
             </DialogFooter>
           </DialogContent>

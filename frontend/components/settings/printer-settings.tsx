@@ -16,11 +16,7 @@ import { useToast } from "@/components/ui/use-toast"
 const PA_HEARTBEAT_WINDOW_MS = 90_000
 const QZ_TRAY_ENABLED_STORAGE_KEY = "primepos.qzTrayEnabled"
 const QZ_TRAY_CONNECT_STATUS_STORAGE_KEY = "primepos.qzTrayConnectStatus"
-const QZ_TRAY_CDN_URLS = [
-  "https://cdn.jsdelivr.net/npm/qz-tray@2.0.0/qz-tray.js",
-  "https://unpkg.com/qz-tray@2.0.0/qz-tray.js",
-  "https://cdnjs.cloudflare.com/ajax/libs/qz-tray/2.0.0/qz-tray.js",
-]
+const QZ_TRAY_LOCAL_SCRIPT_PATHS = ["/qz-tray.js", "/vendor/qz-tray.js"]
 
 type WizardStep = 1 | 2 | 3
 
@@ -176,6 +172,18 @@ export function PrinterSettings() {
       return true
     }
 
+    // Prefer bundled module first so integrations work without external/CDN scripts.
+    try {
+      const qzModule: any = await import("qz-tray")
+      const bundledQz = qzModule?.default || qzModule?.qz || qzModule
+      if (bundledQz && typeof bundledQz.websocket?.connect === "function") {
+        ;(window as Window & typeof globalThis & { qz?: any }).qz = bundledQz
+        return true
+      }
+    } catch {
+      // Fall through to same-origin script fallback below.
+    }
+
     if (typeof document === "undefined") return false
 
     const existingScript = document.querySelector('script[data-primepos-qz="true"]') as HTMLScriptElement | null
@@ -187,8 +195,9 @@ export function PrinterSettings() {
       return Boolean((window as Window & typeof globalThis & { qz?: any }).qz)
     }
 
-    for (const url of QZ_TRAY_CDN_URLS) {
-      const loaded = await loadQzTrayScript(url)
+    // Load same-origin script only. External CDNs are blocked in strict CORS/CSP environments.
+    for (const path of QZ_TRAY_LOCAL_SCRIPT_PATHS) {
+      const loaded = await loadQzTrayScript(path)
       if (!loaded) continue
 
       const candidate = (window as Window & typeof globalThis & { qz?: any }).qz
@@ -221,7 +230,7 @@ export function PrinterSettings() {
       setQzStatus("connecting")
       const ready = await ensureQzTrayReady()
       if (!ready) {
-        throw new Error("QZ Tray is not available in this browser session.")
+        throw new Error("QZ Tray is not available. Ensure dependency is installed or place qz-tray.js in frontend/public/qz-tray.js, then refresh.")
       }
 
       const qz = (window as Window & typeof globalThis & { qz?: any }).qz

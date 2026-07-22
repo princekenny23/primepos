@@ -30,6 +30,7 @@ type RefundStep = "items" | "restock" | "confirm"
 
 type RefundItem = {
   id: string
+  saleItemId: string
   name: string
   quantity: number
   price: number
@@ -128,6 +129,7 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
       const rawItems = (sale as any)._raw?.items || sale.items || []
       const items: RefundItem[] = rawItems.map((item: any, index: number) => ({
         id: String(item.id || item.sale_item_id || item.product_id || `item-${index}`),
+        saleItemId: String(item.id || item.sale_item_id || ""),
         name: item.product_name || item.productName || item.name || item.product?.name || "Unknown Product",
         quantity: Number(item.quantity || 0),
         price: Number(item.price || 0),
@@ -188,10 +190,16 @@ export function RefundReturnModal({ open, onOpenChange, initialReceiptNumber }: 
 
     setIsProcessing(true)
     try {
+      const invalidSelections = saleItems.filter((item) => selectedItems[item.id] && !item.saleItemId)
+      if (invalidSelections.length > 0) {
+        throw new Error("Some selected items are missing sale line ids. Reload the receipt and try again.")
+      }
+
       const itemsPayload = saleItems
         .filter((item) => selectedItems[item.id])
         .map((item) => ({
           item_id: item.id,
+          sale_item_id: item.saleItemId,
           quantity: selectedItems[item.id],
         }))
 

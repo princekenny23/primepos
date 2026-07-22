@@ -167,10 +167,19 @@ function transformProductToBackend(frontendProduct: Partial<Product>): any {
     description: frontendProduct.description || "",
     barcode: frontendProduct.barcode || "",
     retail_price: retailPrice.toString(),
-    stock: frontendProduct.stock || 0,
     low_stock_threshold: (frontendProduct as any).low_stock_threshold !== undefined ? (frontendProduct as any).low_stock_threshold : (frontendProduct.lowStockThreshold || 0),
     unit: frontendProduct.unit || "pcs", // Use provided unit or default to "pcs"
     is_active: frontendProduct.isActive !== undefined ? frontendProduct.isActive : true,
+  }
+
+  // Only send stock when caller explicitly provides it.
+  if (frontendProduct.stock !== undefined && frontendProduct.stock !== null) {
+    const stock = Number(frontendProduct.stock)
+    data.stock = Number.isFinite(stock) && stock >= 0 ? Math.floor(stock) : 0
+  }
+
+  if ((frontendProduct as any).stock_update_intent !== undefined) {
+    data.stock_update_intent = Boolean((frontendProduct as any).stock_update_intent)
   }
   
   // Only include SKU if provided (SKU is optional)
@@ -384,7 +393,7 @@ export const productService = {
     const requestBody = buildProductRequestBody(data)
     console.log("Updating product via real API:", { id, endpoint: apiEndpoints.products.update(id) })
     try {
-      const response = await api.put<any>(apiEndpoints.products.update(id), requestBody)
+      const response = await api.patch<any>(apiEndpoints.products.update(id), requestBody)
       console.log("Product updated successfully:", response)
       return transformProduct(response)
     } catch (error: any) {
@@ -787,6 +796,9 @@ export const productService = {
           mismatch_error: string
           action?: string
           matched_product_id?: string
+          raw_data?: Record<string, any>
+          normalized_data?: Record<string, any>
+          identity_key?: string
         }>
       }> {
         const search = new URLSearchParams()
@@ -797,6 +809,67 @@ export const productService = {
         if (params?.syncStrategy) search.set('sync_strategy', params.syncStrategy)
 
         return api.get(`${apiEndpoints.imports.productsRows(batchId)}?${search.toString()}`)
+      },
+
+      async updateImportRow(batchId: string, rowNumber: number, payload: {
+        product_name?: string
+        sku?: string
+        barcode?: string
+        category?: string
+        price?: string
+        cost?: string
+        stock?: string
+        low_stock_threshold?: string
+        description?: string
+        is_active?: string
+      }, params?: {
+        mode?: string
+        syncStrategy?: string
+      }): Promise<{
+        batch_id: string
+        row_number: number
+        status: string
+        action: string
+        errors: string[]
+        warnings: string[]
+        normalized_data: Record<string, any>
+        preview_summary: Record<string, any>
+      }> {
+        const search = new URLSearchParams()
+        if (params?.mode) search.set('mode', params.mode)
+        if (params?.syncStrategy) search.set('sync_strategy', params.syncStrategy)
+        const query = search.toString() ? `?${search.toString()}` : ''
+        return api.patch(`${apiEndpoints.imports.productsRowUpdate(batchId, rowNumber)}${query}`, payload)
+      },
+
+      async downloadImportSource(batchId: string, params?: {
+        mode?: string
+        syncStrategy?: string
+      }): Promise<{ url: string; filename: string }> {
+        const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
+        const headers: HeadersInit = {}
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+        }
+
+        const search = new URLSearchParams()
+        if (params?.mode) search.set('mode', params.mode)
+        if (params?.syncStrategy) search.set('sync_strategy', params.syncStrategy)
+
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+        const url = `${API_BASE_URL}${apiEndpoints.imports.productsSource(batchId)}${search.toString() ? `?${search.toString()}` : ''}`
+        const response = await fetch(url, { method: 'GET', headers })
+
+        if (!response.ok) {
+          throw new Error(`Source download failed (${response.status})`)
+        }
+
+        const disposition = response.headers.get('content-disposition') || ''
+        const fileNameMatch = disposition.match(/filename="?([^";]+)"?/i)
+        const filename = fileNameMatch?.[1] || `import-source-${batchId}.csv`
+        const blob = await response.blob()
+        const downloadUrl = window.URL.createObjectURL(blob)
+        return { url: downloadUrl, filename }
       },
 
       async getImportMissingProducts(batchId: string, params?: {

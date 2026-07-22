@@ -47,6 +47,7 @@ export default function POSLandingPage() {
   const [activeShifts, setActiveShifts] = useState<Shift[]>([])
   const [selectedShiftId, setSelectedShiftId] = useState<string>("")
   const [isSelectingShift, setIsSelectingShift] = useState(false)
+  const [hasAutoOpenedSingleShift, setHasAutoOpenedSingleShift] = useState(false)
 
   useEffect(() => {
     if (!currentBusiness) {
@@ -128,6 +129,60 @@ export default function POSLandingPage() {
   useEffect(() => {
     loadRegisterStatuses()
   }, [activeShift, currentBusiness, currentOutlet, router, loadRegisterStatuses])
+
+  useEffect(() => {
+    if (isLoading || isSelectingShift || hasAutoOpenedSingleShift || !currentBusiness) {
+      return
+    }
+
+    const shiftsForCurrentOutlet = currentOutlet
+      ? activeShifts.filter((shift) => String(shift.outletId) === String(currentOutlet.id))
+      : []
+
+    const shouldAutoOpenCurrentOutlet = shiftsForCurrentOutlet.length === 1
+    const shouldAutoOpenSingleOverall = !currentOutlet && activeShifts.length === 1
+
+    if (!shouldAutoOpenCurrentOutlet && !shouldAutoOpenSingleOverall) {
+      return
+    }
+
+    const targetShift = shouldAutoOpenCurrentOutlet
+      ? shiftsForCurrentOutlet[0]
+      : activeShifts[0]
+
+    const shiftOutlet = outlets.find((o) => String(o.id) === String(targetShift.outletId))
+    const contextShift = {
+      id: targetShift.id,
+      outletId: targetShift.outletId,
+      tillId: targetShift.tillId,
+      userId: targetShift.userId,
+      operatingDate: targetShift.operatingDate,
+      openingCashBalance: targetShift.openingCashBalance,
+      floatingCash: targetShift.floatingCash,
+      notes: targetShift.notes,
+      status: targetShift.status,
+      startTime: targetShift.startTime,
+      endTime: targetShift.endTime,
+    }
+
+    setHasAutoOpenedSingleShift(true)
+    setActiveShift(contextShift)
+    if (shiftOutlet) {
+      setCurrentOutlet(shiftOutlet.id)
+    }
+    router.push(getOutletPOSRoute(shiftOutlet || currentOutlet, currentBusiness))
+  }, [
+    activeShifts,
+    currentBusiness,
+    currentOutlet,
+    hasAutoOpenedSingleShift,
+    isLoading,
+    isSelectingShift,
+    outlets,
+    router,
+    setActiveShift,
+    setCurrentOutlet,
+  ])
 
   const handleSelectShift = async () => {
     if (!selectedShiftId) return

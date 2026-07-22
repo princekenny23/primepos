@@ -219,6 +219,11 @@ export default function ImportHistoryDetailPage() {
               <Download className="mr-2 h-4 w-4" />
               {isExporting ? "Exporting..." : "Export CSV"}
             </Button>
+            <Button asChild variant="default">
+              <Link href={isSyncMode ? `/dashboard/inventory/products/import?mode=sync&batchId=${batchId}` : `/dashboard/inventory/products/import?batchId=${batchId}`}>
+                Open In Import Workspace
+              </Link>
+            </Button>
             <Button asChild variant="outline" className="border-gray-300">
               <Link href={isSyncMode ? "/dashboard/inventory/products/import?mode=sync" : "/dashboard/inventory/products/import"}>
                 <ArrowLeft className="mr-2 h-4 w-4" />

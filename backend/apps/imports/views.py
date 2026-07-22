@@ -8,6 +8,7 @@ import pandas as pd
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
 from django.db.models import Q
+from django.http import FileResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -159,6 +160,199 @@ class BaseImportView(APIView):
             return None, [f'Value must be at least {min_value}']
 
         return decimal_value, []
+
+    def _stringify_decimal(self, value):
+        if value is None:
+            return ''
+        return str(value)
+
+    def _coerce_bool_text(self, value, default='yes'):
+        if value is None:
+            return default
+        text = str(value).strip().lower()
+        if text in ('', '1', 'true', 'yes', 'y', 'active'):
+            return 'yes'
+        if text in ('0', 'false', 'no', 'n', 'inactive'):
+            return 'no'
+        return default
+
+    def _recompute_batch_preview_totals(self, batch: ImportBatch):
+        total_rows = batch.rows.count()
+        invalid_rows = batch.rows.filter(status=ImportRowResult.STATUS_INVALID).count()
+        warning_rows = batch.rows.filter(status=ImportRowResult.STATUS_WARNING).count()
+        valid_rows = max(0, total_rows - invalid_rows)
+
+        summary = batch.preview_summary if isinstance(batch.preview_summary, dict) else {}
+        summary.update({
+            'total_rows': total_rows,
+            'valid_rows': valid_rows,
+            'invalid_rows': invalid_rows,
+            'warning_rows': warning_rows,
+        })
+
+        batch.total_rows = total_rows
+        batch.valid_rows = valid_rows
+        batch.invalid_rows = invalid_rows
+        batch.warning_rows = warning_rows
+        batch.preview_summary = summary
+
+    def _build_sync_row_from_payload(self, payload: Dict[str, Any], *, tenant, outlet):
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        name = str(payload.get('name') or '').strip()
+        sku = str(payload.get('sku') or '').strip()
+        barcode = str(payload.get('barcode') or '').strip()
+        category_name = str(payload.get('category') or '').strip()
+        description = str(payload.get('description') or '').strip()
+        batch_expiry_date = str(payload.get('batch_expiry_date') or '').strip()
+
+        if not name and not sku and not barcode:
+            errors.append('Provide Product Name, SKU, or Barcode')
+
+        retail_price, retail_errors = self._parse_optional_decimal(
+            payload.get('retail_price'), min_value='0.01', zero_is_blank=True
+        )
+        wholesale_price, wholesale_errors = self._parse_optional_decimal(
+            payload.get('wholesale_price'), min_value='0.01', zero_is_blank=True
+        )
+        cost_price, cost_errors = self._parse_optional_decimal(
+            payload.get('cost_price'), min_value='0', zero_is_blank=True
+        )
+        errors.extend(retail_errors)
+        errors.extend(wholesale_errors)
+        errors.extend(cost_errors)
+
+        stock_text = str(payload.get('stock') or '').strip()
+        stock_value = ''
+        if stock_text != '':
+            try:
+                stock_int = int(float(stock_text))
+                if stock_int < 0:
+                    errors.append('Counted quantity must be 0 or greater')
+                else:
+                    stock_value = str(stock_int)
+            except (TypeError, ValueError):
+                errors.append(f'Invalid counted quantity: {stock_text}')
+
+        low_stock_text = str(payload.get('low_stock_threshold') or '').strip()
+        low_stock_value = '0'
+        if low_stock_text != '':
+            try:
+                low_stock_value = str(max(0, int(float(low_stock_text))))
+            except (TypeError, ValueError):
+                errors.append(f'Invalid low stock threshold: {low_stock_text}')
+
+        is_active = self._coerce_bool_text(payload.get('is_active'), default='yes')
+
+        queryset = Product.objects.filter(tenant=tenant, outlet=outlet)
+        existing = None
+        if not errors:
+            if sku:
+                existing = queryset.filter(sku__iexact=sku).first()
+            if not existing and barcode:
+                existing = queryset.filter(barcode__iexact=barcode).first()
+            if not existing and name:
+                existing = queryset.filter(name__iexact=name).first()
+
+        if not existing and retail_price is None:
+            errors.append('Retail price is required for new products')
+
+        identity = self._build_identity(name or sku or barcode, sku, barcode)
+        action = ImportRowResult.ACTION_CREATE if not existing else ImportRowResult.ACTION_UPDATE
+        if errors:
+            status_value = ImportRowResult.STATUS_INVALID
+            action = ImportRowResult.ACTION_SKIP
+        elif warnings:
+            status_value = ImportRowResult.STATUS_WARNING
+        else:
+            status_value = ImportRowResult.STATUS_VALID
+
+        normalized_data = {
+            'name': name,
+            'sku': sku,
+            'barcode': barcode,
+            'category': category_name,
+            'retail_price': self._stringify_decimal(retail_price),
+            'wholesale_price': self._stringify_decimal(wholesale_price),
+            'cost_price': self._stringify_decimal(cost_price),
+            'stock': stock_value,
+            'low_stock_threshold': low_stock_value,
+            'batch_expiry_date': batch_expiry_date,
+            'description': description,
+            'is_active': is_active,
+            'matched_product_id': str(existing.id) if existing else '',
+        }
+
+        return {
+            'identity_key': identity,
+            'status': status_value,
+            'action': action,
+            'errors': errors,
+            'warnings': warnings,
+            'normalized_data': normalized_data,
+        }
+
+    def _build_upsert_row_from_payload(self, payload: Dict[str, Any], *, tenant, outlet):
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        name = str(payload.get('name') or '').strip()
+        sku = str(payload.get('sku') or '').strip()
+        barcode = str(payload.get('barcode') or '').strip()
+
+        if not name:
+            errors.append('Product name is required')
+
+        retail_price_text = str(payload.get('retail_price') or '').strip()
+        retail_price = None
+        if retail_price_text != '':
+            try:
+                retail_price = float(retail_price_text)
+                if retail_price < 0.01:
+                    errors.append('Price must be >= 0.01')
+            except (TypeError, ValueError):
+                errors.append(f'Invalid price: {retail_price_text}')
+        else:
+            errors.append('Price is required')
+
+        identity = self._build_identity(name or sku or barcode, sku, barcode) if (name or sku or barcode) else ''
+        action = ImportRowResult.ACTION_CREATE
+        if not errors and name:
+            existing = Product.objects.filter(tenant=tenant, outlet=outlet)
+            if sku:
+                existing = existing.filter(sku__iexact=sku)
+            elif barcode:
+                existing = existing.filter(barcode__iexact=barcode)
+            else:
+                existing = existing.filter(name__iexact=name)
+
+            if existing.exists():
+                action = ImportRowResult.ACTION_UPDATE
+
+        if errors:
+            status_value = ImportRowResult.STATUS_INVALID
+            action = ImportRowResult.ACTION_SKIP
+        elif warnings:
+            status_value = ImportRowResult.STATUS_WARNING
+        else:
+            status_value = ImportRowResult.STATUS_VALID
+
+        normalized_data = {
+            'name': name,
+            'sku': sku,
+            'barcode': barcode,
+            'retail_price': str(retail_price) if retail_price is not None else '',
+        }
+
+        return {
+            'identity_key': identity,
+            'status': status_value,
+            'action': action,
+            'errors': errors,
+            'warnings': warnings,
+            'normalized_data': normalized_data,
+        }
 
     def _preview_sync_rows(self, df: pd.DataFrame, column_mapping: Dict[str, str], tenant, outlet) -> Dict[str, Any]:
         name_col = self._pick_first_column(column_mapping, 'product_name', 'name', 'product', 'item_name')
@@ -752,6 +946,7 @@ class ProductImportPreviewView(BaseImportView):
                     sync_mode=batch_sync_mode,
                     status=ImportBatch.STATUS_PREVIEW_READY,
                     source_filename=uploaded_file.name,
+                    source_file=uploaded_file,
                     idempotency_key=idempotency_key,
                     total_rows=preview_data['summary']['total_rows'],
                     valid_rows=preview_data['summary']['valid_rows'],
@@ -1255,6 +1450,9 @@ class ProductImportRowsView(BaseImportView):
                 'mismatch_error': mismatch,
                 'action': row.action,
                 'matched_product_id': normalized_data.get('matched_product_id') or '',
+                'raw_data': raw_data,
+                'normalized_data': normalized_data,
+                'identity_key': row.identity_key,
             }
 
             if search:
@@ -1406,6 +1604,154 @@ class ProductImportMissingProductsView(BaseImportView):
         })
 
 
+class ProductImportRowUpdateView(BaseImportView):
+    def patch(self, request, batch_id, row_number):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sync_mode = self._resolve_sync_mode(request)
+
+        try:
+            batch = ImportBatch.objects.select_related('outlet').get(
+                id=batch_id,
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_PRODUCTS,
+            )
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sync_mode and batch.sync_mode != sync_mode:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if batch.status == ImportBatch.STATUS_APPLYING:
+            return Response({'detail': 'Cannot edit rows while apply is running.'}, status=status.HTTP_409_CONFLICT)
+        if batch.status == ImportBatch.STATUS_APPLIED:
+            return Response({'detail': 'Cannot edit rows after apply is completed.'}, status=status.HTTP_409_CONFLICT)
+
+        try:
+            row = ImportRowResult.objects.get(batch=batch, row_number=row_number)
+        except ImportRowResult.DoesNotExist:
+            return Response({'detail': 'Import row not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        payload = request.data if isinstance(request.data, dict) else {}
+        normalized = row.normalized_data if isinstance(row.normalized_data, dict) else {}
+        incoming = {
+            'name': payload.get('product_name', normalized.get('name', '')),
+            'sku': payload.get('sku', normalized.get('sku', '')),
+            'barcode': payload.get('barcode', normalized.get('barcode', '')),
+            'category': payload.get('category', normalized.get('category', '')),
+            'retail_price': payload.get('price', normalized.get('retail_price', '')),
+            'wholesale_price': payload.get('wholesale_price', normalized.get('wholesale_price', '')),
+            'cost_price': payload.get('cost', normalized.get('cost_price', '')),
+            'stock': payload.get('stock', normalized.get('stock', '')),
+            'low_stock_threshold': payload.get('low_stock_threshold', normalized.get('low_stock_threshold', '0')),
+            'batch_expiry_date': payload.get('batch_expiry_date', normalized.get('batch_expiry_date', '')),
+            'description': payload.get('description', normalized.get('description', '')),
+            'is_active': payload.get('is_active', normalized.get('is_active', 'yes')),
+        }
+
+        if batch.sync_mode == ImportBatch.MODE_INVENTORY_SYNC:
+            computed = self._build_sync_row_from_payload(incoming, tenant=tenant, outlet=batch.outlet)
+            normalized_out = computed['normalized_data']
+        else:
+            computed = self._build_upsert_row_from_payload(incoming, tenant=tenant, outlet=batch.outlet)
+            normalized_out = {
+                **computed['normalized_data'],
+                'category': str(incoming.get('category') or '').strip(),
+                'cost_price': str(incoming.get('cost_price') or '').strip(),
+                'stock': str(incoming.get('stock') or '').strip(),
+                'low_stock_threshold': str(incoming.get('low_stock_threshold') or '').strip(),
+                'description': str(incoming.get('description') or '').strip(),
+                'is_active': self._coerce_bool_text(incoming.get('is_active'), default='yes'),
+            }
+
+        row.status = computed['status']
+        row.action = computed['action']
+        row.identity_key = computed['identity_key']
+        row.errors = computed['errors']
+        row.warnings = computed['warnings']
+        row.normalized_data = normalized_out
+        row.raw_data = {
+            'Product Name': normalized_out.get('name', ''),
+            'SKU': normalized_out.get('sku', ''),
+            'Barcode': normalized_out.get('barcode', ''),
+            'Category': normalized_out.get('category', ''),
+            'Retail Price': normalized_out.get('retail_price', ''),
+            'Cost Price': normalized_out.get('cost_price', ''),
+            'Initial Stock Qty': normalized_out.get('stock', ''),
+            'Low Stock Threshold': normalized_out.get('low_stock_threshold', ''),
+            'Description': normalized_out.get('description', ''),
+            'Is Active': normalized_out.get('is_active', 'yes'),
+        }
+        row.save(update_fields=['status', 'action', 'identity_key', 'errors', 'warnings', 'normalized_data', 'raw_data'])
+
+        with transaction.atomic():
+            batch.apply_errors.all().delete()
+            if batch.status == ImportBatch.STATUS_FAILED:
+                batch.status = ImportBatch.STATUS_PREVIEW_READY
+            batch.is_approved = False
+            batch.approved_by = None
+            batch.approved_at = None
+            batch.apply_summary = {}
+            batch.applied_rows = 0
+            batch.applied_at = None
+            self._recompute_batch_preview_totals(batch)
+            batch.save(update_fields=[
+                'status', 'is_approved', 'approved_by', 'approved_at',
+                'apply_summary', 'applied_rows', 'applied_at',
+                'total_rows', 'valid_rows', 'invalid_rows', 'warning_rows',
+                'preview_summary', 'updated_at',
+            ])
+            ImportAuditEvent.objects.create(
+                batch=batch,
+                event_type='row_updated',
+                message=f'Row {row.row_number} updated in staged import batch.',
+                metadata={
+                    'row_number': row.row_number,
+                    'status': row.status,
+                    'action': row.action,
+                    'errors': row.errors,
+                    'warnings': row.warnings,
+                },
+                created_by=request.user,
+            )
+
+        return Response({
+            'batch_id': str(batch.id),
+            'row_number': row.row_number,
+            'status': row.status,
+            'action': row.action,
+            'errors': row.errors,
+            'warnings': row.warnings,
+            'normalized_data': row.normalized_data,
+            'preview_summary': batch.preview_summary,
+        })
+
+
+class ProductImportSourceDownloadView(BaseImportView):
+    def get(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sync_mode = self._resolve_sync_mode(request)
+
+        try:
+            batch = ImportBatch.objects.get(id=batch_id, tenant=tenant, entity_type=ImportBatch.ENTITY_PRODUCTS)
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sync_mode and batch.sync_mode != sync_mode:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not batch.source_file:
+            return Response({'detail': 'No source file available for this batch.'}, status=status.HTTP_404_NOT_FOUND)
+
+        response = FileResponse(batch.source_file.open('rb'), as_attachment=True, filename=batch.source_filename)
+        return response
+
+
 class ProductImportApproveView(BaseImportView):
     def post(self, request, batch_id):
         tenant = self._resolve_tenant(request)
@@ -1420,10 +1766,14 @@ class ProductImportApproveView(BaseImportView):
         if batch.status not in [ImportBatch.STATUS_PREVIEW_READY, ImportBatch.STATUS_FAILED]:
             return Response({'detail': f'Batch cannot be approved in current status: {batch.status}'}, status=status.HTTP_409_CONFLICT)
 
+        # Failed batches need to be moved back to preview_ready for a new apply attempt.
+        if batch.status == ImportBatch.STATUS_FAILED:
+            batch.status = ImportBatch.STATUS_PREVIEW_READY
+
         batch.is_approved = True
         batch.approved_by = request.user
         batch.approved_at = timezone.now()
-        batch.save(update_fields=['is_approved', 'approved_by', 'approved_at', 'updated_at'])
+        batch.save(update_fields=['status', 'is_approved', 'approved_by', 'approved_at', 'updated_at'])
 
         ImportAuditEvent.objects.create(
             batch=batch,

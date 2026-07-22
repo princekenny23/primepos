@@ -415,7 +415,7 @@ export const saleService = {
           restock?: boolean
           refund_method?: string
           refund_amount?: number
-          items?: Array<{ item_id: string; quantity: number }>
+          items?: Array<{ item_id: string; sale_item_id?: string; quantity: number }>
           other_payment_method_name?: string
         }
   ): Promise<SaleWithMetadata> {
@@ -427,6 +427,33 @@ export const saleService = {
     const payload = typeof options === "string"
       ? { reason: normalizeReason(options) }
       : { ...(options || {}), reason: normalizeReason(options && typeof options !== "string" ? options.reason : undefined) }
+
+    // Backend contract expects:
+    // - payment_method (not refund_method)
+    // - restore_stock (not restock)
+    // - items[].sale_item_id (not item_id)
+    if (typeof options !== "string" && options) {
+      ;(payload as any).payment_method = options.refund_method || "cash"
+      ;(payload as any).restore_stock = options.restock !== undefined ? Boolean(options.restock) : true
+
+      const normalizedItems = (options.items || []).map((item) => ({
+        sale_item_id: Number(item.sale_item_id || item.item_id),
+        quantity: Number(item.quantity || 0),
+      }))
+
+      const hasInvalidItems = normalizedItems.some(
+        (item) => !Number.isInteger(item.sale_item_id) || item.sale_item_id <= 0 || !Number.isInteger(item.quantity) || item.quantity <= 0
+      )
+      if (hasInvalidItems) {
+        throw new Error("Refund payload invalid: one or more selected sale items are missing a valid sale item id or quantity")
+      }
+
+      ;(payload as any).items = normalizedItems
+      delete (payload as any).refund_method
+      delete (payload as any).restock
+      delete (payload as any).refund_amount
+      delete (payload as any).other_payment_method_name
+    }
 
     const response = await api.post<any>(`${apiEndpoints.sales.get(id)}refund/`, payload)
     return transformSale(response)

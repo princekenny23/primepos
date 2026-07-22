@@ -64,6 +64,7 @@ import {
 import { Label } from "@/components/ui/label"
 
 export default function CustomerManagementPage() {
+  const ITEMS_PER_PAGE = 10
   const { currentBusiness, currentOutlet, outlets } = useBusinessStore()
   const { toast } = useToast()
   const { t } = useI18n()
@@ -88,6 +89,7 @@ export default function CustomerManagementPage() {
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "card" | "mobile" | "bank_transfer" | "other">("cash")
   const [paymentRef, setPaymentRef] = useState("")
   const [paymentNotes, setPaymentNotes] = useState("")
+  const [currentPage, setCurrentPage] = useState(1)
 
   const selectedCreditInvoice = useMemo(
     () => creditInvoices.find((invoice) => String(invoice.id) === selectedCreditSaleId) || null,
@@ -148,6 +150,23 @@ export default function CustomerManagementPage() {
 
     return outletFiltered
   }, [customers, searchTerm, outletFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / ITEMS_PER_PAGE))
+  const currentPageSafe = Math.min(currentPage, totalPages)
+  const paginatedCustomers = useMemo(() => {
+    const start = (currentPageSafe - 1) * ITEMS_PER_PAGE
+    return filteredCustomers.slice(start, start + ITEMS_PER_PAGE)
+  }, [filteredCustomers, currentPageSafe, ITEMS_PER_PAGE])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, outletFilter])
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
 
   const handleDelete = (customerId: string) => {
     setCustomerToDelete(customerId)
@@ -357,7 +376,7 @@ export default function CustomerManagementPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredCustomers.map((customer) => {
+                    paginatedCustomers.map((customer) => {
                       const customerPoints = customer.loyalty_points || 0
                       const lastVisit = customer.last_visit
                       
@@ -493,6 +512,35 @@ export default function CustomerManagementPage() {
                 </TableBody>
               </Table>
             </div>
+            {filteredCustomers.length > 0 && (
+              <div className="flex items-center justify-between pt-4">
+                <p className="text-sm text-muted-foreground">
+                  Showing {(currentPageSafe - 1) * ITEMS_PER_PAGE + 1}
+                  -{Math.min(currentPageSafe * ITEMS_PER_PAGE, filteredCustomers.length)} of {filteredCustomers.length}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                    disabled={currentPageSafe === 1}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    Page {currentPageSafe} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={currentPageSafe === totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </PageLayout>

@@ -86,6 +86,7 @@ const paymentMethods = [
 ]
 
 export default function ExpensesPage() {
+  const ITEMS_PER_PAGE = 10
   const { currentBusiness } = useBusinessStore()
   const { toast } = useToast()
   const { t } = useI18n()
@@ -105,6 +106,7 @@ export default function ExpensesPage() {
   const [expenseToApprove, setExpenseToApprove] = useState<Expense | null>(null)
   const [showApprovalModal, setShowApprovalModal] = useState(false)
   const [approvalAction, setApprovalAction] = useState<"approve" | "reject" | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
 
   const loadExpenses = useCallback(async () => {
     if (!currentBusiness) {
@@ -157,6 +159,23 @@ export default function ExpensesPage() {
     
     return matchesSearch && matchesStatus && matchesDate
   })
+
+  const totalPages = Math.max(1, Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE))
+  const currentPageSafe = Math.min(currentPage, totalPages)
+  const paginatedExpenses = filteredExpenses.slice(
+    (currentPageSafe - 1) * ITEMS_PER_PAGE,
+    (currentPageSafe - 1) * ITEMS_PER_PAGE + ITEMS_PER_PAGE
+  )
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, statusFilter, dateRange.from, dateRange.to])
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
 
   const totalExpenses = filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0)
   const todayExpenses = filteredExpenses
@@ -355,74 +374,103 @@ export default function ExpensesPage() {
                 </Link>
               </div>
             ) : (
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Expense #</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Title</TableHead>
-                      <TableHead>Description</TableHead>
-                      <TableHead>Vendor</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Payment Method</TableHead>
-                      <TableHead>Shift</TableHead>
-                      <TableHead>Created By</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredExpenses.map((expense) => (
-                      <TableRow key={expense.id}>
-                        <TableCell className="font-medium">{expense.expense_number}</TableCell>
-                        <TableCell>{format(new Date(expense.expense_date), "MMM dd, yyyy")}</TableCell>
-                        <TableCell className="font-medium">{expense.title}</TableCell>
-                        <TableCell className="max-w-[200px] truncate">{expense.description}</TableCell>
-                        <TableCell>{expense.vendor || "N/A"}</TableCell>
-                        <TableCell className="font-semibold">
-                          {formatCurrency(expense.amount, currentBusiness)}
-                        </TableCell>
-                        <TableCell className="capitalize">{expense.payment_method.replace("_", " ")}</TableCell>
-                        <TableCell>{expense.shift ? `#${expense.shift} (${expense.shift_status || "-"})` : "-"}</TableCell>
-                        <TableCell>{expense.created_by_name || "System"}</TableCell>
-                        <TableCell>{getStatusBadge(expense.status)}</TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <Menu className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleEdit(expense)}>
-                                <Edit className="h-4 w-4 mr-2" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleApprove(expense)}>
-                                <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
-                                Approve
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleReject(expense)}>
-                                <XCircle className="h-4 w-4 mr-2 text-red-600" />
-                                Reject
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleDelete(expense.id)} className="text-destructive">
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
+              <>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Expense #</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Title</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Vendor</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>Payment Method</TableHead>
+                        <TableHead>Shift</TableHead>
+                        <TableHead>Created By</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedExpenses.map((expense) => (
+                        <TableRow key={expense.id}>
+                          <TableCell className="font-medium">{expense.expense_number}</TableCell>
+                          <TableCell>{format(new Date(expense.expense_date), "MMM dd, yyyy")}</TableCell>
+                          <TableCell className="font-medium">{expense.title}</TableCell>
+                          <TableCell className="max-w-[200px] truncate">{expense.description}</TableCell>
+                          <TableCell>{expense.vendor || "N/A"}</TableCell>
+                          <TableCell className="font-semibold">
+                            {formatCurrency(expense.amount, currentBusiness)}
+                          </TableCell>
+                          <TableCell className="capitalize">{expense.payment_method.replace("_", " ")}</TableCell>
+                          <TableCell>{expense.shift ? `#${expense.shift} (${expense.shift_status || "-"})` : "-"}</TableCell>
+                          <TableCell>{expense.created_by_name || "System"}</TableCell>
+                          <TableCell>{getStatusBadge(expense.status)}</TableCell>
+                          <TableCell className="text-right">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="sm">
+                                  <Menu className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => handleEdit(expense)}>
+                                  <Edit className="h-4 w-4 mr-2" />
+                                  Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => handleApprove(expense)}>
+                                  <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
+                                  Approve
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleReject(expense)}>
+                                  <XCircle className="h-4 w-4 mr-2 text-red-600" />
+                                  Reject
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => handleDelete(expense.id)} className="text-destructive">
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="flex items-center justify-between pt-4">
+                  <p className="text-sm text-muted-foreground">
+                    Showing {(currentPageSafe - 1) * ITEMS_PER_PAGE + 1}
+                    -{Math.min(currentPageSafe * ITEMS_PER_PAGE, filteredExpenses.length)} of {filteredExpenses.length}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                      disabled={currentPageSafe === 1}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      Page {currentPageSafe} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                      disabled={currentPageSafe === totalPages}
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

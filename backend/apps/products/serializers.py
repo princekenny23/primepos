@@ -137,7 +137,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'barcode': {'required': False, 'allow_blank': True},
             'retail_price': {'required': False},  # Can come from units instead
             'wholesale_price': {'required': False, 'allow_null': True},
-            'stock': {'required': False, 'allow_null': True, 'min_value': 0, 'default': 0},
+            'stock': {'required': False, 'allow_null': True, 'min_value': 0},
         }
     
     def get_is_low_stock(self, obj):

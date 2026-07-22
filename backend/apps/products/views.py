@@ -342,11 +342,30 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             return Response(serializer.data, status=status.HTTP_200_OK)
         
         return response
+
+    def _as_bool(self, value):
+        """Parse common truthy representations from JSON/form inputs."""
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        return str(value).strip().lower() in ('1', 'true', 'yes', 'y', 'on')
     
     def perform_update(self, serializer):
         """Handle stock updates when updating a product"""
         # Get the stock value from validated data before saving
         new_stock = serializer.validated_data.get('stock', None)
+        stock_update_intent = self._as_bool(self.request.data.get('stock_update_intent'))
+
+        # Guardrail: stock updates must be explicit to avoid accidental overwrites.
+        if new_stock is not None and not stock_update_intent:
+            serializer.validated_data.pop('stock', None)
+            logger.warning(
+                "Ignored unintended stock update for product %s by user %s (missing stock_update_intent)",
+                getattr(serializer.instance, 'id', 'unknown'),
+                getattr(self.request.user, 'id', 'unknown'),
+            )
+            new_stock = None
         
         # Save the product (this will update Product.stock)
         product = serializer.save()
@@ -1318,11 +1337,11 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                             active_str = str(active_val).strip().lower()
                             is_active = active_str in ('yes', 'true', '1', 'y')
                     
-                    # Prepare product data
+                    # Prepare product data (non-stock fields).
+                    # Stock is handled separately so updates do not overwrite existing quantities.
                     product_data = {
                         'name': name,
                         'retail_price': str(price),  # Use retail_price instead of price
-                        'stock': stock,
                         'unit': unit,
                         'description': description,
                         'low_stock_threshold': low_stock_threshold,
@@ -1392,11 +1411,15 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     # outlet_id and outlet are already set above
                     
                     # Create or update product (outlet-specific)
+                    create_defaults = {
+                        **product_data,
+                        'stock': stock,
+                    }
                     product, product_created = Product.objects.get_or_create(
                         tenant=tenant,
                         outlet=outlet,
                         name=name,
-                        defaults=product_data
+                        defaults=create_defaults
                     )
                     
                     if not product_created:
@@ -1407,12 +1430,21 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         product.save()
                     
                     from apps.inventory.models import LocationStock
-                    LocationStock.objects.update_or_create(
-                        tenant=tenant,
-                        product=product,
-                        outlet=outlet,
-                        defaults={'quantity': max(0, int(product.stock or 0))}
-                    )
+                    if product_created:
+                        LocationStock.objects.update_or_create(
+                            tenant=tenant,
+                            product=product,
+                            outlet=outlet,
+                            defaults={'quantity': max(0, int(stock or 0))}
+                        )
+                    else:
+                        # Ensure a location stock record exists, but do not overwrite existing quantity.
+                        LocationStock.objects.get_or_create(
+                            tenant=tenant,
+                            product=product,
+                            outlet=outlet,
+                            defaults={'quantity': max(0, int(product.stock or 0))}
+                        )
 
                     # Now process variations for this product
                     
