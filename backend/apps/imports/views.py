@@ -29,6 +29,19 @@ class BaseImportView(APIView):
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_inventory', 'allow_inventory_products']
 
+    SYNC_STRATEGY_UPDATE_EXISTING = 'update_existing'
+    SYNC_STRATEGY_CREATE_NEW = 'create_new'
+    SYNC_STRATEGY_STOCK_ONLY = 'stock_only'
+    SYNC_STRATEGY_PRICES_ONLY = 'prices_only'
+    SYNC_STRATEGY_FULL_SYNC = 'full_sync'
+    SYNC_STRATEGY_CHOICES = {
+        SYNC_STRATEGY_UPDATE_EXISTING,
+        SYNC_STRATEGY_CREATE_NEW,
+        SYNC_STRATEGY_STOCK_ONLY,
+        SYNC_STRATEGY_PRICES_ONLY,
+        SYNC_STRATEGY_FULL_SYNC,
+    }
+
     def _resolve_tenant(self, request):
         return getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
 
@@ -103,6 +116,22 @@ class BaseImportView(APIView):
             or request.data.get('mode')
             or ''
         ).strip().lower()
+
+    def _resolve_sync_strategy(self, request, *, default=None) -> str:
+        raw_value = (
+            request.headers.get('X-Sync-Strategy')
+            or request.query_params.get('sync_strategy')
+            or request.data.get('sync_strategy')
+            or default
+            or self.SYNC_STRATEGY_FULL_SYNC
+        )
+        strategy = str(raw_value).strip().lower().replace('-', '_')
+        if strategy not in self.SYNC_STRATEGY_CHOICES:
+            raise ValueError(
+                f"Invalid sync_strategy '{raw_value}'. "
+                f"Allowed values: {', '.join(sorted(self.SYNC_STRATEGY_CHOICES))}."
+            )
+        return strategy
 
     def _pick_first_column(self, column_mapping: Dict[str, str], *keys: str) -> str:
         for key in keys:
@@ -289,7 +318,7 @@ class BaseImportView(APIView):
             }
         }
 
-    def _apply_inventory_sync_batch(self, request, batch: ImportBatch):
+    def _apply_inventory_sync_batch(self, request, batch: ImportBatch, sync_strategy: str):
         valid_rows_qs = batch.rows.filter(status__in=[ImportRowResult.STATUS_VALID, ImportRowResult.STATUS_WARNING]).exclude(action=ImportRowResult.ACTION_SKIP).order_by('row_number')
         valid_rows = list(valid_rows_qs.values('row_number', 'raw_data', 'normalized_data'))
         if not valid_rows:
@@ -305,7 +334,7 @@ class BaseImportView(APIView):
                 batch=batch,
                 event_type='apply_started',
                 message='Inventory sync apply started',
-                metadata={'valid_rows': batch.valid_rows},
+                metadata={'valid_rows': batch.valid_rows, 'sync_strategy': sync_strategy},
                 created_by=request.user,
             )
 
@@ -316,9 +345,35 @@ class BaseImportView(APIView):
         stock_increases = 0
         stock_decreases = 0
         prices_changed = 0
+        skipped_by_strategy = 0
         total_imported = 0
         total_failed = 0
         chunk_reports: List[Dict[str, Any]] = []
+
+        apply_catalog_fields = sync_strategy in {
+            self.SYNC_STRATEGY_FULL_SYNC,
+            self.SYNC_STRATEGY_UPDATE_EXISTING,
+        }
+        apply_price_updates = sync_strategy in {
+            self.SYNC_STRATEGY_FULL_SYNC,
+            self.SYNC_STRATEGY_UPDATE_EXISTING,
+            self.SYNC_STRATEGY_PRICES_ONLY,
+        }
+        apply_stock_updates = sync_strategy in {
+            self.SYNC_STRATEGY_FULL_SYNC,
+            self.SYNC_STRATEGY_UPDATE_EXISTING,
+            self.SYNC_STRATEGY_STOCK_ONLY,
+        }
+        allow_create = sync_strategy in {
+            self.SYNC_STRATEGY_FULL_SYNC,
+            self.SYNC_STRATEGY_CREATE_NEW,
+        }
+        allow_update = sync_strategy in {
+            self.SYNC_STRATEGY_FULL_SYNC,
+            self.SYNC_STRATEGY_UPDATE_EXISTING,
+            self.SYNC_STRATEGY_STOCK_ONLY,
+            self.SYNC_STRATEGY_PRICES_ONLY,
+        }
 
         def _get_decimal(value, default=None):
             if value in (None, ''):
@@ -366,7 +421,13 @@ class BaseImportView(APIView):
                         defaults={'description': ''},
                     )
 
+                product_was_created = False
+
                 if product is None:
+                    if not allow_create:
+                        skipped_by_strategy += 1
+                        continue
+
                     if retail_price is None:
                         raise ValueError('Retail price is required for new products')
 
@@ -383,9 +444,18 @@ class BaseImportView(APIView):
                         low_stock_threshold=low_stock_threshold,
                         description=description,
                         is_active=is_active,
+                        is_archived=False,
+                        archived_at=None,
+                        archived_reason='',
+                        archived_by=None,
                         stock=0,
                     )
                     new_products_created += 1
+                    product_was_created = True
+
+                if product is not None and not product_was_created and not allow_update:
+                    skipped_by_strategy += 1
+                    continue
 
                 original_retail_price = product.retail_price
                 original_cost = product.cost
@@ -394,37 +464,46 @@ class BaseImportView(APIView):
                 original_stock = get_available_stock(product, outlet)
 
                 changed = False
-                if name and name != product.name:
-                    product.name = name
+                if getattr(product, 'is_archived', False):
+                    product.is_archived = False
+                    product.archived_at = None
+                    product.archived_reason = ''
+                    product.archived_by = None
                     changed = True
-                if sku and sku != (product.sku or ''):
-                    product.sku = sku
-                    changed = True
-                if barcode and barcode != (product.barcode or ''):
-                    product.barcode = barcode
-                    changed = True
-                if category and product.category_id != category.id:
-                    product.category = category
-                    changed = True
-                if retail_price is not None and retail_price != product.retail_price:
-                    product.retail_price = retail_price
-                    prices_changed += 1
-                    changed = True
-                if cost_price is not None and cost_price != product.cost:
-                    product.cost = cost_price
-                    changed = True
-                if wholesale_price is not None and wholesale_price != product.wholesale_price:
-                    product.wholesale_price = wholesale_price
-                    changed = True
-                if low_stock_threshold != product.low_stock_threshold:
-                    product.low_stock_threshold = low_stock_threshold
-                    changed = True
-                if description and description != (product.description or ''):
-                    product.description = description
-                    changed = True
-                if product.is_active != is_active:
-                    product.is_active = is_active
-                    changed = True
+                if apply_catalog_fields:
+                    if name and name != product.name:
+                        product.name = name
+                        changed = True
+                    if sku and sku != (product.sku or ''):
+                        product.sku = sku
+                        changed = True
+                    if barcode and barcode != (product.barcode or ''):
+                        product.barcode = barcode
+                        changed = True
+                    if category and product.category_id != category.id:
+                        product.category = category
+                        changed = True
+                    if low_stock_threshold != product.low_stock_threshold:
+                        product.low_stock_threshold = low_stock_threshold
+                        changed = True
+                    if description and description != (product.description or ''):
+                        product.description = description
+                        changed = True
+                    if product.is_active != is_active:
+                        product.is_active = is_active
+                        changed = True
+
+                if apply_price_updates or product_was_created:
+                    if retail_price is not None and retail_price != product.retail_price:
+                        product.retail_price = retail_price
+                        prices_changed += 1
+                        changed = True
+                    if cost_price is not None and cost_price != product.cost:
+                        product.cost = cost_price
+                        changed = True
+                    if wholesale_price is not None and wholesale_price != product.wholesale_price:
+                        product.wholesale_price = wholesale_price
+                        changed = True
                 if batch_expiry_date:
                     # Expiry date is acknowledged from the template, but product-level expiry is optional.
                     # If future batch handling is added here, this value is already available in normalized_data.
@@ -434,7 +513,8 @@ class BaseImportView(APIView):
                     product.save()
                     products_updated += 1
 
-                if target_stock is not None and target_stock != original_stock:
+                should_apply_stock = apply_stock_updates or product_was_created
+                if should_apply_stock and target_stock is not None and target_stock != original_stock:
                     adjust_stock(
                         product=product,
                         outlet=outlet,
@@ -481,6 +561,8 @@ class BaseImportView(APIView):
             'stock_increases': stock_increases,
             'stock_decreases': stock_decreases,
             'prices_changed': prices_changed,
+            'skipped_by_strategy': skipped_by_strategy,
+            'sync_strategy': sync_strategy,
             'errors': total_failed,
         }
 
@@ -631,6 +713,12 @@ class ProductImportPreviewView(BaseImportView):
         sync_mode = self._resolve_sync_mode(request)
         is_inventory_sync = sync_mode == ImportBatch.MODE_INVENTORY_SYNC
         batch_sync_mode = ImportBatch.MODE_INVENTORY_SYNC if is_inventory_sync else ImportBatch.MODE_UPSERT_ADJUST
+        sync_strategy = self.SYNC_STRATEGY_FULL_SYNC
+        if is_inventory_sync:
+            try:
+                sync_strategy = self._resolve_sync_strategy(request)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         idempotency_key = request.headers.get('X-Idempotency-Key') or request.data.get('idempotency_key')
         if idempotency_key:
@@ -652,6 +740,9 @@ class ProductImportPreviewView(BaseImportView):
             df = self._read_dataframe(uploaded_file)
             df, column_mapping = self._normalize_columns(df)
             preview_data = self._preview_sync_rows(df, column_mapping, tenant, outlet) if is_inventory_sync else self._preview_rows(df, column_mapping, tenant, outlet)
+            summary_payload = dict(preview_data['summary'])
+            if is_inventory_sync:
+                summary_payload['sync_strategy'] = sync_strategy
 
             with transaction.atomic():
                 batch = ImportBatch.objects.create(
@@ -666,7 +757,7 @@ class ProductImportPreviewView(BaseImportView):
                     valid_rows=preview_data['summary']['valid_rows'],
                     invalid_rows=preview_data['summary']['invalid_rows'],
                     warning_rows=preview_data['summary']['warning_rows'],
-                    preview_summary=preview_data['summary'],
+                    preview_summary=summary_payload,
                     created_by=request.user,
                     previewed_at=timezone.now(),
                 )
@@ -690,7 +781,7 @@ class ProductImportPreviewView(BaseImportView):
                     batch=batch,
                     event_type='preview_created',
                     message='Preview completed and batch staged for apply.',
-                    metadata=preview_data['summary'],
+                    metadata=summary_payload,
                     created_by=request.user,
                 )
 
@@ -750,7 +841,12 @@ class ProductImportApplyView(BaseImportView):
             return Response({'detail': 'Batch must be approved before apply.'}, status=status.HTTP_409_CONFLICT)
 
         if batch.sync_mode == ImportBatch.MODE_INVENTORY_SYNC:
-            return self._apply_inventory_sync_batch(request, batch)
+            try:
+                default_strategy = (batch.preview_summary or {}).get('sync_strategy')
+                sync_strategy = self._resolve_sync_strategy(request, default=default_strategy)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return self._apply_inventory_sync_batch(request, batch, sync_strategy)
 
         chunk_size_raw = request.data.get('chunk_size', 100)
         try:
@@ -930,6 +1026,7 @@ class ProductImportStatusView(BaseImportView):
             'status': batch.status,
             'is_approved': batch.is_approved,
             'sync_mode': batch.sync_mode,
+            'sync_strategy': (batch.preview_summary or {}).get('sync_strategy') or (batch.apply_summary or {}).get('sync_strategy') or self.SYNC_STRATEGY_FULL_SYNC,
             'total_rows': batch.total_rows,
             'valid_rows': batch.valid_rows,
             'invalid_rows': batch.invalid_rows,
@@ -1039,6 +1136,7 @@ class ProductImportHistoryView(BaseImportView):
                 'source_filename': batch.source_filename,
                 'status': batch.status,
                 'is_approved': batch.is_approved,
+                'sync_strategy': (batch.preview_summary or {}).get('sync_strategy') or (batch.apply_summary or {}).get('sync_strategy') or self.SYNC_STRATEGY_FULL_SYNC,
                 'outlet': {
                     'id': str(batch.outlet_id),
                     'name': getattr(batch.outlet, 'name', ''),
@@ -1197,6 +1295,114 @@ class ProductImportRowsView(BaseImportView):
             'page_size': page_size,
             'total_pages': total_pages,
             'results': rows[start:end],
+        })
+
+
+class ProductImportMissingProductsView(BaseImportView):
+    def get(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sync_mode = self._resolve_sync_mode(request)
+
+        try:
+            batch = ImportBatch.objects.select_related('outlet').get(
+                id=batch_id,
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_PRODUCTS,
+            )
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sync_mode and batch.sync_mode != sync_mode:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if batch.sync_mode != ImportBatch.MODE_INVENTORY_SYNC:
+            return Response({'detail': 'Missing-products list is available for inventory sync mode only.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            return Response({'detail': 'page must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            page_size = max(1, min(int(request.query_params.get('page_size', 50)), 200))
+        except (TypeError, ValueError):
+            return Response({'detail': 'page_size must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        search = (request.query_params.get('search') or '').strip().lower()
+        include_inactive = str(request.query_params.get('include_inactive', 'false')).lower() in ('1', 'true', 'yes', 'y')
+
+        batch_identity_keys = set(
+            batch.rows.exclude(identity_key='').values_list('identity_key', flat=True)
+        )
+
+        products_qs = Product.objects.filter(tenant=tenant, outlet=batch.outlet).select_related('category').order_by('name', 'id')
+        if not include_inactive:
+            products_qs = products_qs.filter(is_active=True, is_archived=False)
+        else:
+            products_qs = products_qs.filter(is_archived=False)
+
+        missing_products = []
+
+        for product in products_qs:
+            candidates = []
+            sku = str(product.sku or '').strip()
+            barcode = str(product.barcode or '').strip()
+            name = str(product.name or '').strip()
+
+            if sku:
+                candidates.append(f"sku:{sku.lower()}")
+            if barcode:
+                candidates.append(f"barcode:{barcode.lower()}")
+            if name:
+                candidates.append(f"name:{name.lower()}")
+
+            if candidates and any(candidate in batch_identity_keys for candidate in candidates):
+                continue
+
+            available_stock = get_available_stock(product, batch.outlet)
+            item = {
+                'id': str(product.id),
+                'name': product.name or '',
+                'sku': sku,
+                'barcode': barcode,
+                'category': getattr(product.category, 'name', '') if product.category_id else '',
+                'sellable_stock': int(available_stock or 0),
+                'low_stock_threshold': int(product.low_stock_threshold or 0),
+                'retail_price': str(product.retail_price or ''),
+                'is_active': bool(product.is_active),
+            }
+
+            if search:
+                searchable = ' '.join([
+                    item['name'],
+                    item['sku'],
+                    item['barcode'],
+                    item['category'],
+                ]).lower()
+                if search not in searchable:
+                    continue
+
+            missing_products.append(item)
+
+        total_count = len(missing_products)
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        if page > total_pages:
+            page = total_pages
+
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        return Response({
+            'batch_id': str(batch.id),
+            'status': batch.status,
+            'count': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+            'results': missing_products[start:end],
         })
 
 

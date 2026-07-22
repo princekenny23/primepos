@@ -5,6 +5,7 @@ from .views import (
     ProductImportApplyView,
     ProductImportErrorsView,
     ProductImportHistoryView,
+    ProductImportMissingProductsView,
     ProductImportPreviewView,
     ProductImportRowsView,
     ProductImportStatusView,
@@ -18,4 +19,5 @@ urlpatterns = [
     path('imports/products/<uuid:batch_id>/status/', ProductImportStatusView.as_view(), name='imports-products-status'),
     path('imports/products/<uuid:batch_id>/errors/', ProductImportErrorsView.as_view(), name='imports-products-errors'),
     path('imports/products/<uuid:batch_id>/rows/', ProductImportRowsView.as_view(), name='imports-products-rows'),
+    path('imports/products/<uuid:batch_id>/missing/', ProductImportMissingProductsView.as_view(), name='imports-products-missing'),
 ]

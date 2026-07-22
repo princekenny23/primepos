@@ -27,6 +27,7 @@ function transformUnitToBackend(frontendUnit: Partial<ProductUnit>): any {
 export interface ProductFilters {
   category?: string
   is_active?: boolean
+  include_archived?: boolean
   search?: string
   page?: number
   tenant?: string
@@ -131,6 +132,10 @@ function transformProduct(backendProduct: any): Product {
     batches,
     image: backendProduct.image || undefined,
     isActive: backendProduct.is_active !== undefined ? backendProduct.is_active : (backendProduct.isActive !== undefined ? backendProduct.isActive : true),
+    is_archived: backendProduct.is_archived || false,
+    archived_at: backendProduct.archived_at || undefined,
+    archived_reason: backendProduct.archived_reason || undefined,
+    archived_by: backendProduct.archived_by || undefined,
     // Wholesale fields
     wholesale_price: backendProduct.wholesale_price ? parseFloat(backendProduct.wholesale_price) : undefined,
     wholesalePrice: backendProduct.wholesale_price ? parseFloat(backendProduct.wholesale_price) : undefined,
@@ -336,6 +341,7 @@ export const productService = {
     if (filters?.businessId) params.append("business", filters.businessId)
     if (filters?.outlet) params.append("outlet", filters.outlet)
     if (filters?.limit) params.append("limit", String(filters.limit))
+    if (filters?.include_archived !== undefined) params.append("include_archived", String(filters.include_archived))
     
     const query = params.toString()
     const response = await api.get<any>(`${apiEndpoints.products.list}${query ? `?${query}` : ""}`)
@@ -391,6 +397,16 @@ export const productService = {
     return await api.delete<any>(apiEndpoints.products.delete(id))
   },
 
+  async archiveProduct(id: string): Promise<Product> {
+    const response = await api.post<any>(apiEndpoints.products.archive(id), {})
+    return transformProduct(response)
+  },
+
+  async restoreProduct(id: string): Promise<Product> {
+    const response = await api.post<any>(apiEndpoints.products.restore(id), {})
+    return transformProduct(response)
+  },
+
   async getCategories(filters?: CategoryFilters): Promise<Category[]> {
     try {
       return await categoryService.list(filters)
@@ -412,7 +428,7 @@ export const productService = {
     if (filters?.include_units !== undefined) params.append("include_units", String(filters.include_units))
 
     const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
-    const endpoint = `${apiEndpoints.products.list.replace(/\/$/, "")}/bulk-export/`
+    const endpoint = apiEndpoints.products.bulkExport
     const url = `${base}${endpoint}${params.toString() ? `?${params.toString()}` : ""}`
 
     const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
@@ -537,7 +553,13 @@ export const productService = {
         return responseData
       },
 
-      async previewImport(file: File, outletId?: string, idempotencyKey?: string, mode?: string): Promise<{
+      async previewImport(
+        file: File,
+        outletId?: string,
+        idempotencyKey?: string,
+        mode?: string,
+        syncStrategy?: string,
+      ): Promise<{
         batch_id: string
         status: string
         summary: {
@@ -545,6 +567,7 @@ export const productService = {
           valid_rows: number
           invalid_rows: number
           warning_rows: number
+          sync_strategy?: string
         }
         sample_errors: Array<{ row_number: number; errors: string[] }>
         idempotent_reuse?: boolean
@@ -566,7 +589,10 @@ export const productService = {
         }
 
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
-        const previewUrl = `${API_BASE_URL}${apiEndpoints.imports.productsPreview}${mode ? `?mode=${encodeURIComponent(mode)}` : ''}`
+        const previewSearch = new URLSearchParams()
+        if (mode) previewSearch.set('mode', mode)
+        if (syncStrategy) previewSearch.set('sync_strategy', syncStrategy)
+        const previewUrl = `${API_BASE_URL}${apiEndpoints.imports.productsPreview}${previewSearch.toString() ? `?${previewSearch.toString()}` : ''}`
         const response = await fetch(previewUrl, {
           method: 'POST',
           headers,
@@ -581,14 +607,17 @@ export const productService = {
         return responseData
       },
 
-      async applyImport(batchId: string, mode?: string): Promise<{
+      async applyImport(batchId: string, mode?: string, syncStrategy?: string): Promise<{
         batch_id: string
         status: string
         apply_summary: any
         already_applied?: boolean
         idempotent_reuse?: boolean
       }> {
-        const query = mode ? `?mode=${encodeURIComponent(mode)}` : ''
+        const search = new URLSearchParams()
+        if (mode) search.set('mode', mode)
+        if (syncStrategy) search.set('sync_strategy', syncStrategy)
+        const query = search.toString() ? `?${search.toString()}` : ''
         return api.post(`${apiEndpoints.imports.productsApply(batchId)}${query}`, {})
       },
 
@@ -606,6 +635,7 @@ export const productService = {
         chunkSize?: number
         continueOnError?: boolean
         mode?: string
+        syncStrategy?: string
       }): Promise<{
         batch_id: string
         status: string
@@ -622,7 +652,10 @@ export const productService = {
         }
 
         const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
-        const applyUrl = `${API_BASE_URL}${apiEndpoints.imports.productsApply(batchId)}${options?.mode ? `?mode=${encodeURIComponent(options.mode)}` : ''}`
+        const applySearch = new URLSearchParams()
+        if (options?.mode) applySearch.set('mode', options.mode)
+        if (options?.syncStrategy) applySearch.set('sync_strategy', options.syncStrategy)
+        const applyUrl = `${API_BASE_URL}${apiEndpoints.imports.productsApply(batchId)}${applySearch.toString() ? `?${applySearch.toString()}` : ''}`
         const response = await fetch(applyUrl, {
           method: 'POST',
           headers: {
@@ -644,8 +677,11 @@ export const productService = {
         return responseData
       },
 
-      async getImportStatus(batchId: string, mode?: string): Promise<any> {
-        const query = mode ? `?mode=${encodeURIComponent(mode)}` : ''
+      async getImportStatus(batchId: string, mode?: string, syncStrategy?: string): Promise<any> {
+        const search = new URLSearchParams()
+        if (mode) search.set('mode', mode)
+        if (syncStrategy) search.set('sync_strategy', syncStrategy)
+        const query = search.toString() ? `?${search.toString()}` : ''
         return api.get(`${apiEndpoints.imports.productsStatus(batchId)}${query}`)
       },
 
@@ -658,6 +694,7 @@ export const productService = {
         page?: number
         pageSize?: number
         mode?: string
+        syncStrategy?: string
       }): Promise<{
         count: number
         page: number
@@ -669,6 +706,7 @@ export const productService = {
           source_filename: string
           status: string
           is_approved: boolean
+          sync_strategy?: string
           outlet: { id: string; name: string }
           created_by?: string | null
           total_rows: number
@@ -690,6 +728,7 @@ export const productService = {
         if (params?.dateFrom) search.set('date_from', params.dateFrom)
         if (params?.dateTo) search.set('date_to', params.dateTo)
         if (params?.mode) search.set('mode', params.mode)
+        if (params?.syncStrategy) search.set('sync_strategy', params.syncStrategy)
         search.set('page', String(params?.page || 1))
         search.set('page_size', String(params?.pageSize || 10))
 
@@ -697,7 +736,7 @@ export const productService = {
         return api.get(`${apiEndpoints.imports.productsHistory}${query ? `?${query}` : ''}`)
       },
 
-      async getImportErrors(batchId: string, mode?: string): Promise<{
+      async getImportErrors(batchId: string, mode?: string, syncStrategy?: string): Promise<{
         batch_id: string
         preview_error_count: number
         preview_errors: Array<{ row_number: number; errors: string[]; raw_data?: Record<string, any> }>
@@ -711,7 +750,10 @@ export const productService = {
           raw_data?: Record<string, any>
         }>
       }> {
-        const query = mode ? `?mode=${encodeURIComponent(mode)}` : ''
+        const search = new URLSearchParams()
+        if (mode) search.set('mode', mode)
+        if (syncStrategy) search.set('sync_strategy', syncStrategy)
+        const query = search.toString() ? `?${search.toString()}` : ''
         return api.get(`${apiEndpoints.imports.productsErrors(batchId)}${query}`)
       },
 
@@ -720,6 +762,7 @@ export const productService = {
         pageSize?: number
         search?: string
         mode?: string
+        syncStrategy?: string
       }): Promise<{
         batch_id: string
         status: string
@@ -751,8 +794,46 @@ export const productService = {
         search.set('page_size', String(params?.pageSize || 10))
         if (params?.search?.trim()) search.set('search', params.search.trim())
         if (params?.mode) search.set('mode', params.mode)
+        if (params?.syncStrategy) search.set('sync_strategy', params.syncStrategy)
 
         return api.get(`${apiEndpoints.imports.productsRows(batchId)}?${search.toString()}`)
+      },
+
+      async getImportMissingProducts(batchId: string, params?: {
+        page?: number
+        pageSize?: number
+        search?: string
+        mode?: string
+        syncStrategy?: string
+        includeInactive?: boolean
+      }): Promise<{
+        batch_id: string
+        status: string
+        count: number
+        page: number
+        page_size: number
+        total_pages: number
+        results: Array<{
+          id: string
+          name: string
+          sku: string
+          barcode: string
+          category: string
+          sellable_stock: number
+          low_stock_threshold: number
+          retail_price: string
+          is_active: boolean
+        }>
+      }> {
+        const search = new URLSearchParams()
+        search.set('page', String(params?.page || 1))
+        search.set('page_size', String(params?.pageSize || 50))
+        if (params?.search?.trim()) search.set('search', params.search.trim())
+        if (params?.mode) search.set('mode', params.mode)
+        if (params?.syncStrategy) search.set('sync_strategy', params.syncStrategy)
+        if (params?.includeInactive) search.set('include_inactive', 'true')
+
+        return api.get(`${apiEndpoints.imports.productsMissing(batchId)}?${search.toString()}`)
       },
     }
 

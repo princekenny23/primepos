@@ -664,7 +664,12 @@ export const apiEndpoints = {
     get: (id: string) => `/products/${id}/`,
     create: "/products/",
     update: (id: string) => `/products/${id}/`,
-    delete: (id: string) => `/products/${id}/`,    lookup: "/products/lookup/",  },
+    delete: (id: string) => `/products/${id}/`,
+    archive: (id: string) => `/products/${id}/archive/`,
+    restore: (id: string) => `/products/${id}/restore/`,
+    bulkExport: "/products/bulk-export/",
+    lookup: "/products/lookup/",
+  },
   // Variations
   variations: {
     list: "/variations/",
@@ -847,6 +852,7 @@ export const apiEndpoints = {
     productsStatus: (batchId: string) => `/imports/products/${batchId}/status/`,
     productsErrors: (batchId: string) => `/imports/products/${batchId}/errors/`,
     productsRows: (batchId: string) => `/imports/products/${batchId}/rows/`,
+    productsMissing: (batchId: string) => `/imports/products/${batchId}/missing/`,
   },
   // Shifts
   shifts: {

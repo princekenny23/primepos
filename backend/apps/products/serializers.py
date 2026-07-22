@@ -121,13 +121,17 @@ class ProductSerializer(serializers.ModelSerializer):
             'sku', 'barcode', 'retail_price', 'price', 'cost', 'cost_price', 
             'wholesale_price', 'wholesale_enabled', 'minimum_wholesale_quantity', 
             'stock', 'sellable_stock', 'low_stock_threshold', 'unit', 'image', 'is_active', 
+            'is_archived', 'archived_at', 'archived_reason', 'archived_by',
             'new_stock_override', 'new_stock_override_until',
             'is_low_stock', 'selling_units', 'selling_units_data',
             'track_expiration', 'manufacturing_date', 'expiry_date',
             'preparation_time', 'volume_ml', 'alcohol_percentage',
             'created_at', 'updated_at'
         )
-        read_only_fields = ('id', 'tenant', 'outlet', 'created_at', 'updated_at', 'price', 'cost_price', 'selling_units')
+        read_only_fields = (
+            'id', 'tenant', 'outlet', 'created_at', 'updated_at', 'price', 'cost_price',
+            'selling_units', 'is_archived', 'archived_at', 'archived_reason', 'archived_by'
+        )
         extra_kwargs = {
             'sku': {'required': False, 'allow_blank': True},
             'barcode': {'required': False, 'allow_blank': True},
@@ -191,6 +195,10 @@ class ProductSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Create product with units"""
         selling_units_data = validated_data.pop('selling_units_data', [])
+        validated_data['is_archived'] = False
+        validated_data['archived_at'] = None
+        validated_data['archived_reason'] = ''
+        validated_data['archived_by'] = None
         
         # Create product
         product = Product.objects.create(**validated_data)
@@ -205,6 +213,10 @@ class ProductSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         """Update product (units are updated separately via ProductUnitSerializer)"""
         validated_data.pop('selling_units_data', None)
+        validated_data['is_archived'] = False
+        validated_data['archived_at'] = None
+        validated_data['archived_reason'] = ''
+        validated_data['archived_by'] = None
         
         # Update product fields - DRF handles foreign key conversion automatically
         for attr, value in validated_data.items():

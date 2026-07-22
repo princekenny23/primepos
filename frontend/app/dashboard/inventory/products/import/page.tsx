@@ -37,13 +37,14 @@ import { useToast } from "@/components/ui/use-toast"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { productService } from "@/lib/services/productService"
-import { ArrowLeft, CheckCircle2, Download, Plus, Upload, XCircle } from "lucide-react"
+import { Archive, ArrowLeft, CheckCircle2, Download, Plus, Upload, XCircle } from "lucide-react"
 import * as XLSX from "xlsx"
 
 type BatchStatus = {
   batch_id?: string
   status?: string
   is_approved?: boolean
+  sync_strategy?: SyncStrategyValue
   total_rows?: number
   valid_rows?: number
   invalid_rows?: number
@@ -54,6 +55,7 @@ type BatchStatus = {
     valid_rows?: number
     invalid_rows?: number
     warning_rows?: number
+    sync_strategy?: SyncStrategyValue
   }
   apply_summary?: {
     imported?: number
@@ -64,6 +66,8 @@ type BatchStatus = {
     stock_increases?: number
     stock_decreases?: number
     prices_changed?: number
+    skipped_by_strategy?: number
+    sync_strategy?: SyncStrategyValue
     errors?: number
     chunks?: Array<{
       chunk_index: number
@@ -74,6 +78,13 @@ type BatchStatus = {
     }>
   }
 }
+
+type SyncStrategyValue =
+  | "update_existing"
+  | "create_new"
+  | "stock_only"
+  | "prices_only"
+  | "full_sync"
 
 type PreviewErrorRow = {
   row_number: number
@@ -124,6 +135,7 @@ type ImportHistoryRow = {
   source_filename: string
   status: string
   is_approved: boolean
+  sync_strategy?: SyncStrategyValue
   outlet?: { id: string; name: string }
   total_rows: number
   valid_rows: number
@@ -148,6 +160,18 @@ type ImportBatchRow = {
   matched_product_id?: string
 }
 
+type MissingCatalogProduct = {
+  id: string
+  name: string
+  sku: string
+  barcode: string
+  category: string
+  sellable_stock: number
+  low_stock_threshold: number
+  retail_price: string
+  is_active: boolean
+}
+
 type CreateProductDraft = {
   rowNumber: number
   productName: string
@@ -163,7 +187,101 @@ type CreateProductDraft = {
   isActive: boolean
 }
 
+type SyncPhase = {
+  label: string
+  description: string
+}
+
+type SyncModeOption = {
+  value: SyncStrategyValue
+  label: string
+  description: string
+  recommended?: boolean
+}
+
 const PAGE_SIZE = 10
+
+const INVENTORY_SYNC_PHASES: SyncPhase[] = [
+  {
+    label: "Upload File",
+    description: "Upload the source file for product import or inventory synchronization.",
+  },
+  {
+    label: "Column Mapping",
+    description: "Map spreadsheet columns to product fields and inventory fields.",
+  },
+  {
+    label: "Validation",
+    description: "Check required fields, duplicates, invalid prices, and bad stock values.",
+  },
+  {
+    label: "Preview Changes",
+    description: "Review matched products, new products, updates, and warnings before applying.",
+  },
+  {
+    label: "Resolve Missing Products",
+    description: "Decide what to do with products that exist in the database but are missing from the file.",
+  },
+  {
+    label: "Review Summary",
+    description: "Confirm created, updated, archived, and adjusted records before commit.",
+  },
+  {
+    label: "Apply Synchronization",
+    description: "Commit the approved changes with stock adjustments and audit logging.",
+  },
+  {
+    label: "Completion Report",
+    description: "Review the final sync summary and export the results.",
+  },
+]
+
+const INVENTORY_SYNC_MODES: SyncModeOption[] = [
+  {
+    value: "update_existing",
+    label: "Update Existing Products",
+    description: "Update matched catalog records without creating new products.",
+  },
+  {
+    value: "create_new",
+    label: "Create New Products",
+    description: "Add products that do not already exist in the catalog.",
+  },
+  {
+    value: "stock_only",
+    label: "Update Stock Only",
+    description: "Write quantity differences as stock adjustments only.",
+  },
+  {
+    value: "prices_only",
+    label: "Update Prices Only",
+    description: "Apply retail, wholesale, and cost price changes only.",
+  },
+  {
+    value: "full_sync",
+    label: "Full Inventory Synchronization",
+    description: "Recommended: reconcile catalog, prices, stock, and missing products together.",
+    recommended: true,
+  },
+]
+
+const SYNC_STRATEGY_LABELS: Record<SyncStrategyValue, string> = {
+  update_existing: "Update Existing Products",
+  create_new: "Create New Products",
+  stock_only: "Update Stock Only",
+  prices_only: "Update Prices Only",
+  full_sync: "Full Inventory Synchronization",
+}
+
+const isSyncStrategyValue = (value: unknown): value is SyncStrategyValue => {
+  return (
+    value === "update_existing" ||
+    value === "create_new" ||
+    value === "stock_only" ||
+    value === "prices_only" ||
+    value === "full_sync"
+  )
+}
 
 const normalizeHeader = (value: string) =>
   value
@@ -278,6 +396,7 @@ function ProductsImportPageContent() {
   const historyTabLabel = isSyncMode ? "Processes" : "Import History"
 
   const [selectedOutletId, setSelectedOutletId] = useState<string>(defaultOutletId)
+  const [selectedSyncStrategy, setSelectedSyncStrategy] = useState<SyncStrategyValue>("full_sync")
   const [file, setFile] = useState<File | null>(null)
   const [batchId, setBatchId] = useState<string>("")
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null)
@@ -302,6 +421,14 @@ function ProductsImportPageContent() {
   const [historyDateTo, setHistoryDateTo] = useState<string>("")
   const [loadingAction, setLoadingAction] = useState<"" | "preview" | "approve" | "apply" | "refresh">("")
   const [activeTab, setActiveTab] = useState("upload-preview")
+  const [missingProducts, setMissingProducts] = useState<MissingCatalogProduct[]>([])
+  const [missingLoading, setMissingLoading] = useState(false)
+  const [missingSearchTerm, setMissingSearchTerm] = useState("")
+  const [archivingProductId, setArchivingProductId] = useState("")
+  const [newProductsPage, setNewProductsPage] = useState(1)
+  const [missingProductsPage, setMissingProductsPage] = useState(1)
+  const [archivingAllMissing, setArchivingAllMissing] = useState(false)
+  const [showArchiveAllDialog, setShowArchiveAllDialog] = useState(false)
   const [categoryOptions, setCategoryOptions] = useState<Array<{ id: string; name: string }>>([])
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
@@ -321,6 +448,27 @@ function ProductsImportPageContent() {
     isActive: true,
   })
 
+  const syncPhaseIndex = useMemo(() => {
+    if (!isSyncMode) return 0
+
+    if (batchStatus?.status === "applied") return 7
+    if (activeTab === "not-in-file") return 4
+    if (activeTab === "import-summary") return batchStatus?.is_approved ? 6 : 5
+    if (activeTab === "rejected-products") return batchId ? 2 : 0
+    if (activeTab === "import-history") return batchId ? 5 : 0
+    if (file) return 3
+
+    return 0
+  }, [activeTab, batchId, batchStatus?.is_approved, batchStatus?.status, file, isSyncMode])
+
+  const syncPhaseState = useMemo(() => {
+    return INVENTORY_SYNC_PHASES.map((phase, index) => {
+      if (index < syncPhaseIndex) return { ...phase, state: "completed" as const }
+      if (index === syncPhaseIndex) return { ...phase, state: "current" as const }
+      return { ...phase, state: "upcoming" as const }
+    })
+  }, [syncPhaseIndex])
+
   const summary = useMemo(() => {
     const preview = batchStatus?.preview_summary || {}
     return {
@@ -337,9 +485,15 @@ function ProductsImportPageContent() {
     () => {
       if (isSyncMode) {
         const applySummary = batchStatus?.apply_summary || {}
+        const syncStrategy =
+          batchStatus?.sync_strategy ||
+          batchStatus?.preview_summary?.sync_strategy ||
+          batchStatus?.apply_summary?.sync_strategy ||
+          selectedSyncStrategy
         return [
           { label: "Batch ID", value: batchId || "-" },
           { label: "Status", value: batchStatus?.status || "-" },
+          { label: "Sync Strategy", value: SYNC_STRATEGY_LABELS[syncStrategy] || syncStrategy },
           { label: "Approved", value: batchStatus?.is_approved ? "Yes" : "No" },
           { label: "Total Rows", value: String(summary.totalRows) },
           { label: "Valid Rows", value: String(summary.validRows) },
@@ -349,6 +503,7 @@ function ProductsImportPageContent() {
           { label: "Stock Increases", value: String(applySummary.stock_increases ?? 0) },
           { label: "Stock Decreases", value: String(applySummary.stock_decreases ?? 0) },
           { label: "Prices Changed", value: String(applySummary.prices_changed ?? 0) },
+          { label: "Skipped By Strategy", value: String(applySummary.skipped_by_strategy ?? 0) },
           { label: "Errors", value: String(applySummary.errors ?? summary.failedRows) },
         ]
       }
@@ -365,7 +520,7 @@ function ProductsImportPageContent() {
         { label: "Failed Rows", value: String(summary.failedRows) },
       ]
     },
-    [batchId, batchStatus?.status, batchStatus?.is_approved, batchStatus?.apply_summary, summary, isSyncMode]
+    [batchId, batchStatus?.status, batchStatus?.is_approved, batchStatus?.sync_strategy, batchStatus?.preview_summary?.sync_strategy, batchStatus?.apply_summary, summary, isSyncMode, selectedSyncStrategy]
   )
 
   const importTabs: TabConfig[] = useMemo(
@@ -387,6 +542,12 @@ function ProductsImportPageContent() {
             icon: Plus,
             badgeCount: batchRows.filter((row) => row.action === "create").length,
             badgeVariant: "secondary" as const,
+          }, {
+            value: "not-in-file",
+            label: "Not In File",
+            icon: Archive,
+            badgeCount: missingProducts.length,
+            badgeVariant: "secondary" as const,
           }]
         : []),
       {
@@ -402,7 +563,7 @@ function ProductsImportPageContent() {
         icon: CheckCircle2,
       },
     ],
-    [previewErrors.length, applyErrors.length, uploadTabLabel, summaryTabLabel, historyTabLabel, isSyncMode, batchRows]
+    [previewErrors.length, applyErrors.length, uploadTabLabel, summaryTabLabel, historyTabLabel, isSyncMode, batchRows, missingProducts.length]
   )
 
   const getRawValue = (rawData: Record<string, any> | undefined, keys: string[]) => {
@@ -445,6 +606,16 @@ function ProductsImportPageContent() {
 
     return batchRows.filter((row) => row.action === "create")
   }, [batchRows, isSyncMode])
+
+  const totalNewProductsPages = useMemo(
+    () => Math.max(1, Math.ceil(newProductRows.length / PAGE_SIZE)),
+    [newProductRows.length]
+  )
+
+  const paginatedNewProductRows = useMemo(() => {
+    const start = (newProductsPage - 1) * PAGE_SIZE
+    return newProductRows.slice(start, start + PAGE_SIZE)
+  }, [newProductRows, newProductsPage])
 
   const previewErrorMap = useMemo(() => {
     const map = new Map<number, string>()
@@ -512,6 +683,18 @@ function ProductsImportPageContent() {
     setDetailPage((prev) => Math.min(prev, totalDetailPages))
   }, [totalDetailPages])
 
+  useEffect(() => {
+    setNewProductsPage(1)
+  }, [batchId, newProductRows.length])
+
+  useEffect(() => {
+    setNewProductsPage((prev) => Math.min(prev, totalNewProductsPages))
+  }, [totalNewProductsPages])
+
+  useEffect(() => {
+    setMissingProductsPage(1)
+  }, [batchId, missingSearchTerm, missingProducts.length])
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0]
     if (!selected) return
@@ -548,6 +731,47 @@ function ProductsImportPageContent() {
     }
   }
 
+  const handleDownloadOutletProducts = async () => {
+    if (!selectedOutletId) {
+      toast({
+        title: "Outlet Required",
+        description: "Select an outlet before downloading products.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const exported = await productService.export({
+        format: "csv",
+        outlet_id: selectedOutletId,
+        include_inactive: true,
+        include_stock: true,
+        include_batches: true,
+        include_units: true,
+      })
+
+      const link = document.createElement("a")
+      link.href = exported.url
+      link.download = exported.filename || `outlet-${selectedOutletId}-products.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(exported.url)
+
+      toast({
+        title: "Download Started",
+        description: "Full outlet products file is being downloaded.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Download Failed",
+        description: error?.message || "Unable to download outlet products file.",
+        variant: "destructive",
+      })
+    }
+  }
+
   const loadBatchRows = useCallback(async (targetBatchId: string) => {
     const collectedRows: ImportBatchRow[] = []
     let currentPage = 1
@@ -558,6 +782,7 @@ function ProductsImportPageContent() {
         page: currentPage,
         pageSize: 100,
         mode: importMode,
+        syncStrategy: selectedSyncStrategy,
       })
 
       collectedRows.push(...(response.results || []))
@@ -566,7 +791,24 @@ function ProductsImportPageContent() {
     } while (currentPage <= totalPages)
 
     setBatchRows(collectedRows)
-  }, [importMode])
+  }, [importMode, selectedSyncStrategy])
+
+  const loadMissingProducts = useCallback(async (targetBatchId: string) => {
+    setMissingLoading(true)
+    try {
+      const response = await productService.getImportMissingProducts(targetBatchId, {
+        page: 1,
+        pageSize: 500,
+        mode: importMode,
+        syncStrategy: selectedSyncStrategy,
+      })
+      setMissingProducts(response.results || [])
+    } catch {
+      setMissingProducts([])
+    } finally {
+      setMissingLoading(false)
+    }
+  }, [importMode, selectedSyncStrategy])
 
   const loadCategories = useCallback(async () => {
     try {
@@ -584,17 +826,22 @@ function ProductsImportPageContent() {
     setLoadingAction("refresh")
     try {
       const [statusPayload, errorsPayload] = await Promise.all([
-        productService.getImportStatus(targetBatchId, importMode),
-        productService.getImportErrors(targetBatchId, importMode),
+        productService.getImportStatus(targetBatchId, importMode, selectedSyncStrategy),
+        productService.getImportErrors(targetBatchId, importMode, selectedSyncStrategy),
       ])
 
       setBatchStatus(statusPayload)
+      if (isSyncMode && statusPayload?.sync_strategy) {
+        setSelectedSyncStrategy(statusPayload.sync_strategy)
+      }
       setPreviewErrors(errorsPayload.preview_errors || [])
       setApplyErrors(errorsPayload.apply_errors || [])
       if (isSyncMode) {
         await loadBatchRows(targetBatchId)
+        await loadMissingProducts(targetBatchId)
       } else {
         setBatchRows([])
+        setMissingProducts([])
       }
     } catch (error: any) {
       toast({
@@ -606,6 +853,83 @@ function ProductsImportPageContent() {
       setLoadingAction("")
     }
   }
+
+  const archiveMissingProduct = async (product: MissingCatalogProduct) => {
+    if (!product.id) return
+
+    setArchivingProductId(product.id)
+    try {
+      await productService.archiveProduct(product.id)
+      setMissingProducts((prev) => prev.filter((item) => item.id !== product.id))
+      toast({
+        title: "Product Archived",
+        description: `${product.name || "Product"} has been archived.`,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Archive Failed",
+        description: error?.message || "Unable to archive this product.",
+        variant: "destructive",
+      })
+    } finally {
+      setArchivingProductId("")
+    }
+  }
+
+  const archiveAllMissingProducts = async () => {
+    if (filteredMissingProducts.length === 0) return
+
+    setArchivingAllMissing(true)
+    try {
+      const productIds = filteredMissingProducts.map((product) => String(product.id))
+      const response = await productService.bulkDelete(productIds)
+
+      setMissingProducts((prev) =>
+        prev.filter((item) => !productIds.includes(String(item.id)))
+      )
+
+      const archivedCount = response.archived_count || 0
+      const deletedCount = response.deleted_count || 0
+      toast({
+        title: "Products Archived",
+        description:
+          deletedCount > 0
+            ? `${archivedCount} archived, ${deletedCount} deleted from the filtered list.`
+            : `${archivedCount} products archived from the filtered list.`,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Archive All Failed",
+        description: error?.message || "Unable to archive missing products.",
+        variant: "destructive",
+      })
+    } finally {
+      setArchivingAllMissing(false)
+    }
+  }
+
+  const filteredMissingProducts = useMemo(() => {
+    const term = missingSearchTerm.trim().toLowerCase()
+    if (!term) return missingProducts
+
+    return missingProducts.filter((row) => {
+      return [row.name, row.sku, row.barcode, row.category].join(" ").toLowerCase().includes(term)
+    })
+  }, [missingProducts, missingSearchTerm])
+
+  const totalMissingProductsPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredMissingProducts.length / PAGE_SIZE)),
+    [filteredMissingProducts.length]
+  )
+
+  const paginatedMissingProducts = useMemo(() => {
+    const start = (missingProductsPage - 1) * PAGE_SIZE
+    return filteredMissingProducts.slice(start, start + PAGE_SIZE)
+  }, [filteredMissingProducts, missingProductsPage])
+
+  useEffect(() => {
+    setMissingProductsPage((prev) => Math.min(prev, totalMissingProductsPages))
+  }, [totalMissingProductsPages])
 
   const loadImportHistory = useCallback(async (pageOverride?: number) => {
     const targetPage = pageOverride || historyPage
@@ -643,11 +967,17 @@ function ProductsImportPageContent() {
         dateFrom,
         dateTo,
         mode: importMode,
+        syncStrategy: isSyncMode ? selectedSyncStrategy : undefined,
         page: targetPage,
         pageSize: 10,
       })
 
-      setHistoryRows(payload.results || [])
+      const normalizedHistoryRows: ImportHistoryRow[] = (payload.results || []).map((row) => ({
+        ...row,
+        sync_strategy: isSyncStrategyValue(row.sync_strategy) ? row.sync_strategy : undefined,
+      }))
+
+      setHistoryRows(normalizedHistoryRows)
       setHistoryCount(payload.count || 0)
       setHistoryPage(payload.page || targetPage)
       setHistoryTotalPages(payload.total_pages || 1)
@@ -660,7 +990,7 @@ function ProductsImportPageContent() {
     } finally {
       setHistoryLoading(false)
     }
-  }, [historyPage, historyStatusFilter, historySearchTerm, historyDatePreset, historyDateFrom, historyDateTo, selectedOutletId, toast, importMode])
+  }, [historyPage, historyStatusFilter, historySearchTerm, historyDatePreset, historyDateFrom, historyDateTo, selectedOutletId, toast, importMode, isSyncMode, selectedSyncStrategy])
 
   const formatDateTime = (value?: string) => {
     if (!value) return "-"
@@ -707,7 +1037,7 @@ function ProductsImportPageContent() {
     setLoadingAction("preview")
     try {
       const idempotencyKey = `preview-${importMode}-${selectedOutletId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-      const preview = await productService.previewImport(file, selectedOutletId, idempotencyKey, importMode)
+      const preview = await productService.previewImport(file, selectedOutletId, idempotencyKey, importMode, selectedSyncStrategy)
       setBatchId(preview.batch_id)
 
       await refreshBatch(preview.batch_id)
@@ -783,6 +1113,7 @@ function ProductsImportPageContent() {
         continueOnError,
         idempotencyKey: `apply-${importMode}-${batchId}`,
         mode: importMode,
+        syncStrategy: selectedSyncStrategy,
       })
 
       await refreshBatch(batchId)
@@ -809,6 +1140,9 @@ function ProductsImportPageContent() {
     try {
       if (row.outlet?.id) {
         setSelectedOutletId(String(row.outlet.id))
+      }
+      if (isSyncMode && row.sync_strategy) {
+        setSelectedSyncStrategy(row.sync_strategy)
       }
 
       setBatchId(row.batch_id)
@@ -975,6 +1309,113 @@ function ProductsImportPageContent() {
           </Button>
         }
       >
+        {isSyncMode ? (
+          <Card className="mb-6 border-slate-200 bg-slate-50/90 shadow-sm">
+            <CardHeader className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle>Inventory Synchronization Phases</CardTitle>
+                <Badge variant="secondary" className="bg-slate-900 text-white hover:bg-slate-900">
+                  Sync Mode
+                </Badge>
+                <Badge variant="outline" className="border-emerald-200 text-emerald-700">
+                  Full Sync Recommended
+                </Badge>
+              </div>
+              <CardDescription>
+                This workflow keeps product import separate from stock-take counts and makes every sync step visible before any change is applied.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {syncPhaseState.map((phase, index) => (
+                  <div
+                    key={phase.label}
+                    className={`rounded-lg border p-3 transition-colors ${
+                      phase.state === "completed"
+                        ? "border-emerald-200 bg-emerald-50"
+                        : phase.state === "current"
+                        ? "border-blue-300 bg-blue-50"
+                        : "border-slate-200 bg-white"
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
+                          phase.state === "completed"
+                            ? "bg-emerald-600 text-white"
+                            : phase.state === "current"
+                            ? "bg-blue-600 text-white"
+                            : "bg-slate-200 text-slate-600"
+                        }`}
+                      >
+                        {phase.state === "completed" ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="font-medium text-slate-900">{phase.label}</p>
+                          <Badge
+                            variant={phase.state === "current" ? "default" : phase.state === "completed" ? "secondary" : "outline"}
+                            className="shrink-0"
+                          >
+                            {phase.state}
+                          </Badge>
+                        </div>
+                        <p className="mt-1 text-sm text-slate-600">{phase.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Inventory Synchronization Modes</p>
+                    <p className="text-sm text-slate-600">Choose how the uploaded file should affect the catalog and stock ledger.</p>
+                  </div>
+                  <Badge variant="outline" className="border-emerald-200 text-emerald-700">
+                    Enterprise workflow
+                  </Badge>
+                </div>
+                <p className="mb-3 text-xs text-slate-500">
+                  Selected strategy: <span className="font-medium text-slate-800">{SYNC_STRATEGY_LABELS[selectedSyncStrategy]}</span>
+                </p>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  {INVENTORY_SYNC_MODES.map((mode) => (
+                    <button
+                      key={mode.label}
+                      type="button"
+                      onClick={() => setSelectedSyncStrategy(mode.value)}
+                      className={`rounded-lg border p-3 text-left transition ${
+                        selectedSyncStrategy === mode.value
+                          ? "border-blue-400 bg-blue-50"
+                          : mode.recommended
+                          ? "border-emerald-300 bg-emerald-50/70"
+                          : "border-slate-200 bg-slate-50/40"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-slate-900">{mode.label}</p>
+                        {selectedSyncStrategy === mode.value ? (
+                          <Badge variant="default" className="bg-blue-600 text-white hover:bg-blue-600">
+                            Selected
+                          </Badge>
+                        ) : null}
+                        {mode.recommended ? (
+                          <Badge variant="secondary" className="bg-emerald-600 text-white hover:bg-emerald-600">
+                            Recommended
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="mt-1 text-sm text-slate-600">{mode.description}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
         <FilterableTabs
           tabs={importTabs}
           activeTab={activeTab}
@@ -1024,7 +1465,7 @@ function ProductsImportPageContent() {
                     className="block w-full rounded-md border border-gray-300 bg-white p-2 text-sm"
                   />
                   <p className="text-xs text-gray-500">
-                    Use the same initial stock template: <a href="/templates/products-import-template.csv" className="text-blue-700 underline">products-import-template.csv</a>
+                    Download the current outlet product file, edit it, then upload it for preview and synchronization.
                   </p>
                 </div>
 
@@ -1033,11 +1474,14 @@ function ProductsImportPageContent() {
                     <Upload className="mr-2 h-4 w-4" />
                     {loadingAction === "preview" ? "Previewing..." : (isSyncMode ? "Preview Sync" : "Preview Import")}
                   </Button>
-                  <Button asChild variant="outline" className="border-gray-300">
-                    <a href="/templates/products-import-template.csv" download>
-                      <Download className="mr-2 h-4 w-4" />
-                      Download Template
-                    </a>
+                  <Button
+                    variant="outline"
+                    className="border-gray-300"
+                    onClick={handleDownloadOutletProducts}
+                    disabled={!selectedOutletId || loadingAction !== ""}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download Outlet Products
                   </Button>
                 </div>
               </CardContent>
@@ -1298,7 +1742,7 @@ function ProductsImportPageContent() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {newProductRows.map((row) => (
+                          {paginatedNewProductRows.map((row) => (
                             <TableRow key={`${row.row_number}-${row.product_name}`}>
                               <TableCell>{row.row_number}</TableCell>
                               <TableCell>{row.product_name || "-"}</TableCell>
@@ -1327,6 +1771,144 @@ function ProductsImportPageContent() {
                           ))}
                         </TableBody>
                       </Table>
+                      {newProductRows.length > PAGE_SIZE && (
+                        <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm text-gray-600">
+                            Showing {(newProductsPage - 1) * PAGE_SIZE + 1}-{Math.min(newProductsPage * PAGE_SIZE, newProductRows.length)} of {newProductRows.length}
+                          </p>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-gray-500">Page {newProductsPage} of {totalNewProductsPages}</span>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setNewProductsPage((prev) => Math.max(1, prev - 1))}
+                                disabled={newProductsPage === 1}
+                              >
+                                Previous
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setNewProductsPage((prev) => Math.min(totalNewProductsPages, prev + 1))}
+                                disabled={newProductsPage === totalNewProductsPages}
+                              >
+                                Next
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
+          {isSyncMode && (
+            <TabsContent value="not-in-file" className="mt-0">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Products Not In File</CardTitle>
+                  <CardDescription>
+                    Active catalog products for this outlet that were not found in the uploaded sync file. Archive them if they are no longer sold.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="flex-1 space-y-2">
+                      <Label htmlFor="missing-search">Search Missing Products</Label>
+                      <input
+                        id="missing-search"
+                        type="text"
+                        value={missingSearchTerm}
+                        onChange={(e) => setMissingSearchTerm(e.target.value)}
+                        placeholder="Search by name, SKU, barcode, or category"
+                        className="h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      className="border-gray-300"
+                      onClick={() => setShowArchiveAllDialog(true)}
+                      disabled={archivingAllMissing || filteredMissingProducts.length === 0}
+                    >
+                      <Archive className="mr-2 h-4 w-4" />
+                      {archivingAllMissing ? "Archiving All..." : "Archive All"}
+                    </Button>
+                  </div>
+
+                  {missingLoading ? (
+                    <p className="text-sm text-gray-600">Loading missing products...</p>
+                  ) : filteredMissingProducts.length === 0 ? (
+                    <p className="text-sm text-gray-600">No missing products detected.</p>
+                  ) : (
+                    <div className="rounded-md border border-gray-300 bg-white">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-gray-50">
+                            <TableHead>Product Name</TableHead>
+                            <TableHead className="w-32">SKU</TableHead>
+                            <TableHead className="w-32">Barcode</TableHead>
+                            <TableHead className="w-32">Category</TableHead>
+                            <TableHead className="w-24">Stock</TableHead>
+                            <TableHead className="w-28">Low-Stock Limit</TableHead>
+                            <TableHead className="w-28">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {paginatedMissingProducts.map((row) => (
+                            <TableRow key={row.id}>
+                              <TableCell>{row.name || "-"}</TableCell>
+                              <TableCell>{row.sku || "-"}</TableCell>
+                              <TableCell>{row.barcode || "-"}</TableCell>
+                              <TableCell>{row.category || "-"}</TableCell>
+                              <TableCell>{row.sellable_stock}</TableCell>
+                              <TableCell>{row.low_stock_threshold}</TableCell>
+                              <TableCell>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-[11px]"
+                                  onClick={() => archiveMissingProduct(row)}
+                                  disabled={archivingProductId === row.id}
+                                >
+                                  {archivingProductId === row.id ? "Archiving..." : "Archive"}
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      {filteredMissingProducts.length > PAGE_SIZE && (
+                        <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm text-gray-600">
+                            Showing {(missingProductsPage - 1) * PAGE_SIZE + 1}-{Math.min(missingProductsPage * PAGE_SIZE, filteredMissingProducts.length)} of {filteredMissingProducts.length}
+                          </p>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-gray-500">Page {missingProductsPage} of {totalMissingProductsPages}</span>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setMissingProductsPage((prev) => Math.max(1, prev - 1))}
+                                disabled={missingProductsPage === 1}
+                              >
+                                Previous
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setMissingProductsPage((prev) => Math.min(totalMissingProductsPages, prev + 1))}
+                                disabled={missingProductsPage === totalMissingProductsPages}
+                              >
+                                Next
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </CardContent>
@@ -1415,6 +1997,7 @@ function ProductsImportPageContent() {
                         <TableHead className="w-52">Import Date</TableHead>
                         <TableHead>File</TableHead>
                         <TableHead className="w-36">Outlet</TableHead>
+                        <TableHead className="w-44">Sync Strategy</TableHead>
                         <TableHead className="w-28">Status</TableHead>
                         <TableHead className="w-24">Approved</TableHead>
                         <TableHead>List Details</TableHead>
@@ -1424,13 +2007,13 @@ function ProductsImportPageContent() {
                     <TableBody>
                       {historyLoading ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center text-sm text-gray-600">
+                          <TableCell colSpan={8} className="text-center text-sm text-gray-600">
                             Loading import history...
                           </TableCell>
                         </TableRow>
                       ) : historyRows.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center text-sm text-gray-600">
+                          <TableCell colSpan={8} className="text-center text-sm text-gray-600">
                             No import history found.
                           </TableCell>
                         </TableRow>
@@ -1440,6 +2023,7 @@ function ProductsImportPageContent() {
                             <TableCell>{formatDateTime(row.import_date)}</TableCell>
                             <TableCell>{row.source_filename || "-"}</TableCell>
                             <TableCell>{row.outlet?.name || "-"}</TableCell>
+                            <TableCell>{row.sync_strategy ? SYNC_STRATEGY_LABELS[row.sync_strategy] : "-"}</TableCell>
                             <TableCell>{row.status}</TableCell>
                             <TableCell>{row.is_approved ? "Yes" : "No"}</TableCell>
                             <TableCell>
@@ -1501,6 +2085,36 @@ function ProductsImportPageContent() {
             </Card>
           </TabsContent>
         </FilterableTabs>
+
+        <Dialog open={showArchiveAllDialog} onOpenChange={setShowArchiveAllDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Archive All Filtered Products?</DialogTitle>
+              <DialogDescription>
+                This will archive all products currently listed in Not In File based on your search filter.
+                You can restore archived products later from product management.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowArchiveAllDialog(false)}
+                disabled={archivingAllMissing}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  await archiveAllMissingProducts()
+                  setShowArchiveAllDialog(false)
+                }}
+                disabled={archivingAllMissing || filteredMissingProducts.length === 0}
+              >
+                {archivingAllMissing ? "Archiving..." : "Confirm Archive All"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
           <DialogContent className="max-w-2xl">

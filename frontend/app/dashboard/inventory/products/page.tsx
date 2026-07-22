@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
-import { Plus, Search, Upload, Filter, Folder, Trash2, RefreshCw, AlertTriangle, Package, AlertCircle, Clock, Download, Edit, Menu, ShoppingCart, SlidersHorizontal } from "lucide-react"
+import { Plus, Search, Upload, Filter, Folder, Trash2, RefreshCw, AlertTriangle, Package, AlertCircle, Clock, Download, Edit, Menu, ShoppingCart, SlidersHorizontal, Archive, RotateCcw } from "lucide-react"
 import { OrderProductModal } from "@/components/modals/order-product-modal"
 import { StockAdjustmentModal } from "@/components/modals/stock-adjustment-modal"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -105,7 +105,9 @@ export default function ProductsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [showExport, setShowExport] = useState(false)
+  const [showArchivedProducts, setShowArchivedProducts] = useState(false)
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
+  const [restoringProductId, setRestoringProductId] = useState<string | null>(null)
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showDeleteAllDialog, setShowDeleteAllDialog] = useState(false)
   const [isDeletingAllProducts, setIsDeletingAllProducts] = useState(false)
@@ -207,11 +209,18 @@ export default function ProductsPage() {
       let next: string | undefined = undefined
 
       do {
-        const response = await productService.list({
-          is_active: true,
+        const filters: any = {
           page,
           outlet: outlet?.id ? String(outlet.id) : undefined,
-        })
+        }
+
+        if (showArchivedProducts) {
+          filters.include_archived = true
+        } else {
+          filters.is_active = true
+        }
+
+        const response = await productService.list(filters)
         allProducts.push(...(response.results || []))
         next = response.next
         page += 1
@@ -230,7 +239,7 @@ export default function ProductsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, outlet, toast])
+  }, [currentBusiness, outlet, toast, showArchivedProducts])
 
   useEffect(() => {
     loadData()
@@ -249,6 +258,10 @@ export default function ProductsPage() {
   }
 
   const getProductStatus = (product: any) => {
+    if (product.is_archived) {
+      return "archived"
+    }
+
     const stock = getDisplayStock(product)
 
     // Check if backend already marked it as low stock
@@ -447,6 +460,28 @@ export default function ProductsPage() {
     setShowDeleteDialog(true)
   }
 
+  const handleRestoreClick = async (product: any) => {
+    if (!product?.id) return
+
+    setRestoringProductId(product.id)
+    try {
+      await productService.restoreProduct(product.id)
+      toast({
+        title: "Product Restored",
+        description: `${product.name} has been restored and returned to the catalog.`,
+      })
+      await handleProductSaved()
+    } catch (error: any) {
+      toast({
+        title: "Restore Failed",
+        description: error?.message || "Failed to restore product. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setRestoringProductId(null)
+    }
+  }
+
   const handleDeleteConfirm = async () => {
     if (!productToDelete) return
 
@@ -513,10 +548,10 @@ export default function ProductsPage() {
       const archivedCount = response?.archived_count || 0
 
       toast({
-        title: archivedCount > 0 ? "Products Deleted / Archived" : "Products Deleted",
+        title: archivedCount > 0 ? "Products Archived / Deleted" : "Products Archived",
         description: archivedCount > 0
           ? `${deletedCount} deleted, ${archivedCount} archived due to historical links.`
-          : `${deletedCount} product${deletedCount !== 1 ? "s" : ""} deleted successfully.`,
+            : `${deletedCount} product${deletedCount !== 1 ? "s" : ""} archived successfully.`,
       })
 
       await handleProductSaved()
@@ -593,7 +628,7 @@ export default function ProductsPage() {
                     className="text-destructive focus:text-destructive"
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
-                    Delete All Products
+                    Archive All Products
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -627,18 +662,29 @@ export default function ProductsPage() {
                 </div>
                 )}
               </div>
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-[200px] bg-white border-gray-300">
-                    <Filter className="mr-2 h-4 w-4" />
-                    <SelectValue placeholder={t("common.all_categories")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {categories.map(cat => (
-                      <SelectItem key={cat.id || cat} value={cat.name || cat}>{cat.name || cat}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                    <div className="flex items-center gap-2">
+                      <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                        <SelectTrigger className="w-[200px] bg-white border-gray-300">
+                          <Filter className="mr-2 h-4 w-4" />
+                          <SelectValue placeholder={t("common.all_categories")} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Categories</SelectItem>
+                          {categories.map(cat => (
+                            <SelectItem key={cat.id || cat} value={cat.name || cat}>{cat.name || cat}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        variant={showArchivedProducts ? "default" : "outline"}
+                        className={showArchivedProducts ? "bg-blue-900 hover:bg-blue-800" : "border-gray-300"}
+                        onClick={() => setShowArchivedProducts((prev) => !prev)}
+                      >
+                        <Archive className="mr-2 h-4 w-4" />
+                        {showArchivedProducts ? "Including Archived" : "Show Archived"}
+                      </Button>
+                    </div>
               </div>
             </div>
 
@@ -796,12 +842,22 @@ export default function ProductsPage() {
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
-                              onClick={() => handleDeleteClick(product)}
-                              disabled={deletingProductId === product.id}
+                              onClick={() => {
+                                if (product.is_archived) {
+                                  handleRestoreClick(product)
+                                } else {
+                                  handleDeleteClick(product)
+                                }
+                              }}
+                              disabled={deletingProductId === product.id || restoringProductId === product.id}
                               className="text-destructive focus:text-destructive"
                             >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete Product
+                              {product.is_archived ? (
+                                <RotateCcw className="mr-2 h-4 w-4" />
+                              ) : (
+                                <Trash2 className="mr-2 h-4 w-4" />
+                              )}
+                              {product.is_archived ? "Restore Product" : "Archive Product"}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -915,13 +971,19 @@ export default function ProductsPage() {
                             </TableCell>
                             <TableCell>{threshold || "—"}</TableCell>
                             <TableCell>
-                              <span className={`px-2 py-1 rounded-full text-xs ${
-                                status === "low-stock"
-                                  ? "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200"
-                                  : "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200"
-                              }`}>
-                                {status === "low-stock" ? "Low Stock" : "Out of Stock"}
-                              </span>
+                              {status === "archived" ? (
+                                <span className="px-2 py-1 rounded-full text-xs bg-slate-100 text-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                                  Archived
+                                </span>
+                              ) : (
+                                <span className={`px-2 py-1 rounded-full text-xs ${
+                                  status === "low-stock"
+                                    ? "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200"
+                                    : "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200"
+                                }`}>
+                                  {status === "low-stock" ? "Low Stock" : "Out of Stock"}
+                                </span>
+                              )}
                             </TableCell>
                             <TableCell>
                               <DropdownMenu>
@@ -952,12 +1014,22 @@ export default function ProductsPage() {
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
-                                    onClick={() => handleDeleteClick(product)}
-                                    disabled={deletingProductId === product.id}
+                                    onClick={() => {
+                                      if (product.is_archived) {
+                                        handleRestoreClick(product)
+                                      } else {
+                                        handleDeleteClick(product)
+                                      }
+                                    }}
+                                    disabled={deletingProductId === product.id || restoringProductId === product.id}
                                     className="text-destructive focus:text-destructive"
                                   >
-                                    <Trash2 className="mr-2 h-4 w-4" />
-                                    Delete Product
+                                    {product.is_archived ? (
+                                      <RotateCcw className="mr-2 h-4 w-4" />
+                                    ) : (
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                    )}
+                                    {product.is_archived ? "Restore Product" : "Archive Product"}
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -1284,15 +1356,15 @@ export default function ProductsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              Delete Product
+              Archive Product
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete <strong>&quot;{productToDelete?.name}&quot;</strong>? 
+              Are you sure you want to archive <strong>&quot;{productToDelete?.name}&quot;</strong>? 
               <br />
-              <span className="text-destructive font-medium">This action cannot be undone.</span>
+              <span className="text-destructive font-medium">You can restore it later from the archived list.</span>
               <br />
               <span className="text-xs text-muted-foreground mt-2 block">
-                All associated data including sales history and inventory records will be affected.
+                Historical sales and inventory records will remain intact.
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1305,7 +1377,7 @@ export default function ProductsPage() {
               disabled={deletingProductId !== null}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deletingProductId !== null ? "Deleting..." : "Delete Product"}
+              {deletingProductId !== null ? "Archiving..." : "Archive Product"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1316,12 +1388,12 @@ export default function ProductsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              Delete All Products
+              Archive All Products
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete all products in this list?
+              Are you sure you want to archive all products in this list?
               <br />
-              <span className="text-destructive font-medium">This action cannot be undone.</span>
+              <span className="text-destructive font-medium">You can restore archived products later.</span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1331,7 +1403,7 @@ export default function ProductsPage() {
               disabled={isDeletingAllProducts || products.length === 0}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {isDeletingAllProducts ? "Deleting..." : "Delete All Products"}
+              {isDeletingAllProducts ? "Archiving..." : "Archive All Products"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

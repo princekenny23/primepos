@@ -2,13 +2,15 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from .models import Product, Category, ProductUnit
 from .serializers import ProductSerializer, CategorySerializer, ProductUnitSerializer
-from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess
+from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess, resolve_tenant_from_request, resolve_outlet_from_request
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
+from django.utils import timezone
 from decimal import Decimal
 import logging
 import pandas as pd
@@ -17,6 +19,99 @@ import csv
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+def export_products_csv(request):
+    """Export outlet products as CSV for import/sync source files."""
+    params = getattr(request, 'query_params', None) or request.GET
+    export_format = str(params.get('format', 'csv')).strip().lower()
+    if export_format != 'csv':
+        return Response({'error': 'Only csv format is currently supported.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    outlet_id = params.get('outlet_id') or params.get('outlet')
+    tenant = resolve_tenant_from_request(request)
+    outlet = None
+
+    if outlet_id:
+        try:
+            from apps.outlets.models import Outlet
+            outlet = Outlet.objects.select_related('tenant').get(id=int(outlet_id))
+        except (TypeError, ValueError, Outlet.DoesNotExist):
+            return Response({'error': f'Invalid outlet_id: {outlet_id}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if tenant is None:
+            tenant = outlet.tenant
+
+    if not tenant:
+        return Response({'error': 'Unable to determine tenant.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if outlet and outlet.tenant_id != tenant.id:
+        return Response({'error': f'Invalid outlet_id: {outlet_id}'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if outlet is None:
+        outlet = resolve_outlet_from_request(request, tenant=tenant)
+
+    include_inactive = str(params.get('include_inactive', 'false')).lower() in ('1', 'true', 'yes', 'y')
+    include_stock = str(params.get('include_stock', 'true')).lower() in ('1', 'true', 'yes', 'y')
+
+    queryset = Product.objects.filter(tenant=tenant).select_related('category', 'outlet').order_by('name', 'id')
+    if outlet:
+        queryset = queryset.filter(outlet=outlet)
+    elif outlet_id:
+        queryset = queryset.filter(outlet_id=int(outlet_id))
+
+    if not include_inactive:
+        queryset = queryset.filter(is_active=True)
+
+    filename_outlet = str(outlet.id) if outlet else (str(outlet_id) if outlet_id else 'all')
+    filename = f'products-outlet-{filename_outlet}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.csv'
+
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+    writer = csv.writer(response)
+    writer.writerow([
+        'Product Name',
+        'SKU',
+        'Barcode',
+        'Category',
+        'Retail Price',
+        'Wholesale Price',
+        'Cost Price',
+        'Initial Stock Qty',
+        'Low Stock Threshold',
+        'Batch Expiry Date',
+        'Description',
+        'Is Active',
+        'Outlet',
+    ])
+
+    for product in queryset:
+        stock_value = product.stock
+        if include_stock and outlet:
+            try:
+                from apps.inventory.stock_helpers import get_available_stock
+                stock_value = get_available_stock(product, outlet)
+            except Exception:
+                stock_value = product.stock
+
+        writer.writerow([
+            product.name or '',
+            product.sku or '',
+            product.barcode or '',
+            product.category.name if product.category_id else '',
+            str(product.retail_price or ''),
+            str(product.wholesale_price or ''),
+            str(product.cost or ''),
+            int(stock_value or 0),
+            int(product.low_stock_threshold or 0),
+            '',
+            product.description or '',
+            'yes' if product.is_active else 'no',
+            product.outlet.name if product.outlet_id else '',
+        ])
+
+    return response
 
 
 class CategoryViewSet(viewsets.ModelViewSet, TenantFilterMixin):
@@ -183,8 +278,30 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             if outlet:
                 queryset = queryset.filter(outlet=outlet)
                 logger.info(f"SaaS admin - Applied outlet filter: {outlet.id} ({outlet.name}) - {queryset.count()} products found")
+
+        include_archived = str(self.request.query_params.get('include_archived', 'false')).lower() in ('1', 'true', 'yes', 'y')
+        if not include_archived:
+            queryset = queryset.filter(is_archived=False)
         
         return queryset
+
+    def _archive_product(self, product, user, reason='Archived from product management'):
+        product.is_archived = True
+        product.is_active = False
+        product.archived_at = timezone.now()
+        product.archived_reason = reason or ''
+        product.archived_by = user
+        product.save(update_fields=['is_archived', 'is_active', 'archived_at', 'archived_reason', 'archived_by', 'updated_at'])
+        return product
+
+    def _restore_product(self, product):
+        product.is_archived = False
+        product.archived_at = None
+        product.archived_reason = ''
+        product.archived_by = None
+        product.is_active = True
+        product.save(update_fields=['is_archived', 'archived_at', 'archived_reason', 'archived_by', 'is_active', 'updated_at'])
+        return product
     
     def update(self, request, *args, **kwargs):
         """Override update to ensure tenant and outlet match"""
@@ -233,6 +350,8 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         # Save the product (this will update Product.stock)
         product = serializer.save()
+        if getattr(product, 'is_archived', False):
+            self._restore_product(product)
         
         # Update stock using batch-aware system if stock was provided
         if new_stock is not None:
@@ -438,6 +557,80 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             return self.get_paginated_response(serializer.data)
         serializer = self.get_serializer(low_stock_products, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='bulk-export')
+    def bulk_export(self, request):
+        """Export outlet products as CSV for import/sync source files."""
+        export_format = str(request.query_params.get('format', 'csv')).strip().lower()
+        if export_format != 'csv':
+            return Response({'error': 'Only csv format is currently supported.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        include_inactive = str(request.query_params.get('include_inactive', 'false')).lower() in ('1', 'true', 'yes', 'y')
+        include_stock = str(request.query_params.get('include_stock', 'true')).lower() in ('1', 'true', 'yes', 'y')
+
+        queryset = self.get_queryset().select_related('category', 'outlet').order_by('name', 'id')
+
+        outlet_id = request.query_params.get('outlet_id')
+        if outlet_id:
+            try:
+                queryset = queryset.filter(outlet_id=int(outlet_id))
+            except (TypeError, ValueError):
+                return Response({'error': f'Invalid outlet_id: {outlet_id}'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not include_inactive:
+            queryset = queryset.filter(is_active=True)
+
+        outlet = self.get_outlet_for_request(request)
+
+        filename_outlet = str(outlet.id) if outlet else (str(outlet_id) if outlet_id else 'all')
+        filename = f'products-outlet-{filename_outlet}-{datetime.now().strftime("%Y%m%d-%H%M%S")}.csv'
+
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        writer = csv.writer(response)
+        writer.writerow([
+            'Product Name',
+            'SKU',
+            'Barcode',
+            'Category',
+            'Retail Price',
+            'Wholesale Price',
+            'Cost Price',
+            'Initial Stock Qty',
+            'Low Stock Threshold',
+            'Batch Expiry Date',
+            'Description',
+            'Is Active',
+            'Outlet',
+        ])
+
+        for product in queryset:
+            stock_value = product.stock
+            if include_stock and outlet:
+                try:
+                    from apps.inventory.stock_helpers import get_available_stock
+                    stock_value = get_available_stock(product, outlet)
+                except Exception:
+                    stock_value = product.stock
+
+            writer.writerow([
+                product.name or '',
+                product.sku or '',
+                product.barcode or '',
+                product.category.name if product.category_id else '',
+                str(product.retail_price or ''),
+                str(product.wholesale_price or ''),
+                str(product.cost or ''),
+                int(stock_value or 0),
+                int(product.low_stock_threshold or 0),
+                '',
+                product.description or '',
+                'yes' if product.is_active else 'no',
+                product.outlet.name if product.outlet_id else '',
+            ])
+
+        return response
     
     @action(detail=False, methods=['get'], url_path='generate-sku')
     def generate_sku_preview(self, request):
@@ -476,21 +669,34 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         product_name = instance.name
         product_id = instance.id
+        permanent_delete = str(request.query_params.get('permanent', 'false')).lower() in ('1', 'true', 'yes', 'y') and getattr(request.user, 'is_saas_admin', False)
         
         logger.info(f"Deleting product: {product_name} (ID: {product_id}) by user: {user.email}")
         
         try:
-            self.perform_destroy(instance)
-            logger.info(f"Product {product_name} (ID: {product_id}) deleted successfully")
+            if permanent_delete:
+                self.perform_destroy(instance)
+                logger.info(f"Product {product_name} (ID: {product_id}) deleted successfully")
+                return Response(
+                    {'message': f'Product "{product_name}" has been deleted successfully.'},
+                    status=status.HTTP_200_OK
+                )
+
+            self._archive_product(instance, user, reason='Archived from product deletion')
+            logger.info(f"Product {product_name} (ID: {product_id}) archived successfully")
             return Response(
-                {'message': f'Product "{product_name}" has been deleted successfully.'},
+                {
+                    'message': f'Product "{product_name}" has been archived successfully.',
+                    'archived': True,
+                    'product_id': product_id,
+                    'product_name': product_name,
+                },
                 status=status.HTTP_200_OK
             )
         except ProtectedError as e:
             blockers = sorted({obj.__class__.__name__ for obj in e.protected_objects})
-            if instance.is_active:
-                instance.is_active = False
-                instance.save(update_fields=['is_active', 'updated_at'])
+            if instance.is_active or not getattr(instance, 'is_archived', False):
+                self._archive_product(instance, user, reason='Archived because protected references block deletion')
                 logger.info(
                     f"Hard delete blocked for product {product_name} (ID: {product_id}); archived instead due to protected references: {blockers}"
                 )
@@ -555,6 +761,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         user = request.user
         is_saas_admin = getattr(user, 'is_saas_admin', False)
+        permanent_delete = str(request.query_params.get('permanent', 'false')).lower() in ('1', 'true', 'yes', 'y') and is_saas_admin
         
         # Get products that belong to the tenant
         queryset = Product.objects.filter(id__in=product_ids)
@@ -584,17 +791,25 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             product_name = product.name
             try:
                 with transaction.atomic():
-                    product.delete()
-                deleted_count += 1
-                deleted_names.append(product_name)
-                logger.info(f"Bulk deleted product: {product_name} (ID: {product_id}) by user: {user.email}")
+                    if permanent_delete:
+                        product.delete()
+                        deleted_count += 1
+                        deleted_names.append(product_name)
+                        logger.info(f"Bulk deleted product: {product_name} (ID: {product_id}) by user: {user.email}")
+                    else:
+                        self._archive_product(product, user, reason='Archived from bulk delete')
+                        archived_count += 1
+                        archived_products.append({
+                            'id': product_id,
+                            'name': product_name,
+                            'blocked_by': [],
+                        })
             except ProtectedError as e:
                 blockers = sorted({obj.__class__.__name__ for obj in e.protected_objects})
                 if product.is_active:
                     try:
                         with transaction.atomic():
-                            product.is_active = False
-                            product.save(update_fields=['is_active', 'updated_at'])
+                            self._archive_product(product, user, reason='Archived because protected references block deletion')
                         archived_count += 1
                         archived_products.append({
                             'id': product_id,
@@ -664,6 +879,31 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             )
         
         return Response(response_data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='archive')
+    def archive(self, request, pk=None):
+        instance = self.get_object()
+        tenant = getattr(request, 'tenant', None) or request.user.tenant
+
+        from apps.tenants.permissions import is_admin_user
+        if not is_admin_user(request.user) and tenant and instance.tenant != tenant:
+            return Response({'detail': 'You do not have permission to archive this product.'}, status=status.HTTP_403_FORBIDDEN)
+
+        reason = str(request.data.get('reason') or request.query_params.get('reason') or 'Archived from product management').strip()
+        archived = self._archive_product(instance, request.user, reason=reason)
+        return Response(self.get_serializer(archived).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='restore')
+    def restore(self, request, pk=None):
+        instance = self.get_object()
+        tenant = getattr(request, 'tenant', None) or request.user.tenant
+
+        from apps.tenants.permissions import is_admin_user
+        if not is_admin_user(request.user) and tenant and instance.tenant != tenant:
+            return Response({'detail': 'You do not have permission to restore this product.'}, status=status.HTTP_403_FORBIDDEN)
+
+        restored = self._restore_product(instance)
+        return Response(self.get_serializer(restored).data, status=status.HTTP_200_OK)
     
     def resolve_categories(self, category_names, tenant):
         """

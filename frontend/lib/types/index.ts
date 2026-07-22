@@ -178,6 +178,10 @@ export interface Product {
   // Display fields
   image?: string
   isActive: boolean
+  is_archived?: boolean
+  archived_at?: string
+  archived_reason?: string
+  archived_by?: string | { id: string; name?: string; email?: string }
   createdAt: string
   
   // Additional fields from backend
