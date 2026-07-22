@@ -910,9 +910,12 @@ def inventory_valuation_report(request):
         expiry = movement_qty(period_movement_totals, product.id, 'expiry')
 
         period_net_movement = period_stock_totals.get(product.id, 0) or 0
-        
-        # A dated report must never read today's mutable batch/projection state.
-        current_stock = max(0, opening_stock + period_net_movement)
+
+        # Keep ledger closing stock for audit/reconciliation visibility.
+        ledger_closing_stock = opening_stock + period_net_movement
+
+        # Align with product listing by using the same sellable stock source.
+        current_stock = get_sellable_stock(product, outlet)
         
         # Get stock take data if available
         counted_qty = 0
@@ -971,6 +974,8 @@ def inventory_valuation_report(request):
             # Current Stock
             'stock_qty': current_stock,
             'stock_value': float(stock_value),
+            'ledger_stock_qty': ledger_closing_stock,
+            'stock_qty_gap': ledger_closing_stock - current_stock,
             
             # Stock Take
             'counted_qty': counted_qty,
