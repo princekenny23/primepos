@@ -951,50 +951,44 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             )
         }
 
-        insufficient = []
+        total_deducted = 0
+        applied_products = 0
+        clamped_products = []
+        skipped_products = []
         for row in preview_rows:
             product = locked_products.get(int(row['product_id']))
             if not product:
-                insufficient.append({
+                skipped_products.append({
                     'product_id': row['product_id'],
                     'product_name': row['product_name'],
                     'detail': 'Product not found in outlet.',
                 })
                 continue
 
-            available = int(get_sellable_stock(product, outlet))
-            required = int(row['sold_qty'])
-            if available < required:
-                insufficient.append({
+            requested_quantity = int(row['sold_qty'])
+            if requested_quantity <= 0:
+                continue
+
+            available_quantity = max(0, int(get_sellable_stock(product, outlet) or 0))
+            quantity_to_deduct = min(available_quantity, requested_quantity)
+
+            if available_quantity < requested_quantity:
+                clamped_products.append({
                     'product_id': row['product_id'],
                     'product_name': row['product_name'],
-                    'available_stock': available,
-                    'required_qty': required,
+                    'available_stock': available_quantity,
+                    'requested_qty': requested_quantity,
+                    'deducted_qty': quantity_to_deduct,
+                    'final_stock': max(0, available_quantity - quantity_to_deduct),
                 })
 
-        if insufficient:
-            return Response(
-                {
-                    'detail': 'Insufficient stock for one or more products. No deductions were applied.',
-                    'insufficient': insufficient,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        total_deducted = 0
-        applied_products = 0
-        for row in preview_rows:
-            product = locked_products.get(int(row['product_id']))
-            if not product:
-                continue
-            quantity = int(row['sold_qty'])
-            if quantity <= 0:
+            if quantity_to_deduct <= 0:
                 continue
 
             deduct_stock(
                 product=product,
                 outlet=outlet,
-                quantity=quantity,
+                quantity=quantity_to_deduct,
                 user=request.user,
                 reference_id=reference_id,
                 reason=(
@@ -1003,7 +997,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 ),
                 movement_type='sale',
             )
-            total_deducted += quantity
+            total_deducted += quantity_to_deduct
             applied_products += 1
 
         try:
@@ -1017,19 +1011,26 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 description=(
                     f"Sales reconciliation applied for outlet {outlet.name}. "
                     f"Date range: {start_dt.date().isoformat()} to {end_dt.date().isoformat()}. "
-                    f"Products: {applied_products}. Quantity deducted: {total_deducted}."
+                    f"Products: {applied_products}. Quantity deducted: {total_deducted}. "
+                    f"Clamped products: {len(clamped_products)}."
                 ),
             )
         except Exception:
             pass
 
+        detail = 'Sales reconciliation applied successfully.'
+        if clamped_products:
+            detail = 'Sales reconciliation applied successfully. Some products were clamped to zero stock.'
+
         return Response(
             {
-                'detail': 'Sales reconciliation applied successfully.',
+                'detail': detail,
                 'already_applied': False,
                 'reference_id': reference_id,
                 'applied_products': applied_products,
                 'total_deducted_qty': total_deducted,
+                'clamped_products': clamped_products,
+                'skipped_products': skipped_products,
             },
             status=status.HTTP_200_OK,
         )
