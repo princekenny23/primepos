@@ -230,7 +230,7 @@ export default function SalesReconciliationPage() {
               setDateRange({ start: range.start, end: range.end })
             }}
           />
-          <Button variant="outline" className="border-gray-300" onClick={handlePreview} disabled={isPreviewLoading}>
+          <Button variant="outline" className="border-gray-300" onClick={() => { void handlePreview() }} disabled={isPreviewLoading}>
             {isPreviewLoading ? "Scanning..." : "Scan Sold Items"}
           </Button>
           <Button
