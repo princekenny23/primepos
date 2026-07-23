@@ -31,19 +31,20 @@ const presetRanges = [
 ]
 
 function getPresetRange(value: string) {
-  const today = new Date()
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   let start: Date | undefined
-  let end: Date | undefined = today
+  let end: Date | undefined = new Date(today)
 
   switch (value) {
     case "today":
-      start = today
-      end = today
+      start = new Date(today)
+      end = new Date(today)
       break
     case "yesterday":
       start = new Date(today)
       start.setDate(start.getDate() - 1)
-      end = start
+      end = new Date(start)
       break
     case "last7":
       start = new Date(today)
@@ -80,28 +81,32 @@ export function DateRangeFilter({ onRangeChange, defaultPreset = "today" }: Date
   const [endDate, setEndDate] = useState<Date | undefined>(initialRange.end)
 
   useEffect(() => {
+    if (selectedPreset === "custom") {
+      // Emit only complete custom ranges to avoid half-state filter glitches.
+      if (startDate && endDate) {
+        onRangeChange?.({ start: startDate, end: endDate })
+      }
+      return
+    }
+
     onRangeChange?.({ start: startDate, end: endDate })
-    // Trigger once on mount so consumers don't silently default to unrelated ranges.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [selectedPreset, startDate, endDate, onRangeChange])
 
   const handlePresetChange = (value: string) => {
     setSelectedPreset(value)
 
     if (value === "custom") {
+      if (!startDate || !endDate) {
+        const fallback = getPresetRange("today")
+        setStartDate(fallback.start)
+        setEndDate(fallback.end)
+      }
       return
     }
 
     const { start, end } = getPresetRange(value)
     setStartDate(start)
     setEndDate(end)
-    onRangeChange?.({ start, end })
-  }
-
-  const handleCustomDateChange = () => {
-    if (startDate && endDate) {
-      onRangeChange?.({ start: startDate, end: endDate })
-    }
   }
 
   return (
@@ -139,7 +144,10 @@ export function DateRangeFilter({ onRangeChange, defaultPreset = "today" }: Date
                 <label className="text-sm font-medium">Start Date</label>
                 <DatePicker
                   date={startDate}
-                  onDateChange={setStartDate}
+                  onDateChange={(date) => {
+                    setStartDate(date)
+                    setSelectedPreset("custom")
+                  }}
                   placeholder="Select start date"
                 />
               </div>
@@ -149,9 +157,7 @@ export function DateRangeFilter({ onRangeChange, defaultPreset = "today" }: Date
                   date={endDate}
                   onDateChange={(date) => {
                     setEndDate(date)
-                    if (date && startDate) {
-                      handleCustomDateChange()
-                    }
+                    setSelectedPreset("custom")
                   }}
                   placeholder="Select end date"
                 />

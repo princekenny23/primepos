@@ -10,6 +10,7 @@ import ReturnsPage from "./returns/page"
 import CreditsPage from "./credits/page"
 import DiscountsPage from "./discounts/page"
 import VoidsPage from "./voids/page"
+import SalesReconciliationPage from "./reconciliation/page"
 import { useI18n } from "@/contexts/i18n-context"
 import { useAuthStore } from "@/stores/authStore"
 import { isTenantFeatureEnabled } from "@/lib/utils/tenant-permissions"
@@ -25,6 +26,7 @@ export default function SalesDashboardPage() {
     { value: "credits", label: t("sales.credit.title"), enabled: isTenantFeatureEnabled(user, "allow_sales_create") },
     { value: "discounts", label: t("sales.menu.discounts"), enabled: isTenantFeatureEnabled(user, "allow_pos_discounts") },
     { value: "voids", label: "Voids", enabled: isTenantFeatureEnabled(user, "allow_sales_refund") },
+    { value: "stock-deduction", label: "Stock Deduction", enabled: isTenantFeatureEnabled(user, "allow_sales_refund") },
   ]
 
   const visibleTabs = tabs.filter(tab => tab.enabled)
@@ -68,6 +70,10 @@ export default function SalesDashboardPage() {
 
           <TabsContent value="voids" className="m-0">
             <VoidsPage />
+          </TabsContent>
+
+          <TabsContent value="stock-deduction" className="m-0">
+            <SalesReconciliationPage />
           </TabsContent>
         </FilterableTabs>
       </PageCard>

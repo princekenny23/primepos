@@ -106,6 +106,42 @@ export interface OfflineQueuedResult {
   detail?: string
 }
 
+export interface SalesStockReconcileFilters {
+  outlet: string
+  start_date: string
+  end_date: string
+}
+
+export interface SalesStockReconcileRow {
+  product_id: string
+  product_name: string
+  sku: string
+  sold_qty: number
+  current_stock: number
+  projected_stock: number
+}
+
+export interface SalesStockReconcilePreviewResponse {
+  outlet_id: string
+  outlet_name: string
+  start_date: string
+  end_date: string
+  rows: SalesStockReconcileRow[]
+  summary: {
+    total_products: number
+    total_sold_qty: number
+  }
+}
+
+export interface SalesStockReconcileApplyResponse {
+  detail: string
+  already_applied: boolean
+  reference_id?: string
+  applied_products?: number
+  total_deducted_qty?: number
+  applied_movements?: number
+}
+
 export function isOfflineQueuedResult(value: SaleWithMetadata | OfflineQueuedResult): value is OfflineQueuedResult {
   return Boolean((value as OfflineQueuedResult)?.offline_queued)
 }
@@ -404,6 +440,18 @@ export const saleService = {
       reason: reason || "Cancelled during payment stage",
     })
     return transformSale(response)
+  },
+
+  async previewStockReconciliation(filters: SalesStockReconcileFilters): Promise<SalesStockReconcilePreviewResponse> {
+    return api.post<SalesStockReconcilePreviewResponse>(apiEndpoints.sales.reconcilePreview, filters)
+  },
+
+  async applyStockReconciliation(payload: SalesStockReconcileFilters & {
+    confirm: boolean
+    product_ids?: string[]
+    idempotency_key: string
+  }): Promise<SalesStockReconcileApplyResponse> {
+    return api.post<SalesStockReconcileApplyResponse>(apiEndpoints.sales.reconcileApply, payload)
   },
 
   async refund(

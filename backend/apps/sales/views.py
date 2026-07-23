@@ -14,7 +14,7 @@ from django.template import engines
 import json
 import logging
 import secrets
-from datetime import timedelta
+from datetime import timedelta, datetime, time
 from decimal import Decimal, InvalidOperation
 from .models import Sale, SaleItem, Receipt, ReceiptTemplate, PrintJob, PrintDevice, Printer, ConnectorPairingSession, Refund, RefundItem
 from .serializers import SaleSerializer, SaleItemSerializer, ReceiptSerializer, ReceiptTemplateSerializer, PrintJobSerializer, PrintDeviceSerializer, PrinterSerializer, RefundSerializer, RefundItemInputSerializer
@@ -105,6 +105,94 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             cost *= Decimal(str(unit.convert_to_base_units(1)))
 
         return cost.quantize(Decimal('0.01'))
+
+    def _parse_sales_reconciliation_request(self, request):
+        tenant = self.get_tenant_for_request(request)
+        if not tenant:
+            return None, None, None, None, Response({"detail": "Tenant is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        outlet_id = request.data.get('outlet') or request.query_params.get('outlet')
+        if not outlet_id:
+            outlet = self.get_outlet_for_request(request)
+        else:
+            from apps.outlets.models import Outlet
+            try:
+                outlet = Outlet.objects.get(id=outlet_id, tenant=tenant)
+            except Outlet.DoesNotExist:
+                return None, None, None, None, Response({"detail": "Invalid outlet."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not outlet:
+            return None, None, None, None, Response({"detail": "Outlet is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        start_date_raw = request.data.get('start_date') or request.query_params.get('start_date')
+        end_date_raw = request.data.get('end_date') or request.query_params.get('end_date')
+        if not start_date_raw or not end_date_raw:
+            return None, None, None, None, Response(
+                {"detail": "start_date and end_date are required (YYYY-MM-DD)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        start_date = parse_date(str(start_date_raw))
+        end_date = parse_date(str(end_date_raw))
+        if not start_date or not end_date:
+            return None, None, None, None, Response(
+                {"detail": "Invalid date format. Use YYYY-MM-DD."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if end_date < start_date:
+            return None, None, None, None, Response(
+                {"detail": "end_date cannot be before start_date."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        start_dt = timezone.make_aware(datetime.combine(start_date, time.min))
+        end_dt = timezone.make_aware(datetime.combine(end_date, time.max))
+        return tenant, outlet, start_dt, end_dt, None
+
+    def _build_sales_reconciliation_rows(self, tenant, outlet, start_dt, end_dt):
+        aggregated_rows = (
+            SaleItem.objects
+            .filter(
+                sale__tenant=tenant,
+                sale__outlet=outlet,
+                sale__is_void=False,
+                sale__created_at__gte=start_dt,
+                sale__created_at__lte=end_dt,
+                sale__status__in=['completed', 'paid'],
+                product__isnull=False,
+            )
+            .values('product_id', 'product_name')
+            .annotate(sold_qty=models.Sum('quantity_in_base_units'))
+            .order_by('-sold_qty', 'product_name')
+        )
+
+        product_ids = [row['product_id'] for row in aggregated_rows if row.get('product_id')]
+        products_by_id = {
+            p.id: p for p in Product.objects.filter(id__in=product_ids, tenant=tenant, outlet=outlet)
+        }
+
+        rows = []
+        for row in aggregated_rows:
+            product_id = row.get('product_id')
+            product = products_by_id.get(product_id)
+            if not product:
+                continue
+
+            sold_qty = int(row.get('sold_qty') or 0)
+            if sold_qty <= 0:
+                continue
+
+            current_stock = int(get_sellable_stock(product, outlet))
+            rows.append({
+                'product_id': str(product.id),
+                'product_name': product.name,
+                'sku': product.sku or '',
+                'sold_qty': sold_qty,
+                'current_stock': current_stock,
+                'projected_stock': current_stock - sold_qty,
+            })
+
+        return rows
     
     def get_queryset(self):
         """Ensure tenant and outlet filtering is applied correctly with strict isolation"""
@@ -787,6 +875,164 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
         response_serializer = SaleSerializer(sale)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=['post'], url_path='reconcile-stock-from-sales/preview')
+    def reconcile_stock_from_sales_preview(self, request):
+        tenant, outlet, start_dt, end_dt, error_response = self._parse_sales_reconciliation_request(request)
+        if error_response:
+            return error_response
+
+        rows = self._build_sales_reconciliation_rows(tenant, outlet, start_dt, end_dt)
+        return Response({
+            'outlet_id': str(outlet.id),
+            'outlet_name': outlet.name,
+            'start_date': start_dt.date().isoformat(),
+            'end_date': end_dt.date().isoformat(),
+            'rows': rows,
+            'summary': {
+                'total_products': len(rows),
+                'total_sold_qty': sum(row['sold_qty'] for row in rows),
+            },
+        })
+
+    @transaction.atomic
+    @action(detail=False, methods=['post'], url_path='reconcile-stock-from-sales/apply')
+    def reconcile_stock_from_sales_apply(self, request):
+        tenant, outlet, start_dt, end_dt, error_response = self._parse_sales_reconciliation_request(request)
+        if error_response:
+            return error_response
+
+        confirm = request.data.get('confirm', False)
+        if not bool(confirm):
+            return Response({"detail": "confirm=true is required to apply deductions."}, status=status.HTTP_400_BAD_REQUEST)
+
+        idempotency_key = (
+            request.headers.get('X-Idempotency-Key')
+            or request.data.get('idempotency_key')
+            or request.data.get('run_id')
+        )
+        if not idempotency_key:
+            return Response({"detail": "idempotency_key is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reference_id = (
+            f"sales-reconcile:{outlet.id}:{start_dt.date().isoformat()}:{end_dt.date().isoformat()}:{idempotency_key}"
+        )
+        existing_qs = StockMovement.objects.filter(
+            tenant=tenant,
+            outlet=outlet,
+            reference_id=reference_id,
+            movement_type='sale',
+        )
+        if existing_qs.exists():
+            return Response({
+                'detail': 'This reconciliation run was already applied.',
+                'already_applied': True,
+                'reference_id': reference_id,
+                'applied_movements': existing_qs.count(),
+            }, status=status.HTTP_200_OK)
+
+        selected_product_ids = request.data.get('product_ids') or []
+        selected_product_ids = {str(pid) for pid in selected_product_ids if str(pid).strip()}
+
+        preview_rows = self._build_sales_reconciliation_rows(tenant, outlet, start_dt, end_dt)
+        if selected_product_ids:
+            preview_rows = [row for row in preview_rows if row['product_id'] in selected_product_ids]
+
+        if not preview_rows:
+            return Response({"detail": "No sold items found for the selected filter."}, status=status.HTTP_400_BAD_REQUEST)
+
+        lock_ids = [int(row['product_id']) for row in preview_rows]
+        locked_products = {
+            product.id: product
+            for product in Product.objects.select_for_update().filter(
+                id__in=lock_ids,
+                tenant=tenant,
+                outlet=outlet,
+            )
+        }
+
+        insufficient = []
+        for row in preview_rows:
+            product = locked_products.get(int(row['product_id']))
+            if not product:
+                insufficient.append({
+                    'product_id': row['product_id'],
+                    'product_name': row['product_name'],
+                    'detail': 'Product not found in outlet.',
+                })
+                continue
+
+            available = int(get_sellable_stock(product, outlet))
+            required = int(row['sold_qty'])
+            if available < required:
+                insufficient.append({
+                    'product_id': row['product_id'],
+                    'product_name': row['product_name'],
+                    'available_stock': available,
+                    'required_qty': required,
+                })
+
+        if insufficient:
+            return Response(
+                {
+                    'detail': 'Insufficient stock for one or more products. No deductions were applied.',
+                    'insufficient': insufficient,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        total_deducted = 0
+        applied_products = 0
+        for row in preview_rows:
+            product = locked_products.get(int(row['product_id']))
+            if not product:
+                continue
+            quantity = int(row['sold_qty'])
+            if quantity <= 0:
+                continue
+
+            deduct_stock(
+                product=product,
+                outlet=outlet,
+                quantity=quantity,
+                user=request.user,
+                reference_id=reference_id,
+                reason=(
+                    f"Sales reconciliation deduction {start_dt.date().isoformat()} to "
+                    f"{end_dt.date().isoformat()}"
+                ),
+                movement_type='sale',
+            )
+            total_deducted += quantity
+            applied_products += 1
+
+        try:
+            from apps.audit.models import ActivityLog
+            ActivityLog.objects.create(
+                tenant=tenant,
+                user=request.user,
+                action='update',
+                model_name='StockMovement',
+                object_id=reference_id,
+                description=(
+                    f"Sales reconciliation applied for outlet {outlet.name}. "
+                    f"Date range: {start_dt.date().isoformat()} to {end_dt.date().isoformat()}. "
+                    f"Products: {applied_products}. Quantity deducted: {total_deducted}."
+                ),
+            )
+        except Exception:
+            pass
+
+        return Response(
+            {
+                'detail': 'Sales reconciliation applied successfully.',
+                'already_applied': False,
+                'reference_id': reference_id,
+                'applied_products': applied_products,
+                'total_deducted_qty': total_deducted,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     # ------------------------------------------------------------------
     # PHASE 3: Refund endpoint

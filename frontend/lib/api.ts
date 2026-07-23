@@ -728,6 +728,8 @@ export const apiEndpoints = {
     refund: (id: string) => `/sales/${id}/refund/`,
     stats: "/sales/stats/",
     void: "/sales/void/",
+    reconcilePreview: "/sales/reconcile-stock-from-sales/preview/",
+    reconcileApply: "/sales/reconcile-stock-from-sales/apply/",
   },
   // Distribution
   distribution: {
