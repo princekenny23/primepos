@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select"
 import { Calendar } from "lucide-react"
 import { DatePicker } from "@/components/ui/date-picker"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { format } from "date-fns"
 
@@ -75,22 +75,38 @@ function getPresetRange(value: string) {
 
 export function DateRangeFilter({ onRangeChange, defaultPreset = "today" }: DateRangeFilterProps) {
   const initialRange = getPresetRange(defaultPreset)
+  const onRangeChangeRef = useRef(onRangeChange)
+  const lastEmittedKeyRef = useRef<string>("")
 
   const [selectedPreset, setSelectedPreset] = useState<string>(defaultPreset)
   const [startDate, setStartDate] = useState<Date | undefined>(initialRange.start)
   const [endDate, setEndDate] = useState<Date | undefined>(initialRange.end)
 
   useEffect(() => {
+    onRangeChangeRef.current = onRangeChange
+  }, [onRangeChange])
+
+  useEffect(() => {
     if (selectedPreset === "custom") {
       // Emit only complete custom ranges to avoid half-state filter glitches.
       if (startDate && endDate) {
-        onRangeChange?.({ start: startDate, end: endDate })
+        const key = `${selectedPreset}:${startDate.getTime()}:${endDate.getTime()}`
+        if (lastEmittedKeyRef.current !== key) {
+          lastEmittedKeyRef.current = key
+          onRangeChangeRef.current?.({ start: startDate, end: endDate })
+        }
       }
       return
     }
 
-    onRangeChange?.({ start: startDate, end: endDate })
-  }, [selectedPreset, startDate, endDate, onRangeChange])
+    const startKey = startDate ? startDate.getTime() : "none"
+    const endKey = endDate ? endDate.getTime() : "none"
+    const key = `${selectedPreset}:${startKey}:${endKey}`
+    if (lastEmittedKeyRef.current !== key) {
+      lastEmittedKeyRef.current = key
+      onRangeChangeRef.current?.({ start: startDate, end: endDate })
+    }
+  }, [selectedPreset, startDate, endDate])
 
   const handlePresetChange = (value: string) => {
     setSelectedPreset(value)
