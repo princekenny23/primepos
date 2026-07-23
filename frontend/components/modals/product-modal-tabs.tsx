@@ -67,6 +67,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
     name: "",
     sku: "",
     categoryId: "",
+    categoryName: "",
     barcode: "",
     description: "",
     isActive: true,
@@ -152,6 +153,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         name: product.name || "",
         sku: product.sku || "",
         categoryId: product.categoryId || "",
+        categoryName: product.category?.name || product.categoryName || "",
         barcode: product.barcode || "",
         description: product.description || "",
         isActive: product.isActive !== undefined ? product.isActive : true,
@@ -200,6 +202,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         name: initialBarcode ? "" : "",
         sku: "",
         categoryId: "",
+        categoryName: "",
         barcode: initialBarcode || "",
         description: "",
         isActive: true,
@@ -370,11 +373,30 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         ? Math.floor(parsedOpeningStock)
         : 0
 
+      const normalizedCategoryName = basicForm.categoryName.trim()
+      let resolvedCategoryId = basicForm.categoryId || ""
+      if (normalizedCategoryName) {
+        const existingCategory = categories.find(
+          (cat) => cat.name.trim().toLowerCase() === normalizedCategoryName.toLowerCase()
+        )
+
+        if (existingCategory?.id) {
+          resolvedCategoryId = String(existingCategory.id)
+        } else {
+          const createdCategory = await categoryService.create({ name: normalizedCategoryName })
+          resolvedCategoryId = String(createdCategory.id)
+          setCategories((prev) => {
+            const alreadyExists = prev.some((cat) => String(cat.id) === String(createdCategory.id))
+            return alreadyExists ? prev : [...prev, createdCategory]
+          })
+        }
+      }
+
       const productPayload: any = {
         name: basicForm.name,
         sku: basicForm.sku || undefined,
         barcode: basicForm.barcode || undefined,
-        categoryId: basicForm.categoryId || undefined,
+        categoryId: resolvedCategoryId || undefined,
         description: basicForm.description || "",
         retail_price: retailPrice,
         cost: pricingForm.cost ? parseFloat(pricingForm.cost) : undefined,
@@ -520,21 +542,12 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
 
               <div className="space-y-2">
                 <Label htmlFor="category">Category</Label>
-                <Select
-                  value={basicForm.categoryId}
-                  onValueChange={(val) => setBasicForm({ ...basicForm, categoryId: val })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Input
+                  id="category"
+                  value={basicForm.categoryName}
+                  onChange={(e) => setBasicForm({ ...basicForm, categoryName: e.target.value, categoryId: "" })}
+                  placeholder="Enter category"
+                />
               </div>
 
               <div className="space-y-2">

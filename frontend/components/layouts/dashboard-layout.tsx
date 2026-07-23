@@ -45,7 +45,6 @@ import { useRole } from "@/contexts/role-context"
 import { NotificationBell } from "@/components/dashboard/notification-bell"
 import { SubNavbar } from "@/components/ui/subnavbar"
 import { useShift } from "@/contexts/shift-context"
-import { format } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useAuthStore } from "@/stores/authStore"
@@ -71,6 +70,20 @@ const navTranslationKeys: Record<string, string> = {
   "Bar": "common.navigation.bar",
 }
 
+const formatElapsedShiftTime = (startTime: string, nowMs: number) => {
+  const startMs = new Date(startTime).getTime()
+  if (!Number.isFinite(startMs)) return null
+
+  // Advance from shift start in second steps for a live moving clock.
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - startMs) / 1000))
+  const runningTime = new Date(startMs + elapsedSeconds * 1000)
+  const hours = runningTime.getHours()
+  const minutes = runningTime.getMinutes()
+  const seconds = runningTime.getSeconds()
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+}
+
 interface DashboardLayoutProps {
   children: React.ReactNode
   showSubNavbar?: boolean
@@ -82,6 +95,7 @@ import { getIndustrySidebarConfig, fullNavigation, type NavigationItem } from "@
 export function DashboardLayout({ children, showSubNavbar = true }: DashboardLayoutProps) {
   const PA_HEARTBEAT_WINDOW_MS = 90_000
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [shiftNowMs, setShiftNowMs] = useState(() => Date.now())
   const [agentStatus, setAgentStatus] = useState<"checking" | "connected" | "disconnected">("checking")
   const [switchAuthOpen, setSwitchAuthOpen] = useState(false)
   const [pendingOutletId, setPendingOutletId] = useState<string | null>(null)
@@ -104,6 +118,10 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
   const restoringBusinessRef = useRef(false)
   const redirectedRef = useRef(false)
   const lastDeniedPathRef = useRef<string | null>(null)
+  const activeShiftId = activeShift?.id || ""
+  const activeShiftStartTime = activeShift?.startTime || ""
+  const activeShiftOutletId = String(activeShift?.outletId || "")
+  const currentOutletId = String(currentOutlet?.id || "")
 
   const isLocalhostBrowser = () => {
     if (typeof window === "undefined") return false
@@ -215,6 +233,22 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
       window.clearInterval(timer)
     }
   }, [currentOutlet?.id, businessOutlet?.id])
+
+  useEffect(() => {
+    const isRunningShiftForOutlet = Boolean(
+      activeShiftStartTime && activeShiftOutletId && currentOutletId && activeShiftOutletId === currentOutletId
+    )
+    if (!isRunningShiftForOutlet) return
+
+    setShiftNowMs(Date.now())
+    const timer = window.setInterval(() => {
+      setShiftNowMs(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [activeShiftId, activeShiftStartTime, activeShiftOutletId, currentOutletId])
   
   // Helper to translate navigation item names
   const translateNavItem = (name: string) => {
@@ -536,13 +570,13 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
               {activeShift && currentOutlet && activeShift.outletId === currentOutlet.id && (() => {
                 if (!activeShift.startTime) return null
                 try {
-                  const date = new Date(activeShift.startTime)
-                  if (isNaN(date.getTime())) return null
+                  const elapsedLabel = formatElapsedShiftTime(activeShift.startTime, shiftNowMs)
+                  if (!elapsedLabel) return null
                   return (
                     <Badge variant="outline" className="flex items-center gap-1.5 px-3 py-1.5 border-blue-600 text-white">
                       <Clock className="h-3.5 w-3.5" />
                       <span className="text-xs">
-                        {t("shifts.shift")}: {format(date, "HH:mm")}
+                        {t("shifts.shift")}: {elapsedLabel}
                       </span>
                     </Badge>
                   )

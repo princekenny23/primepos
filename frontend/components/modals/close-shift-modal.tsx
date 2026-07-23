@@ -126,6 +126,7 @@ export function CloseShiftModal({ open, onOpenChange, shift, onSuccess }: CloseS
 
   const hours = Math.floor(shiftDuration / 60)
   const minutes = shiftDuration % 60
+  const totalPosSales = shift.totalSales ?? shift.systemTotal ?? 0
   const difference = calculateDifference()
 
   return (
@@ -159,6 +160,15 @@ export function CloseShiftModal({ open, onOpenChange, shift, onSuccess }: CloseS
               </span>
               <span className="font-medium">
                 {currentBusiness?.currencySymbol || "MWK"} {shift.openingCashBalance.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground flex items-center gap-1">
+                <DollarSign className="h-3.5 w-3.5" />
+                Total Sold (POS):
+              </span>
+              <span className="font-medium">
+                {currentBusiness?.currencySymbol || "MWK"} {totalPosSales.toFixed(2)}
               </span>
             </div>
             {shift.startTime && (

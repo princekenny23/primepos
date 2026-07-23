@@ -621,6 +621,10 @@ export default function ProductsPage() {
                       Categories
                     </Link>
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowArchivedProducts((prev) => !prev)}>
+                    <Archive className="mr-2 h-4 w-4" />
+                    {showArchivedProducts ? "Including Archived" : "Show Archived"}
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => setShowDeleteAllDialog(true)}
@@ -675,15 +679,6 @@ export default function ProductsPage() {
                           ))}
                         </SelectContent>
                       </Select>
-                      <Button
-                        type="button"
-                        variant={showArchivedProducts ? "default" : "outline"}
-                        className={showArchivedProducts ? "bg-blue-900 hover:bg-blue-800" : "border-gray-300"}
-                        onClick={() => setShowArchivedProducts((prev) => !prev)}
-                      >
-                        <Archive className="mr-2 h-4 w-4" />
-                        {showArchivedProducts ? "Including Archived" : "Show Archived"}
-                      </Button>
                     </div>
               </div>
             </div>

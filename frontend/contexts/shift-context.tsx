@@ -67,21 +67,23 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
       return
     }
 
+    const outletId = String(currentOutlet.id)
+
     // FIXED: Skip if we've already loaded for this outlet
-    if (loadedOutletRef.current === currentOutlet.id) {
+    if (loadedOutletRef.current === outletId) {
       return
     }
 
     const loadShifts = async () => {
       setIsLoading(true)
       setShiftLoadError(false)
-      loadedOutletRef.current = currentOutlet.id
+      loadedOutletRef.current = outletId
       try {
         if (useRealAPI()) {
           // Use real API
           try {
-            const active = await shiftService.getActive(currentOutlet.id)
-            if (active && active.outletId === currentOutlet.id) {
+            const active = await shiftService.getActive(outletId)
+            if (active && String(active.outletId) === outletId) {
               // Only set shift if it belongs to current outlet
               const contextShift: Shift = {
                 id: active.id,
@@ -119,7 +121,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
           
           // Load shift history
           try {
-            const history = await shiftService.getHistory({ outlet: currentOutlet.id })
+            const history = await shiftService.getHistory({ outlet: outletId })
             // Transform to context format
             const contextHistory: Shift[] = history.map(h => ({
               id: h.id,
@@ -145,7 +147,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
           if (stored) {
             const shift = JSON.parse(stored) as Shift
             // Only use shift if it belongs to current outlet
-            if (shift.status === "OPEN" && shift.outletId === currentOutlet.id) {
+            if (shift.status === "OPEN" && String(shift.outletId) === outletId) {
               setActiveShiftState(shift)
             } else {
               localStorage.removeItem("activeShift")
@@ -159,7 +161,7 @@ export function ShiftProvider({ children }: { children: ReactNode }) {
           if (historyStored) {
             const history = JSON.parse(historyStored) as Shift[]
             // Filter history by current outlet
-            const filteredHistory = history.filter(h => h.outletId === currentOutlet.id)
+            const filteredHistory = history.filter(h => String(h.outletId) === outletId)
             setShiftHistory(filteredHistory)
           } else {
             setShiftHistory([])

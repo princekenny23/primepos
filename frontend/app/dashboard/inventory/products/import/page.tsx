@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -172,6 +172,20 @@ type ImportBatchRow = {
   matched_product_id?: string
 }
 
+type ImportRowUpdatePayload = {
+  rowNumber: number
+  productName: string
+  sku: string
+  barcode: string
+  category: string
+  retailPrice: string
+  costPrice: string
+  stock: string
+  lowStockThreshold?: string
+  description?: string
+  isActive?: boolean
+}
+
 type MissingCatalogProduct = {
   id: string
   name: string
@@ -199,11 +213,6 @@ type CreateProductDraft = {
   isActive: boolean
 }
 
-type SyncPhase = {
-  label: string
-  description: string
-}
-
 type SyncModeOption = {
   value: SyncStrategyValue
   label: string
@@ -212,41 +221,6 @@ type SyncModeOption = {
 }
 
 const PAGE_SIZE = 10
-
-const INVENTORY_SYNC_PHASES: SyncPhase[] = [
-  {
-    label: "Upload File",
-    description: "Upload the source file for product import or inventory synchronization.",
-  },
-  {
-    label: "Column Mapping",
-    description: "Map spreadsheet columns to product fields and inventory fields.",
-  },
-  {
-    label: "Validation",
-    description: "Check required fields, duplicates, invalid prices, and bad stock values.",
-  },
-  {
-    label: "Preview Changes",
-    description: "Review matched products, new products, updates, and warnings before applying.",
-  },
-  {
-    label: "Resolve Missing Products",
-    description: "Decide what to do with products that exist in the database but are missing from the file.",
-  },
-  {
-    label: "Review Summary",
-    description: "Confirm created, updated, archived, and adjusted records before commit.",
-  },
-  {
-    label: "Apply Synchronization",
-    description: "Commit the approved changes with stock adjustments and audit logging.",
-  },
-  {
-    label: "Completion Report",
-    description: "Review the final sync summary and export the results.",
-  },
-]
 
 const INVENTORY_SYNC_MODES: SyncModeOption[] = [
   {
@@ -410,6 +384,7 @@ function parseImportRows(file: File): Promise<ImportedProductRow[]> {
 
 function ProductsImportPageContent() {
   const { toast } = useToast()
+  const router = useRouter()
   const { currentBusiness, currentOutlet } = useBusinessStore()
   const { outlets, currentOutlet: tenantOutlet } = useTenant()
   const searchParams = useSearchParams()
@@ -439,6 +414,7 @@ function ProductsImportPageContent() {
   const [continueOnError, setContinueOnError] = useState<boolean>(true)
   const [isParsingFile, setIsParsingFile] = useState<boolean>(false)
   const [detailPage, setDetailPage] = useState<number>(1)
+  const [rejectedPage, setRejectedPage] = useState<number>(1)
   const [detailSearchTerm, setDetailSearchTerm] = useState<string>("")
   const [historyRows, setHistoryRows] = useState<ImportHistoryRow[]>([])
   const [historyLoading, setHistoryLoading] = useState<boolean>(false)
@@ -450,7 +426,7 @@ function ProductsImportPageContent() {
   const [historyDatePreset, setHistoryDatePreset] = useState<string>("all")
   const [historyDateFrom, setHistoryDateFrom] = useState<string>("")
   const [historyDateTo, setHistoryDateTo] = useState<string>("")
-  const [loadingAction, setLoadingAction] = useState<"" | "preview" | "approve" | "apply" | "refresh">("")
+  const [loadingAction, setLoadingAction] = useState<"" | "preview" | "approve" | "apply" | "refresh" | "rescan">("")
   const [activeTab, setActiveTab] = useState("upload-preview")
   const [missingProducts, setMissingProducts] = useState<MissingCatalogProduct[]>([])
   const [missingLoading, setMissingLoading] = useState(false)
@@ -491,27 +467,8 @@ function ProductsImportPageContent() {
     isActive: true,
   })
   const lastRestoredBatchRef = useRef<string>("")
-
-  const syncPhaseIndex = useMemo(() => {
-    if (!isSyncMode) return 0
-
-    if (batchStatus?.status === "applied") return 7
-    if (activeTab === "not-in-file") return 4
-    if (activeTab === "import-summary") return batchStatus?.is_approved ? 6 : 5
-    if (activeTab === "rejected-products") return batchId ? 2 : 0
-    if (activeTab === "import-history") return batchId ? 5 : 0
-    if (file) return 3
-
-    return 0
-  }, [activeTab, batchId, batchStatus?.is_approved, batchStatus?.status, file, isSyncMode])
-
-  const syncPhaseState = useMemo(() => {
-    return INVENTORY_SYNC_PHASES.map((phase, index) => {
-      if (index < syncPhaseIndex) return { ...phase, state: "completed" as const }
-      if (index === syncPhaseIndex) return { ...phase, state: "current" as const }
-      return { ...phase, state: "upcoming" as const }
-    })
-  }, [syncPhaseIndex])
+  const requestMode = isSyncMode ? importMode : undefined
+  const requestSyncStrategy = isSyncMode ? selectedSyncStrategy : undefined
 
   const summary = useMemo(() => {
     const preview = batchStatus?.preview_summary || {}
@@ -647,6 +604,16 @@ function ProductsImportPageContent() {
     return [...previewRows, ...applyRows]
   }, [previewErrors, applyErrors])
 
+  const totalRejectedPages = useMemo(
+    () => Math.max(1, Math.ceil(rejectedRows.length / PAGE_SIZE)),
+    [rejectedRows.length]
+  )
+
+  const paginatedRejectedRows = useMemo(() => {
+    const start = (rejectedPage - 1) * PAGE_SIZE
+    return rejectedRows.slice(start, start + PAGE_SIZE)
+  }, [rejectedRows, rejectedPage])
+
   const newProductRows = useMemo(() => {
     if (!isSyncMode) return []
 
@@ -728,6 +695,14 @@ function ProductsImportPageContent() {
   useEffect(() => {
     setDetailPage((prev) => Math.min(prev, totalDetailPages))
   }, [totalDetailPages])
+
+  useEffect(() => {
+    setRejectedPage(1)
+  }, [batchId, rejectedRows.length])
+
+  useEffect(() => {
+    setRejectedPage((prev) => Math.min(prev, totalRejectedPages))
+  }, [totalRejectedPages])
 
   useEffect(() => {
     setNewProductsPage(1)
@@ -827,8 +802,8 @@ function ProductsImportPageContent() {
       const response = await productService.getImportRows(targetBatchId, {
         page: currentPage,
         pageSize: 100,
-        mode: importMode,
-        syncStrategy: selectedSyncStrategy,
+        mode: requestMode,
+        syncStrategy: requestSyncStrategy,
       })
 
       collectedRows.push(...(response.results || []))
@@ -838,7 +813,7 @@ function ProductsImportPageContent() {
 
     setBatchRows(collectedRows)
     return collectedRows
-  }, [importMode, selectedSyncStrategy])
+  }, [requestMode, requestSyncStrategy])
 
   const loadMissingProducts = useCallback(async (targetBatchId: string) => {
     setMissingLoading(true)
@@ -846,8 +821,8 @@ function ProductsImportPageContent() {
       const response = await productService.getImportMissingProducts(targetBatchId, {
         page: 1,
         pageSize: 500,
-        mode: importMode,
-        syncStrategy: selectedSyncStrategy,
+        mode: requestMode,
+        syncStrategy: requestSyncStrategy,
       })
       setMissingProducts(response.results || [])
     } catch {
@@ -855,7 +830,7 @@ function ProductsImportPageContent() {
     } finally {
       setMissingLoading(false)
     }
-  }, [importMode, selectedSyncStrategy])
+  }, [requestMode, requestSyncStrategy])
 
   const loadCategories = useCallback(async () => {
     try {
@@ -869,13 +844,32 @@ function ProductsImportPageContent() {
     }
   }, [selectedOutletId])
 
-  const refreshBatch = async (targetBatchId: string) => {
+  const refreshBatch = useCallback(async (targetBatchId: string) => {
     setLoadingAction("refresh")
     try {
-      const [statusPayload, errorsPayload] = await Promise.all([
-        productService.getImportStatus(targetBatchId, importMode, selectedSyncStrategy),
-        productService.getImportErrors(targetBatchId, importMode, selectedSyncStrategy),
-      ])
+      let statusPayload: any
+      let errorsPayload: any
+
+      try {
+        ;[statusPayload, errorsPayload] = await Promise.all([
+          productService.getImportStatus(targetBatchId, requestMode, requestSyncStrategy),
+          productService.getImportErrors(targetBatchId, requestMode, requestSyncStrategy),
+        ])
+      } catch (initialError: any) {
+        const isBatchNotFound =
+          initialError?.status === 404 &&
+          String(initialError?.message || "").toLowerCase().includes("import batch not found")
+
+        if (isBatchNotFound && requestMode) {
+          // Fallback for legacy links or stale mode filters: try unscoped batch lookup once.
+          ;[statusPayload, errorsPayload] = await Promise.all([
+            productService.getImportStatus(targetBatchId),
+            productService.getImportErrors(targetBatchId),
+          ])
+        } else {
+          throw initialError
+        }
+      }
 
       setBatchStatus(statusPayload)
       if (isSyncMode && statusPayload?.sync_strategy) {
@@ -894,15 +888,33 @@ function ProductsImportPageContent() {
         setMissingProducts([])
       }
     } catch (error: any) {
+      const isBatchNotFound =
+        error?.status === 404 &&
+        String(error?.message || "").toLowerCase().includes("import batch not found")
+
+      if (isBatchNotFound) {
+        setBatchId("")
+        setBatchStatus(null)
+        setPreviewErrors([])
+        setApplyErrors([])
+        setBatchRows([])
+        const basePath = isSyncMode
+          ? "/dashboard/inventory/products/import?mode=sync"
+          : "/dashboard/inventory/products/import"
+        router.replace(basePath)
+      }
+
       toast({
-        title: "Status Load Failed",
-        description: error?.message || "Failed to load import status.",
+        title: isBatchNotFound ? "Batch Not Found" : "Status Load Failed",
+        description: isBatchNotFound
+          ? "This batch does not exist in the current environment. Start a new preview or open a valid batch from history."
+          : error?.message || "Failed to load import status.",
         variant: "destructive",
       })
     } finally {
       setLoadingAction("")
     }
-  }
+  }, [isSyncMode, loadBatchRows, loadMissingProducts, requestMode, requestSyncStrategy, router, toast])
 
   const archiveMissingProduct = async (product: MissingCatalogProduct) => {
     if (!product.id) return
@@ -1016,8 +1028,8 @@ function ProductsImportPageContent() {
         search: historySearchTerm,
         dateFrom,
         dateTo,
-        mode: importMode,
-        syncStrategy: isSyncMode ? selectedSyncStrategy : undefined,
+        mode: requestMode,
+        syncStrategy: requestSyncStrategy,
         page: targetPage,
         pageSize: 10,
       })
@@ -1040,7 +1052,7 @@ function ProductsImportPageContent() {
     } finally {
       setHistoryLoading(false)
     }
-  }, [historyPage, historyStatusFilter, historySearchTerm, historyDatePreset, historyDateFrom, historyDateTo, selectedOutletId, toast, importMode, isSyncMode, selectedSyncStrategy])
+  }, [historyPage, historyStatusFilter, historySearchTerm, historyDatePreset, historyDateFrom, historyDateTo, selectedOutletId, toast, requestMode, requestSyncStrategy])
 
   const formatDateTime = (value?: string) => {
     if (!value) return "-"
@@ -1181,8 +1193,8 @@ function ProductsImportPageContent() {
         chunkSize,
         continueOnError,
         idempotencyKey: applyKey,
-        mode: importMode,
-        syncStrategy: selectedSyncStrategy,
+        mode: requestMode,
+        syncStrategy: requestSyncStrategy,
       })
 
       await refreshBatch(batchId)
@@ -1249,8 +1261,8 @@ function ProductsImportPageContent() {
 
     try {
       const source = await productService.downloadImportSource(batchToDownload, {
-        mode: importMode,
-        syncStrategy: selectedSyncStrategy,
+        mode: requestMode,
+        syncStrategy: requestSyncStrategy,
       })
       const link = document.createElement("a")
       link.href = source.url
@@ -1265,6 +1277,86 @@ function ProductsImportPageContent() {
         description: error?.message || "Unable to download this batch source file.",
         variant: "destructive",
       })
+    }
+  }
+
+  const rescanBatchRows = useCallback(async (rowsToRescan: ImportRowUpdatePayload[]) => {
+    if (!batchId) {
+      return { rescanned: 0, failed: 0 }
+    }
+
+    const candidateRows = rowsToRescan.filter((row) => row.rowNumber > 0)
+    if (candidateRows.length === 0) {
+      return { rescanned: 0, failed: 0 }
+    }
+
+    const results = await Promise.allSettled(
+      candidateRows.map((row) =>
+        productService.updateImportRow(
+          batchId,
+          row.rowNumber,
+          {
+            product_name: row.productName,
+            sku: row.sku,
+            barcode: row.barcode,
+            category: row.category,
+            price: row.retailPrice,
+            cost: row.costPrice,
+            stock: row.stock,
+            low_stock_threshold: row.lowStockThreshold,
+            description: row.description,
+            is_active: row.isActive === undefined ? undefined : row.isActive ? "yes" : "no",
+          },
+          {
+            mode: requestMode,
+            syncStrategy: requestSyncStrategy,
+          }
+        )
+      )
+    )
+
+    const rescanned = results.filter((result) => result.status === "fulfilled").length
+    const failed = results.length - rescanned
+
+    return { rescanned, failed }
+  }, [batchId, requestMode, requestSyncStrategy])
+
+  const handleRescanNewProducts = async () => {
+    if (!batchId || newProductRows.length === 0) return
+
+    setLoadingAction("rescan")
+    try {
+      const { rescanned, failed } = await rescanBatchRows(
+        newProductRows.map((row) => ({
+          rowNumber: row.row_number,
+          productName: cleanBatchValue(row.product_name),
+          sku: cleanBatchValue(row.sku),
+          barcode: cleanBatchValue(row.barcode),
+          category: cleanBatchValue(row.category),
+          retailPrice: cleanBatchValue(row.price),
+          costPrice: cleanBatchValue(row.cost),
+          stock: cleanBatchValue(row.stock),
+        }))
+      )
+
+      await refreshBatch(batchId)
+
+      toast({
+        title: failed > 0 ? "Rescan Completed With Warnings" : "Rescan Completed",
+        description:
+          failed > 0
+            ? `${rescanned} row(s) revalidated, ${failed} row(s) could not be rescanned.`
+            : `${rescanned} row(s) revalidated. Review New Products and Summary for updates.`,
+        variant: failed > 0 ? "destructive" : undefined,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Rescan Failed",
+        description: error?.message || "Unable to rescan new products.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingAction("")
     }
   }
 
@@ -1320,8 +1412,8 @@ function ProductsImportPageContent() {
           stock: editRowDraft.stock,
         },
         {
-          mode: importMode,
-          syncStrategy: selectedSyncStrategy,
+          mode: requestMode,
+          syncStrategy: requestSyncStrategy,
         }
       )
 
@@ -1449,6 +1541,25 @@ function ProductsImportPageContent() {
     setCreateSubmitting(true)
     try {
       await productService.create(payload)
+
+      const rescanResult = await rescanBatchRows([{
+        rowNumber: createDraft.rowNumber,
+        productName: createDraft.productName,
+        sku: createDraft.sku,
+        barcode: createDraft.barcode,
+        category: createDraft.category,
+        retailPrice: createDraft.retailPrice,
+        costPrice: createDraft.costPrice,
+        stock: createDraft.stock,
+        lowStockThreshold: createDraft.lowStockThreshold,
+        description: createDraft.description,
+        isActive: createDraft.isActive,
+      }])
+
+      if (batchId) {
+        await refreshBatch(batchId)
+      }
+
       setCreatedRowNumbers((prev) => {
         const next = new Set(prev)
         next.add(createDraft.rowNumber)
@@ -1456,8 +1567,12 @@ function ProductsImportPageContent() {
       })
       setShowCreateDialog(false)
       toast({
-        title: "Product Created",
-        description: `${productName} was created successfully from sync row ${createDraft.rowNumber}.`,
+        title: rescanResult.failed > 0 ? "Product Created With Warning" : "Product Created",
+        description:
+          rescanResult.failed > 0
+            ? `${productName} was created, but the sync row could not be rescanned automatically.`
+            : `${productName} was created and the sync row was rescanned.`,
+        variant: rescanResult.failed > 0 ? "destructive" : undefined,
       })
     } catch (error: any) {
       toast({
@@ -1484,113 +1599,6 @@ function ProductsImportPageContent() {
           </Button>
         }
       >
-        {isSyncMode ? (
-          <Card className="mb-6 border-slate-200 bg-slate-50/90 shadow-sm">
-            <CardHeader className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <CardTitle>Inventory Synchronization Phases</CardTitle>
-                <Badge variant="secondary" className="bg-slate-900 text-white hover:bg-slate-900">
-                  Sync Mode
-                </Badge>
-                <Badge variant="outline" className="border-emerald-200 text-emerald-700">
-                  Full Sync Recommended
-                </Badge>
-              </div>
-              <CardDescription>
-                This workflow keeps product import separate from stock-take counts and makes every sync step visible before any change is applied.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                {syncPhaseState.map((phase, index) => (
-                  <div
-                    key={phase.label}
-                    className={`rounded-lg border p-3 transition-colors ${
-                      phase.state === "completed"
-                        ? "border-emerald-200 bg-emerald-50"
-                        : phase.state === "current"
-                        ? "border-blue-300 bg-blue-50"
-                        : "border-slate-200 bg-white"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div
-                        className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${
-                          phase.state === "completed"
-                            ? "bg-emerald-600 text-white"
-                            : phase.state === "current"
-                            ? "bg-blue-600 text-white"
-                            : "bg-slate-200 text-slate-600"
-                        }`}
-                      >
-                        {phase.state === "completed" ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="font-medium text-slate-900">{phase.label}</p>
-                          <Badge
-                            variant={phase.state === "current" ? "default" : phase.state === "completed" ? "secondary" : "outline"}
-                            className="shrink-0"
-                          >
-                            {phase.state}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-sm text-slate-600">{phase.description}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">Inventory Synchronization Modes</p>
-                    <p className="text-sm text-slate-600">Choose how the uploaded file should affect the catalog and stock ledger.</p>
-                  </div>
-                  <Badge variant="outline" className="border-emerald-200 text-emerald-700">
-                    Enterprise workflow
-                  </Badge>
-                </div>
-                <p className="mb-3 text-xs text-slate-500">
-                  Selected strategy: <span className="font-medium text-slate-800">{SYNC_STRATEGY_LABELS[selectedSyncStrategy]}</span>
-                </p>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                  {INVENTORY_SYNC_MODES.map((mode) => (
-                    <button
-                      key={mode.label}
-                      type="button"
-                      onClick={() => setSelectedSyncStrategy(mode.value)}
-                      className={`rounded-lg border p-3 text-left transition ${
-                        selectedSyncStrategy === mode.value
-                          ? "border-blue-400 bg-blue-50"
-                          : mode.recommended
-                          ? "border-emerald-300 bg-emerald-50/70"
-                          : "border-slate-200 bg-slate-50/40"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-slate-900">{mode.label}</p>
-                        {selectedSyncStrategy === mode.value ? (
-                          <Badge variant="default" className="bg-blue-600 text-white hover:bg-blue-600">
-                            Selected
-                          </Badge>
-                        ) : null}
-                        {mode.recommended ? (
-                          <Badge variant="secondary" className="bg-emerald-600 text-white hover:bg-emerald-600">
-                            Recommended
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <p className="mt-1 text-sm text-slate-600">{mode.description}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ) : null}
-
         <FilterableTabs
           tabs={importTabs}
           activeTab={activeTab}
@@ -1630,6 +1638,27 @@ function ProductsImportPageContent() {
                     </Select>
                   </div>
                 </div>
+
+                {isSyncMode ? (
+                  <div className="space-y-2">
+                    <Label>Sync Strategy</Label>
+                    <Select value={selectedSyncStrategy} onValueChange={(value) => setSelectedSyncStrategy(value as SyncStrategyValue)}>
+                      <SelectTrigger className="border-gray-300">
+                        <SelectValue placeholder="Select sync strategy" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {INVENTORY_SYNC_MODES.map((mode) => (
+                          <SelectItem key={mode.value} value={mode.value}>
+                            {mode.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-gray-500">
+                      {INVENTORY_SYNC_MODES.find((mode) => mode.value === selectedSyncStrategy)?.description}
+                    </p>
+                  </div>
+                ) : null}
 
                 <div className="space-y-2">
                   <Label>Import File</Label>
@@ -1894,7 +1923,7 @@ function ProductsImportPageContent() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {rejectedRows.map((row, idx) => (
+                        {paginatedRejectedRows.map((row, idx) => (
                           <TableRow key={`${row.phase}-${row.rowNumber}-${idx}`}>
                             <TableCell>{row.phase}</TableCell>
                             <TableCell>{row.rowNumber}</TableCell>
@@ -1918,6 +1947,34 @@ function ProductsImportPageContent() {
                         ))}
                       </TableBody>
                     </Table>
+                    {rejectedRows.length > PAGE_SIZE && (
+                      <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm text-gray-600">
+                          Showing {(rejectedPage - 1) * PAGE_SIZE + 1}-{Math.min(rejectedPage * PAGE_SIZE, rejectedRows.length)} of {rejectedRows.length}
+                        </p>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-gray-500">Page {rejectedPage} of {totalRejectedPages}</span>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setRejectedPage((prev) => Math.max(1, prev - 1))}
+                              disabled={rejectedPage === 1}
+                            >
+                              Previous
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setRejectedPage((prev) => Math.min(totalRejectedPages, prev + 1))}
+                              disabled={rejectedPage === totalRejectedPages}
+                            >
+                              Next
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -1934,6 +1991,19 @@ function ProductsImportPageContent() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm text-gray-600">
+                      Re-scan after creating products manually so this batch can match them before apply.
+                    </p>
+                    <Button
+                      variant="outline"
+                      className="border-gray-300"
+                      onClick={handleRescanNewProducts}
+                      disabled={!batchId || newProductRows.length === 0 || loadingAction !== ""}
+                    >
+                      {loadingAction === "rescan" ? "Rescanning..." : "Rescan New Products"}
+                    </Button>
+                  </div>
                   {newProductRows.length === 0 ? (
                     <p className="text-sm text-gray-600">No new products detected yet.</p>
                   ) : (
@@ -1972,6 +2042,7 @@ function ProductsImportPageContent() {
                                     size="sm"
                                     className="h-7 px-2 text-[11px]"
                                     onClick={() => openCreateDialog(row)}
+                                    disabled={loadingAction !== ""}
                                   >
                                     Create
                                   </Button>
