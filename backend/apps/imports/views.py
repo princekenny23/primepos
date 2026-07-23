@@ -110,6 +110,14 @@ class BaseImportView(APIView):
             return f'barcode:{barcode.lower()}'
         return f'name:{name.lower()}'
 
+    def _is_effectively_blank_row(self, row) -> bool:
+        for value in row.to_dict().values():
+            if pd.isna(value):
+                continue
+            if str(value).strip() != '':
+                return False
+        return True
+
     def _resolve_sync_mode(self, request) -> str:
         return str(
             request.headers.get('X-Sync-Mode')
@@ -375,6 +383,9 @@ class BaseImportView(APIView):
         seen_identity = set()
 
         for idx, row in df.iterrows():
+            if self._is_effectively_blank_row(row):
+                continue
+
             row_number = idx + 2
             errors: List[str] = []
             warnings: List[str] = []
@@ -801,6 +812,9 @@ class BaseImportView(APIView):
         row_results: List[Dict[str, Any]] = []
 
         for idx, row in df.iterrows():
+            if self._is_effectively_blank_row(row):
+                continue
+
             row_number = idx + 2
             errors: List[str] = []
             warnings: List[str] = []
