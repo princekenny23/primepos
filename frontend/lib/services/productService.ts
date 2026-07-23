@@ -639,15 +639,38 @@ export const productService = {
         return api.post(apiEndpoints.imports.productsApprove(batchId), {})
       },
 
+      async cancelImport(batchId: string, options?: {
+        mode?: string
+      }): Promise<{
+        batch_id: string
+        status: string
+        is_approved: boolean
+        already_cancelled?: boolean
+      }> {
+        const search = new URLSearchParams()
+        if (options?.mode) search.set('mode', options.mode)
+        const query = search.toString() ? `?${search.toString()}` : ''
+        return api.post(`${apiEndpoints.imports.productsCancel(batchId)}${query}`, {})
+      },
+
       async recoverImport(batchId: string, options?: {
         mode?: string
         syncStrategy?: string
+        restorePreviousState?: boolean
+        autoApply?: boolean
+        deleteSourceBatch?: boolean
       }): Promise<{
         source_batch_id: string
+        template_batch_id?: string
         batch_id: string
         status: string
         is_approved: boolean
         sync_strategy?: string
+        restore_previous_state?: boolean
+        auto_apply?: boolean
+        source_batch_deleted?: boolean
+        source_batch_deleted_id?: string | null
+        apply_summary?: any
         preview_summary?: {
           total_rows?: number
           valid_rows?: number
@@ -660,7 +683,94 @@ export const productService = {
         if (options?.mode) search.set('mode', options.mode)
         if (options?.syncStrategy) search.set('sync_strategy', options.syncStrategy)
         const query = search.toString() ? `?${search.toString()}` : ''
-        return api.post(`${apiEndpoints.imports.productsRecover(batchId)}${query}`, {})
+        return api.post(`${apiEndpoints.imports.productsRecover(batchId)}${query}`, {
+          restore_previous_state: options?.restorePreviousState,
+          auto_apply: options?.autoApply,
+          delete_source_batch: options?.deleteSourceBatch,
+        })
+      },
+
+      async rollbackImportPreview(batchId: string, options?: {
+        mode?: string
+      }): Promise<{
+        batch_id: string
+        can_rollback: boolean
+        detail?: string
+        summary: {
+          rows: number
+          products: number
+          net_delta: number
+          estimated_reversed_increases: number
+          estimated_reversed_decreases: number
+          would_be_negative: number
+        }
+        results: Array<{
+          mutation_id: number
+          row_number: number
+          product_id: string
+          product_name: string
+          outlet_id: string
+          before_quantity: number
+          applied_quantity: number
+          original_delta: number
+          reverse_delta: number
+          current_quantity: number
+          projected_quantity: number
+          would_be_negative: boolean
+        }>
+      }> {
+        const search = new URLSearchParams()
+        if (options?.mode) search.set('mode', options.mode)
+        const query = search.toString() ? `?${search.toString()}` : ''
+        return api.post(`${apiEndpoints.imports.productsRollbackPreview(batchId)}${query}`, {})
+      },
+
+      async rollbackImport(batchId: string, options?: {
+        mode?: string
+        idempotencyKey?: string
+      }): Promise<{
+        batch_id: string
+        status: string
+        idempotent_reuse?: boolean
+        rollback?: {
+          mutations_total?: number
+          mutations_reversed?: number
+          rollback_idempotency_key?: string
+          rolled_back_at?: string
+        }
+      }> {
+        const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null
+        const headers: HeadersInit = {}
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`
+        }
+        if (options?.idempotencyKey) {
+          headers['X-Idempotency-Key'] = options.idempotencyKey
+        }
+
+        const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
+        const search = new URLSearchParams()
+        if (options?.mode) search.set('mode', options.mode)
+        const url = `${API_BASE_URL}${apiEndpoints.imports.productsRollback(batchId)}${search.toString() ? `?${search.toString()}` : ''}`
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: JSON.stringify({
+            confirm: true,
+            idempotency_key: options?.idempotencyKey,
+          }),
+        })
+
+        const responseData = await response.json().catch(() => ({ detail: 'Unknown error' }))
+        if (!response.ok) {
+          throw new Error(responseData.detail || responseData.error || `HTTP ${response.status}: ${response.statusText}`)
+        }
+
+        return responseData
       },
 
       async applyImportWithOptions(batchId: string, options?: {

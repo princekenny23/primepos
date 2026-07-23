@@ -33,11 +33,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { productService } from "@/lib/services/productService"
-import { Archive, ArrowLeft, CheckCircle2, Download, Pencil, Plus, Upload, XCircle } from "lucide-react"
+import { Archive, ArrowLeft, CheckCircle2, Download, Menu, Pencil, Plus, Upload, XCircle } from "lucide-react"
 import * as XLSX from "xlsx"
 
 type BatchStatus = {
@@ -428,7 +436,7 @@ function ProductsImportPageContent() {
   const [historyDatePreset, setHistoryDatePreset] = useState<string>("all")
   const [historyDateFrom, setHistoryDateFrom] = useState<string>("")
   const [historyDateTo, setHistoryDateTo] = useState<string>("")
-  const [loadingAction, setLoadingAction] = useState<"" | "preview" | "approve" | "apply" | "refresh" | "rescan" | "recover">("")
+  const [loadingAction, setLoadingAction] = useState<"" | "preview" | "approve" | "apply" | "refresh" | "rescan" | "recover" | "rollback_preview" | "rollback_execute" | "cancel_sync">("")
   const [activeTab, setActiveTab] = useState("upload-preview")
   const [missingProducts, setMissingProducts] = useState<MissingCatalogProduct[]>([])
   const [missingLoading, setMissingLoading] = useState(false)
@@ -1263,6 +1271,9 @@ function ProductsImportPageContent() {
       const recovery = await productService.recoverImport(row.batch_id, {
         mode: requestMode,
         syncStrategy: row.sync_strategy || requestSyncStrategy,
+        restorePreviousState: false,
+        autoApply: false,
+        deleteSourceBatch: false,
       })
 
       setBatchId(recovery.batch_id)
@@ -1275,13 +1286,153 @@ function ProductsImportPageContent() {
       setActiveTab("import-summary")
 
       toast({
-        title: "Recovery Batch Created",
-        description: "A recovery sync batch has been created. Re-approve and run sync to restore data.",
+        title: "Recovery Ready For Re-Approval",
+        description: "Previous state is staged. Approve Process and then Run Sync when you are ready.",
       })
     } catch (error: any) {
       toast({
         title: "Recovery Failed",
         description: error?.message || "Unable to create a recovery batch.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingAction("")
+    }
+  }
+
+  const handleCancelSync = async () => {
+    if (!batchId) return
+
+    if (batchStatus?.status === "applying") {
+      toast({
+        title: "Sync In Progress",
+        description: "Wait for the current apply process to finish before cancelling.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (batchStatus?.status === "applied" && isSyncMode) {
+      setLoadingAction("cancel_sync")
+      try {
+        const preview = await productService.rollbackImportPreview(batchId, { mode: requestMode })
+        if (!preview.can_rollback) {
+          toast({
+            title: "Cancel Not Allowed",
+            description: preview.detail || "This applied sync cannot be reversed safely.",
+            variant: "destructive",
+          })
+          return
+        }
+
+        const confirmed = window.confirm(
+          `Cancel this applied sync and reverse stock changes?\n\nRows: ${preview.summary.rows}\nProducts: ${preview.summary.products}\nNet Delta: ${preview.summary.net_delta}`
+        )
+        if (!confirmed) return
+
+        const rollbackKey = `cancel-sync-${batchId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+        await productService.rollbackImport(batchId, {
+          mode: requestMode,
+          idempotencyKey: rollbackKey,
+        })
+
+        await refreshBatch(batchId)
+        setHistoryStatusFilter("cancelled")
+        setHistorySearchTerm(batchId)
+        await loadImportHistory(1)
+        setActiveTab("import-history")
+
+        toast({
+          title: "Sync Cancelled",
+          description: "Applied sync was cancelled and reversed. Check Process History for confirmation.",
+        })
+      } catch (error: any) {
+        toast({
+          title: "Cancel Sync Failed",
+          description: error?.message || "Unable to cancel this applied sync.",
+          variant: "destructive",
+        })
+      } finally {
+        setLoadingAction("")
+      }
+      return
+    }
+
+    const confirmed = window.confirm(
+      "Cancel current sync process? This will mark the batch as Cancelled in sync history."
+    )
+    if (!confirmed) return
+
+    setLoadingAction("cancel_sync")
+    try {
+      await productService.cancelImport(batchId, { mode: requestMode })
+      await refreshBatch(batchId)
+      setHistoryStatusFilter("cancelled")
+      setHistorySearchTerm(batchId)
+      await loadImportHistory(1)
+      setActiveTab("import-history")
+
+      toast({
+        title: "Sync Cancelled",
+        description: "Batch was marked as Cancelled. Check Process History for confirmation.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Cancel Sync Failed",
+        description: error?.message || "Unable to cancel this sync batch.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingAction("")
+    }
+  }
+
+  const handleRollbackFromHistory = async (row: ImportHistoryRow) => {
+    if (!isSyncMode) return
+    if (!row?.batch_id) return
+
+    setLoadingAction("rollback_preview")
+    try {
+      const preview = await productService.rollbackImportPreview(row.batch_id, {
+        mode: requestMode,
+      })
+
+      if (!preview.can_rollback) {
+        toast({
+          title: "Rollback Not Allowed",
+          description:
+            preview.detail ||
+            `Rollback cannot continue. ${preview.summary?.would_be_negative || 0} product(s) would go negative.`,
+          variant: "destructive",
+        })
+        return
+      }
+
+      const confirmed = window.confirm(
+        `Reverse this sync batch?\n\nRows: ${preview.summary.rows}\nProducts: ${preview.summary.products}\nNet Delta: ${preview.summary.net_delta}`
+      )
+      if (!confirmed) return
+
+      setLoadingAction("rollback_execute")
+      const rollbackKey = `rollback-${row.batch_id}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      await productService.rollbackImport(row.batch_id, {
+        mode: requestMode,
+        idempotencyKey: rollbackKey,
+      })
+
+      await loadImportHistory(1)
+      if (batchId === row.batch_id) {
+        await refreshBatch(row.batch_id)
+      }
+
+      toast({
+        title: "Sync Reversed",
+        description: "Stock deltas from this sync were reversed successfully.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Rollback Failed",
+        description: error?.message || "Unable to reverse this sync batch.",
         variant: "destructive",
       })
     } finally {
@@ -1935,6 +2086,16 @@ function ProductsImportPageContent() {
                   >
                     {loadingAction === "apply" ? "Applying..." : (isSyncMode ? "Run Sync" : "Apply Import")}
                   </Button>
+                  {isSyncMode && (
+                    <Button
+                      variant="outline"
+                      className="border-gray-300"
+                      onClick={handleCancelSync}
+                      disabled={!batchId || loadingAction !== ""}
+                    >
+                      {loadingAction === "cancel_sync" ? "Cancelling..." : "Cancel Sync"}
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -2270,8 +2431,10 @@ function ProductsImportPageContent() {
                       <SelectContent>
                         <SelectItem value="all">All</SelectItem>
                         <SelectItem value="preview_ready">Preview Ready</SelectItem>
+                        <SelectItem value="approved">Approved</SelectItem>
                         <SelectItem value="applying">Applying</SelectItem>
                         <SelectItem value="applied">Applied</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
                         <SelectItem value="failed">Failed</SelectItem>
                       </SelectContent>
                     </Select>
@@ -2323,7 +2486,7 @@ function ProductsImportPageContent() {
                         <TableHead className="w-28">Status</TableHead>
                         <TableHead className="w-24">Approved</TableHead>
                         <TableHead>List Details</TableHead>
-                        <TableHead className="w-40 text-right">Action</TableHead>
+                        <TableHead className="w-20 text-right">Action</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2352,37 +2515,59 @@ function ProductsImportPageContent() {
                               {row.total_rows} rows | valid {row.valid_rows} | invalid {row.invalid_rows} | imported {row.imported} | failed {row.failed}
                             </TableCell>
                             <TableCell className="text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  variant="default"
-                                  size="sm"
-                                  onClick={() => handleResumeFromHistory(row)}
-                                  disabled={loadingAction !== ""}
-                                >
-                                  {row.status === "applied" ? "Open Batch" : "Continue Sync"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="border-gray-300"
-                                  onClick={() => handleRecoverFromHistory(row)}
-                                  disabled={loadingAction !== "" || row.status?.toLowerCase() !== "applied"}
-                                >
-                                  {loadingAction === "recover" ? "Recovering..." : "Full Recovery"}
-                                </Button>
-                                <Button asChild variant="outline" size="sm" className="border-gray-300">
-                                  <Link href={`/dashboard/inventory/products/import/history/${row.batch_id}?mode=${historyModeParam}`}>
-                                    View Full History
-                                  </Link>
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="border-gray-300"
-                                  onClick={() => handleDownloadBatchSource(row.batch_id)}
-                                >
-                                  Source
-                                </Button>
+                              <div className="flex justify-end">
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="border-gray-300"
+                                      aria-label={`Open actions for batch ${row.batch_id}`}
+                                    >
+                                      <Menu className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-52">
+                                    <DropdownMenuLabel>Batch Actions</DropdownMenuLabel>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem
+                                      onClick={() => handleResumeFromHistory(row)}
+                                      disabled={loadingAction !== ""}
+                                    >
+                                      {row.status === "applied" ? "Open Batch" : "Continue Sync"}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => handleRecoverFromHistory(row)}
+                                      disabled={loadingAction !== "" || row.status?.toLowerCase() !== "applied"}
+                                    >
+                                      {loadingAction === "recover" ? "Recovering..." : "Full Recovery"}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => handleRollbackFromHistory(row)}
+                                      disabled={
+                                        loadingAction !== "" ||
+                                        !isSyncMode ||
+                                        row.status?.toLowerCase() !== "applied"
+                                      }
+                                    >
+                                      {loadingAction === "rollback_preview" || loadingAction === "rollback_execute"
+                                        ? "Reversing..."
+                                        : "Reverse Sync"}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem asChild>
+                                      <Link href={`/dashboard/inventory/products/import/history/${row.batch_id}?mode=${historyModeParam}`}>
+                                        View Full History
+                                      </Link>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={() => handleDownloadBatchSource(row.batch_id)}
+                                      disabled={loadingAction !== ""}
+                                    >
+                                      Source
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </div>
                             </TableCell>
                           </TableRow>

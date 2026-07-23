@@ -3,6 +3,7 @@ from django.conf import settings
 from django.db import models
 from apps.tenants.models import Tenant
 from apps.outlets.models import Outlet
+from apps.products.models import Product
 
 
 class ImportBatch(models.Model):
@@ -13,14 +14,18 @@ class ImportBatch(models.Model):
 
     STATUS_UPLOADED = 'uploaded'
     STATUS_PREVIEW_READY = 'preview_ready'
+    STATUS_APPROVED = 'approved'
     STATUS_APPLYING = 'applying'
     STATUS_APPLIED = 'applied'
+    STATUS_CANCELLED = 'cancelled'
     STATUS_FAILED = 'failed'
     STATUS_CHOICES = [
         (STATUS_UPLOADED, 'Uploaded'),
         (STATUS_PREVIEW_READY, 'Preview Ready'),
+        (STATUS_APPROVED, 'Approved'),
         (STATUS_APPLYING, 'Applying'),
         (STATUS_APPLIED, 'Applied'),
+        (STATUS_CANCELLED, 'Cancelled'),
         (STATUS_FAILED, 'Failed'),
     ]
 
@@ -153,4 +158,38 @@ class ImportApplyError(models.Model):
             models.Index(fields=['batch', 'chunk_index']),
             models.Index(fields=['batch', 'row_number']),
             models.Index(fields=['error_code']),
+        ]
+
+
+class ImportStockMutation(models.Model):
+    """Track inventory deltas applied by an inventory sync batch per product row.
+
+    This enables delta-based rollback that preserves later sales/purchases by
+    reversing only the sync-applied quantity deltas.
+    """
+
+    batch = models.ForeignKey(ImportBatch, on_delete=models.CASCADE, related_name='stock_mutations')
+    row_number = models.IntegerField()
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='import_stock_mutations')
+    outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='import_stock_mutations')
+
+    before_quantity = models.IntegerField(default=0)
+    applied_quantity = models.IntegerField(default=0)
+    quantity_delta = models.IntegerField(default=0)
+    sync_strategy = models.CharField(max_length=64, blank=True)
+    movement_reason = models.CharField(max_length=255, blank=True)
+
+    rolled_back = models.BooleanField(default=False)
+    rolled_back_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'imports_importstockmutation'
+        ordering = ['row_number', 'created_at']
+        unique_together = [['batch', 'row_number', 'product']]
+        indexes = [
+            models.Index(fields=['batch', 'rolled_back']),
+            models.Index(fields=['product', 'outlet']),
+            models.Index(fields=['created_at']),
         ]

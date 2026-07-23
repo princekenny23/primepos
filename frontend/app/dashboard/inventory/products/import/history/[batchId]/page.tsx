@@ -63,6 +63,7 @@ export default function ImportHistoryDetailPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [page, setPage] = useState(1)
   const [isExporting, setIsExporting] = useState(false)
+  const [isReversing, setIsReversing] = useState(false)
   const [payload, setPayload] = useState<ImportRowsPayload | null>(null)
 
   const csvEscape = (value: string | number) => {
@@ -204,6 +205,51 @@ export default function ImportHistoryDetailPage() {
     }
   }
 
+  const handleReverseSync = async () => {
+    if (!isSyncMode || !batchId) return
+
+    setIsReversing(true)
+    try {
+      const preview = await productService.rollbackImportPreview(batchId, { mode: importMode })
+      if (!preview.can_rollback) {
+        toast({
+          title: "Rollback Not Allowed",
+          description:
+            preview.detail ||
+            `Rollback blocked. ${preview.summary?.would_be_negative || 0} product(s) would go negative.`,
+          variant: "destructive",
+        })
+        return
+      }
+
+      const confirmed = window.confirm(
+        `Reverse this sync batch?\n\nRows: ${preview.summary.rows}\nProducts: ${preview.summary.products}\nNet Delta: ${preview.summary.net_delta}`
+      )
+      if (!confirmed) return
+
+      const rollbackKey = `rollback-${batchId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+      await productService.rollbackImport(batchId, {
+        mode: importMode,
+        idempotencyKey: rollbackKey,
+      })
+
+      toast({
+        title: "Sync Reversed",
+        description: "Stock deltas from this sync were reversed successfully.",
+      })
+
+      await loadRows(1)
+    } catch (error: any) {
+      toast({
+        title: "Rollback Failed",
+        description: error?.message || "Unable to reverse this sync batch.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsReversing(false)
+    }
+  }
+
   return (
     <DashboardLayout>
       <PageLayout
@@ -220,6 +266,16 @@ export default function ImportHistoryDetailPage() {
               <Download className="mr-2 h-4 w-4" />
               {isExporting ? "Exporting..." : "Export CSV"}
             </Button>
+            {isSyncMode && (
+              <Button
+                variant="outline"
+                className="border-gray-300"
+                onClick={handleReverseSync}
+                disabled={isReversing || loading || payload?.status?.toLowerCase() !== "applied"}
+              >
+                {isReversing ? "Reversing..." : "Reverse Sync"}
+              </Button>
+            )}
             <Button asChild variant="default">
               <Link href={isSyncMode ? `/dashboard/inventory/products/import?mode=sync&batchId=${batchId}` : `/dashboard/inventory/products/import?batchId=${batchId}`}>
                 Open In Import Workspace

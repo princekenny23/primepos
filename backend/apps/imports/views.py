@@ -20,7 +20,7 @@ from apps.outlets.models import Outlet
 from apps.products.models import Product, Category
 from apps.products.views import ProductViewSet
 from apps.tenants.permissions import HasTenantModuleAccess
-from .models import ImportApplyError, ImportAuditEvent, ImportBatch, ImportRowResult
+from .models import ImportApplyError, ImportAuditEvent, ImportBatch, ImportRowResult, ImportStockMutation
 from apps.inventory.stock_helpers import adjust_stock, get_available_stock
 
 logger = logging.getLogger(__name__)
@@ -182,6 +182,18 @@ class BaseImportView(APIView):
             return 'yes'
         if text in ('0', 'false', 'no', 'n', 'inactive'):
             return 'no'
+        return default
+
+    def _coerce_bool(self, value, default=False):
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ('1', 'true', 'yes', 'y', 'on'):
+            return True
+        if text in ('0', 'false', 'no', 'n', 'off'):
+            return False
         return default
 
     def _recompute_batch_preview_totals(self, batch: ImportBatch):
@@ -531,6 +543,7 @@ class BaseImportView(APIView):
 
         with transaction.atomic():
             batch.apply_errors.all().delete()
+            batch.stock_mutations.all().delete()
             batch.status = ImportBatch.STATUS_APPLYING
             batch.approved_by = request.user
             batch.apply_idempotency_key = request.headers.get('X-Idempotency-Key') or request.data.get('idempotency_key')
@@ -569,6 +582,13 @@ class BaseImportView(APIView):
             self.SYNC_STRATEGY_UPDATE_EXISTING,
             self.SYNC_STRATEGY_STOCK_ONLY,
         }
+        # Safety guard: stock overwrite is explicit and OFF by default unless
+        # strategy is stock_only (where stock changes are the primary intent).
+        explicit_stock_update = self._coerce_bool(
+            request.data.get('update_stock_quantities'),
+            default=(sync_strategy == self.SYNC_STRATEGY_STOCK_ONLY),
+        )
+        apply_stock_updates = apply_stock_updates and explicit_stock_update
         allow_create = sync_strategy in {
             self.SYNC_STRATEGY_FULL_SYNC,
             self.SYNC_STRATEGY_CREATE_NEW,
@@ -720,13 +740,28 @@ class BaseImportView(APIView):
 
                 should_apply_stock = apply_stock_updates or product_was_created
                 if should_apply_stock and target_stock is not None and target_stock != original_stock:
+                    movement_reason = f'Inventory sync import row {row_number}'
                     adjust_stock(
                         product=product,
                         outlet=outlet,
                         new_quantity=target_stock,
                         user=request.user,
-                        reason=f'Inventory sync import row {row_number}',
+                        reason=movement_reason,
                     )
+
+                    # Persist exact delta for deterministic rollback.
+                    ImportStockMutation.objects.create(
+                        batch=batch,
+                        row_number=row_number,
+                        product=product,
+                        outlet=outlet,
+                        before_quantity=original_stock,
+                        applied_quantity=target_stock,
+                        quantity_delta=(target_stock - original_stock),
+                        sync_strategy=sync_strategy,
+                        movement_reason=movement_reason,
+                    )
+
                     if target_stock > original_stock:
                         stock_increases += 1
                     else:
@@ -768,6 +803,7 @@ class BaseImportView(APIView):
             'prices_changed': prices_changed,
             'skipped_by_strategy': skipped_by_strategy,
             'sync_strategy': sync_strategy,
+            'stock_updates_enabled': apply_stock_updates,
             'errors': total_failed,
         }
 
@@ -1039,7 +1075,7 @@ class ProductImportApplyView(BaseImportView):
                 'already_applied': True,
             })
 
-        if batch.status != ImportBatch.STATUS_PREVIEW_READY:
+        if batch.status not in [ImportBatch.STATUS_PREVIEW_READY, ImportBatch.STATUS_APPROVED]:
             return Response({'detail': f'Batch is not ready to apply (status={batch.status})'}, status=status.HTTP_409_CONFLICT)
 
         if batch.valid_rows <= 0:
@@ -1776,12 +1812,22 @@ class ProductImportApproveView(BaseImportView):
         except ImportBatch.DoesNotExist:
             return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if batch.status not in [ImportBatch.STATUS_PREVIEW_READY, ImportBatch.STATUS_FAILED]:
+        if batch.status == ImportBatch.STATUS_APPROVED and batch.is_approved:
+            return Response({
+                'batch_id': str(batch.id),
+                'status': batch.status,
+                'is_approved': batch.is_approved,
+                'approved_at': batch.approved_at,
+            })
+
+        if batch.status not in [ImportBatch.STATUS_PREVIEW_READY, ImportBatch.STATUS_FAILED, ImportBatch.STATUS_CANCELLED]:
             return Response({'detail': f'Batch cannot be approved in current status: {batch.status}'}, status=status.HTTP_409_CONFLICT)
 
-        # Failed batches need to be moved back to preview_ready for a new apply attempt.
-        if batch.status == ImportBatch.STATUS_FAILED:
-            batch.status = ImportBatch.STATUS_PREVIEW_READY
+        # Failed/cancelled batches move back into approval stage for a new apply attempt.
+        if batch.status in [ImportBatch.STATUS_FAILED, ImportBatch.STATUS_CANCELLED]:
+            batch.status = ImportBatch.STATUS_APPROVED
+        else:
+            batch.status = ImportBatch.STATUS_APPROVED
 
         batch.is_approved = True
         batch.approved_by = request.user
@@ -1801,6 +1847,62 @@ class ProductImportApproveView(BaseImportView):
             'status': batch.status,
             'is_approved': batch.is_approved,
             'approved_at': batch.approved_at,
+        })
+
+
+class ProductImportCancelView(BaseImportView):
+    def post(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sync_mode = self._resolve_sync_mode(request)
+
+        try:
+            batch = ImportBatch.objects.get(id=batch_id, tenant=tenant, entity_type=ImportBatch.ENTITY_PRODUCTS)
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sync_mode and batch.sync_mode != sync_mode:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if batch.status == ImportBatch.STATUS_CANCELLED:
+            return Response({
+                'batch_id': str(batch.id),
+                'status': batch.status,
+                'is_approved': batch.is_approved,
+                'already_cancelled': True,
+            })
+
+        if batch.status == ImportBatch.STATUS_APPLYING:
+            return Response({'detail': 'Cannot cancel while apply is in progress.'}, status=status.HTTP_409_CONFLICT)
+
+        if batch.status == ImportBatch.STATUS_APPLIED:
+            return Response(
+                {'detail': 'Applied batches must be reversed using rollback before cancellation.'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        with transaction.atomic():
+            batch.status = ImportBatch.STATUS_CANCELLED
+            batch.is_approved = False
+            batch.approved_by = None
+            batch.approved_at = None
+            batch.apply_idempotency_key = None
+            batch.save(update_fields=['status', 'is_approved', 'approved_by', 'approved_at', 'apply_idempotency_key', 'updated_at'])
+
+            ImportAuditEvent.objects.create(
+                batch=batch,
+                event_type='cancelled',
+                message='Import sync process cancelled.',
+                metadata={'cancelled_at': timezone.now().isoformat()},
+                created_by=request.user,
+            )
+
+        return Response({
+            'batch_id': str(batch.id),
+            'status': batch.status,
+            'is_approved': batch.is_approved,
         })
 
 
@@ -1829,7 +1931,28 @@ class ProductImportRecoverView(BaseImportView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        source_rows = list(source_batch.rows.all().order_by('row_number'))
+        restore_previous_state = str(request.data.get('restore_previous_state', 'false')).lower() in ('1', 'true', 'yes', 'y')
+        auto_apply = str(request.data.get('auto_apply', 'false')).lower() in ('1', 'true', 'yes', 'y')
+        delete_source_batch = str(request.data.get('delete_source_batch', 'false')).lower() in ('1', 'true', 'yes', 'y')
+
+        template_batch = source_batch
+        recovered_from_previous_batch = False
+        if restore_previous_state:
+            template_batch = ImportBatch.objects.filter(
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_PRODUCTS,
+                sync_mode=source_batch.sync_mode,
+                outlet=source_batch.outlet,
+                status=ImportBatch.STATUS_APPLIED,
+                created_at__lt=source_batch.created_at,
+            ).order_by('-created_at').first()
+
+            if not template_batch:
+                template_batch = source_batch
+            else:
+                recovered_from_previous_batch = True
+
+        source_rows = list(template_batch.rows.all().order_by('row_number'))
         if not source_rows:
             return Response({'detail': 'No staged rows found in this batch.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1839,8 +1962,8 @@ class ProductImportRecoverView(BaseImportView):
         valid_rows = max(0, total_rows - invalid_rows)
 
         sync_strategy = (
-            (source_batch.preview_summary or {}).get('sync_strategy')
-            or (source_batch.apply_summary or {}).get('sync_strategy')
+            (template_batch.preview_summary or {}).get('sync_strategy')
+            or (template_batch.apply_summary or {}).get('sync_strategy')
             or self.SYNC_STRATEGY_FULL_SYNC
         )
 
@@ -1859,8 +1982,8 @@ class ProductImportRecoverView(BaseImportView):
                 entity_type=source_batch.entity_type,
                 sync_mode=source_batch.sync_mode,
                 status=ImportBatch.STATUS_PREVIEW_READY,
-                source_filename=source_batch.source_filename,
-                source_file=source_batch.source_file,
+                source_filename=template_batch.source_filename,
+                source_file=template_batch.source_file,
                 total_rows=total_rows,
                 valid_rows=valid_rows,
                 invalid_rows=invalid_rows,
@@ -1891,8 +2014,13 @@ class ProductImportRecoverView(BaseImportView):
                 message='Recovery batch created from applied inventory sync.',
                 metadata={
                     'source_batch_id': str(source_batch.id),
+                    'template_batch_id': str(template_batch.id),
                     'sync_strategy': sync_strategy,
                     'rows_copied': total_rows,
+                    'restore_previous_state': restore_previous_state,
+                    'recovered_from_previous_batch': recovered_from_previous_batch,
+                    'auto_apply': auto_apply,
+                    'delete_source_batch': delete_source_batch,
                 },
                 created_by=request.user,
             )
@@ -1903,20 +2031,280 @@ class ProductImportRecoverView(BaseImportView):
                 message='Recovery batch created from this applied sync batch.',
                 metadata={
                     'recovered_batch_id': str(recovered_batch.id),
+                    'template_batch_id': str(template_batch.id),
                     'sync_strategy': sync_strategy,
                     'rows_copied': total_rows,
+                    'restore_previous_state': restore_previous_state,
+                    'recovered_from_previous_batch': recovered_from_previous_batch,
+                    'auto_apply': auto_apply,
+                    'delete_source_batch': delete_source_batch,
                 },
                 created_by=request.user,
             )
 
+        apply_response = None
+        source_batch_deleted = False
+        source_batch_deleted_id = None
+
+        if auto_apply:
+            recovered_batch.is_approved = True
+            recovered_batch.approved_by = request.user
+            recovered_batch.approved_at = timezone.now()
+            recovered_batch.save(update_fields=['is_approved', 'approved_by', 'approved_at', 'updated_at'])
+
+            apply_response = self._apply_inventory_sync_batch(request, recovered_batch, sync_strategy)
+            apply_success = int(getattr(apply_response, 'status_code', 500)) == status.HTTP_200_OK
+
+            if delete_source_batch and apply_success:
+                source_batch_deleted_id = str(source_batch.id)
+                source_batch.delete()
+                source_batch_deleted = True
+
         return Response({
             'source_batch_id': str(source_batch.id),
+            'template_batch_id': str(template_batch.id),
             'batch_id': str(recovered_batch.id),
             'status': recovered_batch.status,
             'is_approved': recovered_batch.is_approved,
             'sync_strategy': sync_strategy,
             'preview_summary': recovered_batch.preview_summary,
+            'restore_previous_state': restore_previous_state,
+            'recovered_from_previous_batch': recovered_from_previous_batch,
+            'auto_apply': auto_apply,
+            'source_batch_deleted': source_batch_deleted,
+            'source_batch_deleted_id': source_batch_deleted_id,
+            'apply_summary': recovered_batch.apply_summary if auto_apply else None,
         }, status=status.HTTP_201_CREATED)
+
+
+class ProductImportRollbackPreviewView(BaseImportView):
+    def post(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sync_mode = self._resolve_sync_mode(request)
+
+        try:
+            batch = ImportBatch.objects.select_related('outlet').get(
+                id=batch_id,
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_PRODUCTS,
+            )
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sync_mode and batch.sync_mode != sync_mode:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if batch.sync_mode != ImportBatch.MODE_INVENTORY_SYNC:
+            return Response({'detail': 'Rollback is available for inventory sync batches only.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if batch.status != ImportBatch.STATUS_APPLIED:
+            return Response({'detail': f'Only applied batches can be rolled back (current status={batch.status}).'}, status=status.HTTP_409_CONFLICT)
+
+        mutations = list(
+            batch.stock_mutations.select_related('product', 'outlet').filter(rolled_back=False).order_by('row_number', 'id')
+        )
+        if not mutations:
+            return Response({
+                'batch_id': str(batch.id),
+                'can_rollback': False,
+                'detail': 'No stock mutations available to roll back for this batch.',
+                'summary': {
+                    'rows': 0,
+                    'products': 0,
+                    'net_delta': 0,
+                    'estimated_reversed_increases': 0,
+                    'estimated_reversed_decreases': 0,
+                    'would_be_negative': 0,
+                },
+                'results': [],
+            })
+
+        results = []
+        net_delta = 0
+        reversed_increases = 0
+        reversed_decreases = 0
+        would_be_negative = 0
+
+        for mutation in mutations:
+            current_quantity = int(get_available_stock(mutation.product, mutation.outlet) or 0)
+            reverse_delta = -int(mutation.quantity_delta or 0)
+            projected_quantity = current_quantity + reverse_delta
+            is_negative = projected_quantity < 0
+            if is_negative:
+                would_be_negative += 1
+
+            if reverse_delta > 0:
+                reversed_increases += 1
+            elif reverse_delta < 0:
+                reversed_decreases += 1
+
+            net_delta += reverse_delta
+            results.append({
+                'mutation_id': mutation.id,
+                'row_number': mutation.row_number,
+                'product_id': str(mutation.product_id),
+                'product_name': mutation.product.name,
+                'outlet_id': str(mutation.outlet_id),
+                'before_quantity': mutation.before_quantity,
+                'applied_quantity': mutation.applied_quantity,
+                'original_delta': mutation.quantity_delta,
+                'reverse_delta': reverse_delta,
+                'current_quantity': current_quantity,
+                'projected_quantity': projected_quantity,
+                'would_be_negative': is_negative,
+            })
+
+        return Response({
+            'batch_id': str(batch.id),
+            'can_rollback': would_be_negative == 0,
+            'summary': {
+                'rows': len(mutations),
+                'products': len({m.product_id for m in mutations}),
+                'net_delta': net_delta,
+                'estimated_reversed_increases': reversed_increases,
+                'estimated_reversed_decreases': reversed_decreases,
+                'would_be_negative': would_be_negative,
+            },
+            'results': results,
+        })
+
+
+class ProductImportRollbackExecuteView(BaseImportView):
+    def post(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sync_mode = self._resolve_sync_mode(request)
+
+        try:
+            batch = ImportBatch.objects.select_related('outlet').get(
+                id=batch_id,
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_PRODUCTS,
+            )
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sync_mode and batch.sync_mode != sync_mode:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if batch.sync_mode != ImportBatch.MODE_INVENTORY_SYNC:
+            return Response({'detail': 'Rollback is available for inventory sync batches only.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if batch.status != ImportBatch.STATUS_APPLIED:
+            return Response({'detail': f'Only applied batches can be rolled back (current status={batch.status}).'}, status=status.HTTP_409_CONFLICT)
+
+        confirm = self._coerce_bool(request.data.get('confirm'), default=False)
+        if not confirm:
+            return Response(
+                {'detail': 'Rollback confirmation required. Send {"confirm": true}.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rollback_idempotency_key = request.headers.get('X-Idempotency-Key') or request.data.get('idempotency_key')
+        if rollback_idempotency_key:
+            existing_event = ImportAuditEvent.objects.filter(
+                batch=batch,
+                event_type='rollback_completed',
+                metadata__rollback_idempotency_key=rollback_idempotency_key,
+            ).order_by('-created_at').first()
+            if existing_event:
+                return Response({
+                    'batch_id': str(batch.id),
+                    'status': 'rolled_back',
+                    'idempotent_reuse': True,
+                    'rollback': existing_event.metadata,
+                })
+
+        mutations = list(
+            batch.stock_mutations.select_related('product', 'outlet').filter(rolled_back=False).order_by('row_number', 'id')
+        )
+        if not mutations:
+            return Response({'detail': 'No stock mutations left to roll back for this batch.'}, status=status.HTTP_409_CONFLICT)
+
+        try:
+            with transaction.atomic():
+                adjusted = 0
+                errors = []
+
+                for mutation in mutations:
+                    current_quantity = int(get_available_stock(mutation.product, mutation.outlet) or 0)
+                    reverse_delta = -int(mutation.quantity_delta or 0)
+                    target_quantity = current_quantity + reverse_delta
+
+                    if target_quantity < 0:
+                        errors.append({
+                            'mutation_id': mutation.id,
+                            'product_id': str(mutation.product_id),
+                            'product_name': mutation.product.name,
+                            'current_quantity': current_quantity,
+                            'reverse_delta': reverse_delta,
+                            'projected_quantity': target_quantity,
+                        })
+                        continue
+
+                    adjust_stock(
+                        product=mutation.product,
+                        outlet=mutation.outlet,
+                        new_quantity=target_quantity,
+                        user=request.user,
+                        reason=f'Inventory sync rollback batch {batch.id} row {mutation.row_number}',
+                    )
+                    mutation.rolled_back = True
+                    mutation.rolled_back_at = timezone.now()
+                    mutation.save(update_fields=['rolled_back', 'rolled_back_at'])
+                    adjusted += 1
+
+                if errors:
+                    raise ValueError(errors)
+
+                rollback_metadata = {
+                    'batch_id': str(batch.id),
+                    'mutations_total': len(mutations),
+                    'mutations_reversed': adjusted,
+                    'rollback_idempotency_key': rollback_idempotency_key,
+                    'rolled_back_at': timezone.now().isoformat(),
+                }
+                ImportAuditEvent.objects.create(
+                    batch=batch,
+                    event_type='rollback_completed',
+                    message='Inventory sync rollback completed',
+                    metadata=rollback_metadata,
+                    created_by=request.user,
+                )
+
+                apply_summary = batch.apply_summary if isinstance(batch.apply_summary, dict) else {}
+                apply_summary['rollback'] = {
+                    'completed': True,
+                    'mutations_reversed': adjusted,
+                    'rolled_back_at': timezone.now().isoformat(),
+                }
+                batch.apply_summary = apply_summary
+                batch.status = ImportBatch.STATUS_CANCELLED
+                batch.is_approved = False
+                batch.save(update_fields=['apply_summary', 'status', 'is_approved', 'updated_at'])
+        except ValueError as rollback_error:
+            details = rollback_error.args[0] if rollback_error.args else []
+            return Response(
+                {
+                    'detail': 'Rollback aborted because at least one product would go negative.',
+                    'errors': details,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        return Response({
+            'batch_id': str(batch.id),
+            'status': batch.status,
+            'rollback': {
+                'mutations_total': len(mutations),
+                'mutations_reversed': len(mutations),
+            },
+        })
 
 
 class ProductImportErrorsView(BaseImportView):
