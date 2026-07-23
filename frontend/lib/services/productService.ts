@@ -639,6 +639,30 @@ export const productService = {
         return api.post(apiEndpoints.imports.productsApprove(batchId), {})
       },
 
+      async recoverImport(batchId: string, options?: {
+        mode?: string
+        syncStrategy?: string
+      }): Promise<{
+        source_batch_id: string
+        batch_id: string
+        status: string
+        is_approved: boolean
+        sync_strategy?: string
+        preview_summary?: {
+          total_rows?: number
+          valid_rows?: number
+          invalid_rows?: number
+          warning_rows?: number
+          sync_strategy?: string
+        }
+      }> {
+        const search = new URLSearchParams()
+        if (options?.mode) search.set('mode', options.mode)
+        if (options?.syncStrategy) search.set('sync_strategy', options.syncStrategy)
+        const query = search.toString() ? `?${search.toString()}` : ''
+        return api.post(`${apiEndpoints.imports.productsRecover(batchId)}${query}`, {})
+      },
+
       async applyImportWithOptions(batchId: string, options?: {
         idempotencyKey?: string
         chunkSize?: number

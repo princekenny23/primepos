@@ -1804,6 +1804,121 @@ class ProductImportApproveView(BaseImportView):
         })
 
 
+class ProductImportRecoverView(BaseImportView):
+    def post(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        sync_mode = self._resolve_sync_mode(request)
+
+        try:
+            source_batch = ImportBatch.objects.get(id=batch_id, tenant=tenant, entity_type=ImportBatch.ENTITY_PRODUCTS)
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if sync_mode and source_batch.sync_mode != sync_mode:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if source_batch.sync_mode != ImportBatch.MODE_INVENTORY_SYNC:
+            return Response({'detail': 'Recovery is available for inventory sync batches only.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if source_batch.status != ImportBatch.STATUS_APPLIED:
+            return Response(
+                {'detail': f'Only applied batches can be recovered (current status={source_batch.status}).'},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        source_rows = list(source_batch.rows.all().order_by('row_number'))
+        if not source_rows:
+            return Response({'detail': 'No staged rows found in this batch.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        total_rows = len(source_rows)
+        invalid_rows = sum(1 for row in source_rows if row.status == ImportRowResult.STATUS_INVALID)
+        warning_rows = sum(1 for row in source_rows if row.status == ImportRowResult.STATUS_WARNING)
+        valid_rows = max(0, total_rows - invalid_rows)
+
+        sync_strategy = (
+            (source_batch.preview_summary or {}).get('sync_strategy')
+            or (source_batch.apply_summary or {}).get('sync_strategy')
+            or self.SYNC_STRATEGY_FULL_SYNC
+        )
+
+        preview_summary = {
+            'total_rows': total_rows,
+            'valid_rows': valid_rows,
+            'invalid_rows': invalid_rows,
+            'warning_rows': warning_rows,
+            'sync_strategy': sync_strategy,
+        }
+
+        with transaction.atomic():
+            recovered_batch = ImportBatch.objects.create(
+                tenant=source_batch.tenant,
+                outlet=source_batch.outlet,
+                entity_type=source_batch.entity_type,
+                sync_mode=source_batch.sync_mode,
+                status=ImportBatch.STATUS_PREVIEW_READY,
+                source_filename=source_batch.source_filename,
+                source_file=source_batch.source_file,
+                total_rows=total_rows,
+                valid_rows=valid_rows,
+                invalid_rows=invalid_rows,
+                warning_rows=warning_rows,
+                preview_summary=preview_summary,
+                created_by=request.user,
+                previewed_at=timezone.now(),
+            )
+
+            ImportRowResult.objects.bulk_create([
+                ImportRowResult(
+                    batch=recovered_batch,
+                    row_number=row.row_number,
+                    status=row.status,
+                    action=row.action,
+                    identity_key=row.identity_key,
+                    errors=row.errors,
+                    warnings=row.warnings,
+                    raw_data=row.raw_data,
+                    normalized_data=row.normalized_data,
+                )
+                for row in source_rows
+            ], batch_size=500)
+
+            ImportAuditEvent.objects.create(
+                batch=recovered_batch,
+                event_type='recovery_created',
+                message='Recovery batch created from applied inventory sync.',
+                metadata={
+                    'source_batch_id': str(source_batch.id),
+                    'sync_strategy': sync_strategy,
+                    'rows_copied': total_rows,
+                },
+                created_by=request.user,
+            )
+
+            ImportAuditEvent.objects.create(
+                batch=source_batch,
+                event_type='recovery_requested',
+                message='Recovery batch created from this applied sync batch.',
+                metadata={
+                    'recovered_batch_id': str(recovered_batch.id),
+                    'sync_strategy': sync_strategy,
+                    'rows_copied': total_rows,
+                },
+                created_by=request.user,
+            )
+
+        return Response({
+            'source_batch_id': str(source_batch.id),
+            'batch_id': str(recovered_batch.id),
+            'status': recovered_batch.status,
+            'is_approved': recovered_batch.is_approved,
+            'sync_strategy': sync_strategy,
+            'preview_summary': recovered_batch.preview_summary,
+        }, status=status.HTTP_201_CREATED)
+
+
 class ProductImportErrorsView(BaseImportView):
     def get(self, request, batch_id):
         tenant = self._resolve_tenant(request)

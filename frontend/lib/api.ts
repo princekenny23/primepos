@@ -863,6 +863,7 @@ export const apiEndpoints = {
     productsHistory: "/imports/products/history/",
     productsPreview: "/imports/products/preview/",
     productsApprove: (batchId: string) => `/imports/products/${batchId}/approve/`,
+    productsRecover: (batchId: string) => `/imports/products/${batchId}/recover/`,
     productsApply: (batchId: string) => `/imports/products/${batchId}/apply/`,
     productsStatus: (batchId: string) => `/imports/products/${batchId}/status/`,
     productsErrors: (batchId: string) => `/imports/products/${batchId}/errors/`,

@@ -390,9 +390,11 @@ function ProductsImportPageContent() {
   const searchParams = useSearchParams()
 
   const defaultOutletId = String(tenantOutlet?.id || currentOutlet?.id || "")
-  const importMode = searchParams?.get('mode') === 'sync' ? 'inventory_sync' : 'products'
+  const modeParam = String(searchParams?.get('mode') || '').trim().toLowerCase()
+  const isSyncMode = modeParam === 'sync' || modeParam === 'inventory_sync'
+  const importMode = isSyncMode ? 'inventory_sync' : 'products'
+  const historyModeParam = isSyncMode ? 'sync' : 'products'
   const requestedBatchId = String(searchParams?.get('batchId') || "")
-  const isSyncMode = importMode === 'inventory_sync'
   const pageTitle = isSyncMode ? "Product & Inventory Sync" : "Import Products"
   const pageDescription = isSyncMode
     ? "Preview, reconcile, and apply product data with inventory adjustments and audit history."
@@ -426,7 +428,7 @@ function ProductsImportPageContent() {
   const [historyDatePreset, setHistoryDatePreset] = useState<string>("all")
   const [historyDateFrom, setHistoryDateFrom] = useState<string>("")
   const [historyDateTo, setHistoryDateTo] = useState<string>("")
-  const [loadingAction, setLoadingAction] = useState<"" | "preview" | "approve" | "apply" | "refresh" | "rescan">("")
+  const [loadingAction, setLoadingAction] = useState<"" | "preview" | "approve" | "apply" | "refresh" | "rescan" | "recover">("")
   const [activeTab, setActiveTab] = useState("upload-preview")
   const [missingProducts, setMissingProducts] = useState<MissingCatalogProduct[]>([])
   const [missingLoading, setMissingLoading] = useState(false)
@@ -1241,6 +1243,45 @@ function ProductsImportPageContent() {
       toast({
         title: "Load Failed",
         description: error?.message || "Unable to load this sync batch.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingAction("")
+    }
+  }
+
+  const handleRecoverFromHistory = async (row: ImportHistoryRow) => {
+    setLoadingAction("recover")
+    try {
+      if (row.outlet?.id) {
+        setSelectedOutletId(String(row.outlet.id))
+      }
+      if (isSyncMode && row.sync_strategy) {
+        setSelectedSyncStrategy(row.sync_strategy)
+      }
+
+      const recovery = await productService.recoverImport(row.batch_id, {
+        mode: requestMode,
+        syncStrategy: row.sync_strategy || requestSyncStrategy,
+      })
+
+      setBatchId(recovery.batch_id)
+      if (isSyncMode && isSyncStrategyValue(recovery.sync_strategy)) {
+        setSelectedSyncStrategy(recovery.sync_strategy)
+      }
+
+      await refreshBatch(recovery.batch_id)
+      await loadImportHistory(1)
+      setActiveTab("import-summary")
+
+      toast({
+        title: "Recovery Batch Created",
+        description: "A recovery sync batch has been created. Re-approve and run sync to restore data.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Recovery Failed",
+        description: error?.message || "Unable to create a recovery batch.",
         variant: "destructive",
       })
     } finally {
@@ -2320,8 +2361,17 @@ function ProductsImportPageContent() {
                                 >
                                   {row.status === "applied" ? "Open Batch" : "Continue Sync"}
                                 </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-gray-300"
+                                  onClick={() => handleRecoverFromHistory(row)}
+                                  disabled={loadingAction !== "" || row.status?.toLowerCase() !== "applied"}
+                                >
+                                  {loadingAction === "recover" ? "Recovering..." : "Full Recovery"}
+                                </Button>
                                 <Button asChild variant="outline" size="sm" className="border-gray-300">
-                                  <Link href={`/dashboard/inventory/products/import/history/${row.batch_id}?mode=${importMode}`}>
+                                  <Link href={`/dashboard/inventory/products/import/history/${row.batch_id}?mode=${historyModeParam}`}>
                                     View Full History
                                   </Link>
                                 </Button>

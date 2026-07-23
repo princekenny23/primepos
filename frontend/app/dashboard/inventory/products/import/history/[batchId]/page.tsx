@@ -55,8 +55,9 @@ export default function ImportHistoryDetailPage() {
   const params = useParams<{ batchId: string }>()
   const searchParams = useSearchParams()
   const batchId = String(params?.batchId || "")
-  const importMode = searchParams?.get('mode') === 'sync' ? 'inventory_sync' : 'products'
-  const isSyncMode = importMode === 'inventory_sync'
+  const modeParam = String(searchParams?.get('mode') || '').trim().toLowerCase()
+  const isSyncMode = modeParam === 'sync' || modeParam === 'inventory_sync'
+  const importMode = isSyncMode ? 'inventory_sync' : 'products'
 
   const [loading, setLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
