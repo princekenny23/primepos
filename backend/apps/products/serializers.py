@@ -20,6 +20,25 @@ class CategorySerializer(serializers.ModelSerializer):
             representation['product_count'] = instance.products.count()
         return representation
 
+    def validate_name(self, value):
+        normalized = (value or '').strip()
+        if not normalized:
+            raise serializers.ValidationError("Category name is required.")
+
+        request = self.context.get('request')
+        tenant = None
+        if request is not None:
+            tenant = getattr(request, 'tenant', None) or getattr(getattr(request, 'user', None), 'tenant', None)
+
+        if tenant is not None:
+            duplicate_qs = Category.objects.filter(tenant=tenant, name__iexact=normalized)
+            if self.instance:
+                duplicate_qs = duplicate_qs.exclude(pk=self.instance.pk)
+            if duplicate_qs.exists():
+                raise serializers.ValidationError("A category with this name already exists.")
+
+        return normalized
+
 
 class ProductUnitSerializer(serializers.ModelSerializer):
     """Product Unit serializer - UNITS ONLY ARCHITECTURE

@@ -10,6 +10,7 @@ from .serializers import ProductSerializer, CategorySerializer, ProductUnitSeria
 from apps.tenants.permissions import TenantFilterMixin, HasTenantModuleAccess, resolve_tenant_from_request, resolve_outlet_from_request
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
+from django.db import IntegrityError
 from django.utils import timezone
 from decimal import Decimal
 import logging
@@ -163,6 +164,30 @@ class CategoryViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             queryset = queryset.filter(products__outlet=outlet).distinct()
 
         return queryset
+
+    def create(self, request, *args, **kwargs):
+        """Idempotent create: if category already exists for tenant, return it."""
+        tenant = self.get_tenant_for_request(request)
+        if not tenant and not request.user.is_saas_admin:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("Tenant is required. Please ensure you are authenticated and have a tenant assigned.")
+        if not tenant:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("Tenant is required. Please provide tenant_id in request data.")
+
+        raw_name = request.data.get('name')
+        normalized_name = raw_name.strip() if isinstance(raw_name, str) else ''
+        if normalized_name:
+            existing = Category.objects.filter(tenant=tenant, name__iexact=normalized_name).first()
+            if existing:
+                serializer = self.get_serializer(existing)
+                return Response(serializer.data, status=status.HTTP_200_OK)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
     
     def perform_create(self, serializer):
         # Tenant is read-only, so always set it from request context
@@ -174,7 +199,13 @@ class CategoryViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if not tenant:
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Tenant is required. Please provide tenant_id in request data.")
-        serializer.save(tenant=tenant)
+        try:
+            serializer.save(tenant=tenant)
+        except IntegrityError as exc:
+            from rest_framework.exceptions import ValidationError
+            if "products_category_tenant_id_name" in str(exc):
+                raise ValidationError({"name": ["A category with this name already exists."]})
+            raise
     
     def update(self, request, *args, **kwargs):
         """Override update to ensure tenant matches"""
