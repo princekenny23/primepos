@@ -87,6 +87,7 @@ export default function StockControlPage() {
           outlet_id: typeof m.outlet === 'object' ? m.outlet?.id : m.outlet,
           reason: m.reason || "",
           quantity: m.quantity || 0,
+          quantity_delta: m.quantity_delta,
           user_name: m.user_name || (typeof m.user === 'string' ? m.user : m.user?.email) || "System",
           date: m.created_at || m.date || new Date().toISOString(),
         }))
@@ -344,6 +345,21 @@ export default function StockControlPage() {
   const getResolvedProductName = (item: any) => {
     const currentName = products.find((p) => String(p.id) === String(item.product_id))?.name
     return currentName || item.product_name || "N/A"
+  }
+
+  const getCurrentStockForProduct = (productId?: string | number | null) => {
+    if (!productId) return 0
+    const product = products.find((p) => String(p.id) === String(productId))
+    return Number(product?.sellable_stock ?? product?.stock ?? 0)
+  }
+
+  const getAdjustmentDelta = (item: any) => {
+    if (typeof item.quantity_delta === "number") return item.quantity_delta
+    return Number(item.quantity || 0)
+  }
+
+  const getReturnTotalQuantity = (returnItem: Return) => {
+    return (returnItem.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0)
   }
 
   const tabs: TabConfig[] = [
@@ -609,25 +625,32 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Product</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
-                      <TableHead className="text-gray-900 font-semibold">Quantity</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Quantity Before</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Adjustment</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Quantity After</TableHead>
                       <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {isLoadingAdjustments ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={8} className="text-center py-8 text-gray-600">
                           Loading adjustments...
                         </TableCell>
                       </TableRow>
                     ) : filteredAdjustments.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={8} className="text-center py-8 text-gray-600">
                           {adjustments.length === 0 ? "No adjustments found" : "No adjustments in selected date range"}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      paginatedAdjustments.map((adjustment) => (
+                      paginatedAdjustments.map((adjustment) => {
+                        const delta = getAdjustmentDelta(adjustment)
+                        const quantityAfter = getCurrentStockForProduct(adjustment.product_id)
+                        const quantityBefore = Math.max(0, quantityAfter - delta)
+
+                        return (
                         <TableRow key={adjustment.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {adjustment.date
@@ -638,13 +661,17 @@ export default function StockControlPage() {
                           <TableCell>{adjustment.outlet_name}</TableCell>
                           <TableCell>{adjustment.reason || "-"}</TableCell>
                           <TableCell>
-                            <span className={adjustment.quantity > 0 ? "text-green-600" : "text-red-600"}>
-                              {adjustment.quantity > 0 ? "+" : ""}{adjustment.quantity}
+                            {quantityBefore}
+                          </TableCell>
+                          <TableCell>
+                            <span className={delta > 0 ? "text-green-600" : "text-red-600"}>
+                              {delta > 0 ? "+" : ""}{delta}
                             </span>
                           </TableCell>
+                          <TableCell>{quantityAfter}</TableCell>
                           <TableCell>{adjustment.user_name}</TableCell>
                         </TableRow>
-                      ))
+                      )})
                     )}
                   </TableBody>
                 </Table>
@@ -675,7 +702,9 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Product</TableHead>
                       <TableHead className="text-gray-900 font-semibold">From Outlet</TableHead>
                       <TableHead className="text-gray-900 font-semibold">To Outlet</TableHead>
-                      <TableHead className="text-gray-900 font-semibold">Quantity</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Quantity Before</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Adjustment</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Quantity After</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
                       <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     </TableRow>
@@ -683,18 +712,23 @@ export default function StockControlPage() {
                   <TableBody>
                     {isLoadingTransfers ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={9} className="text-center py-8 text-gray-600">
                           Loading transfers...
                         </TableCell>
                       </TableRow>
                     ) : filteredTransfers.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={9} className="text-center py-8 text-gray-600">
                           {transfers.length === 0 ? "No transfers found" : "No transfers in selected date range"}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      paginatedTransfers.map((transfer) => (
+                      paginatedTransfers.map((transfer) => {
+                        const quantityAfter = getCurrentStockForProduct(transfer.product_id)
+                        const movedQty = Math.abs(Number(transfer.quantity || 0))
+                        const quantityBefore = Math.max(0, quantityAfter + movedQty)
+
+                        return (
                         <TableRow key={transfer.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {transfer.date
@@ -704,11 +738,15 @@ export default function StockControlPage() {
                           <TableCell>{transfer.product_name}</TableCell>
                           <TableCell>{transfer.from_outlet_name}</TableCell>
                           <TableCell>{transfer.to_outlet_name}</TableCell>
-                          <TableCell>{transfer.quantity}</TableCell>
+                          <TableCell>{quantityBefore}</TableCell>
+                          <TableCell>
+                            <span className="text-red-600">-{movedQty}</span>
+                          </TableCell>
+                          <TableCell>{quantityAfter}</TableCell>
                           <TableCell>{transfer.reason || "-"}</TableCell>
                           <TableCell>{transfer.user_name || "System"}</TableCell>
                         </TableRow>
-                      ))
+                      )})
                     )}
                   </TableBody>
                 </Table>
@@ -740,7 +778,9 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Items</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Item Names</TableHead>
-                      <TableHead className="text-gray-900 font-semibold">Total Quantity</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Quantity Before</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Adjustment</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Quantity After</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
                       <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     </TableRow>
@@ -748,18 +788,26 @@ export default function StockControlPage() {
                   <TableBody>
                     {isLoadingReceiving ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={10} className="text-center py-8 text-gray-600">
                           Loading receiving records...
                         </TableCell>
                       </TableRow>
                     ) : filteredReceiving.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={8} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={10} className="text-center py-8 text-gray-600">
                           {receiving.length === 0 ? "No receiving records found" : "No receiving records in selected date range"}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      paginatedReceiving.map((rec) => (
+                      paginatedReceiving.map((rec) => {
+                        const quantityAfter = (rec.items || []).reduce(
+                          (sum: number, item: any) => sum + getCurrentStockForProduct(item.product_id),
+                          0
+                        )
+                        const adjustment = Math.abs(Number(rec.total_quantity || 0))
+                        const quantityBefore = Math.max(0, quantityAfter - adjustment)
+
+                        return (
                         <TableRow key={rec.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {rec.date
@@ -775,11 +823,15 @@ export default function StockControlPage() {
                               <span className="text-xs text-muted-foreground"> +{rec.item_more_count} more</span>
                             )}
                           </TableCell>
-                          <TableCell>{rec.total_quantity}</TableCell>
+                          <TableCell>{quantityBefore}</TableCell>
+                          <TableCell>
+                            <span className="text-green-600">+{adjustment}</span>
+                          </TableCell>
+                          <TableCell>{quantityAfter}</TableCell>
                           <TableCell>{rec.reason || "-"}</TableCell>
                           <TableCell>{rec.user_name || "System"}</TableCell>
                         </TableRow>
-                      ))
+                      )})
                     )}
                   </TableBody>
                 </Table>
@@ -810,7 +862,9 @@ export default function StockControlPage() {
                       <TableHead className="text-gray-900 font-semibold">Return Type</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reference</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Outlet</TableHead>
-                      <TableHead className="text-gray-900 font-semibold">Items</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Quantity Before</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Adjustment</TableHead>
+                      <TableHead className="text-gray-900 font-semibold">Quantity After</TableHead>
                       <TableHead className="text-gray-900 font-semibold">Reason</TableHead>
                       <TableHead className="text-gray-900 font-semibold">User</TableHead>
                     </TableRow>
@@ -818,18 +872,28 @@ export default function StockControlPage() {
                   <TableBody>
                     {isLoadingReturns ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={9} className="text-center py-8 text-gray-600">
                           Loading returns...
                         </TableCell>
                       </TableRow>
                     ) : filteredReturns.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-600">
+                        <TableCell colSpan={9} className="text-center py-8 text-gray-600">
                           {returns.length === 0 ? "No returns found" : "No returns in selected date range"}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      paginatedReturns.map((returnItem) => (
+                      paginatedReturns.map((returnItem) => {
+                        const quantityAfter = (returnItem.items || []).reduce(
+                          (sum: number, item: any) => sum + getCurrentStockForProduct(item.product_id),
+                          0
+                        )
+                        const totalQty = getReturnTotalQuantity(returnItem)
+                        const isPositiveReturn = returnItem.return_type === "customer"
+                        const delta = isPositiveReturn ? totalQty : -totalQty
+                        const quantityBefore = Math.max(0, quantityAfter - delta)
+
+                        return (
                         <TableRow key={returnItem.id} className="border-gray-300">
                           <TableCell className="font-medium">
                             {returnItem.created_at
@@ -851,11 +915,17 @@ export default function StockControlPage() {
                              ) || 
                              "N/A"}
                           </TableCell>
-                          <TableCell>{returnItem.items?.length || 0}</TableCell>
+                          <TableCell>{quantityBefore}</TableCell>
+                          <TableCell>
+                            <span className={delta >= 0 ? "text-green-600" : "text-red-600"}>
+                              {delta >= 0 ? "+" : ""}{delta}
+                            </span>
+                          </TableCell>
+                          <TableCell>{quantityAfter}</TableCell>
                           <TableCell>{returnItem.reason || "-"}</TableCell>
                           <TableCell>{returnItem.user_name || "System"}</TableCell>
                         </TableRow>
-                      ))
+                      )})
                     )}
                   </TableBody>
                 </Table>

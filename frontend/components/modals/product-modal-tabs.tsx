@@ -176,7 +176,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         track_inventory: true,
         low_stock_threshold: String(product.lowStockThreshold || 0),
         outletId: product.outlet?.id || product.outlet_id || "",
-        opening_stock: String(product.stock || 0),
+        opening_stock: String(Number(product.sellable_stock ?? product.stock ?? 0)),
       })
       setStockTouched(false)
 
@@ -921,7 +921,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="opening_stock">Opening Stock</Label>
+                    <Label htmlFor="opening_stock">{product ? "Current Stock" : "Opening Stock"}</Label>
                     <Input
                       id="opening_stock"
                       type="number"
@@ -932,7 +932,9 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
                       }}
                       placeholder="0"
                     />
-                    <p className="text-xs text-gray-500">Initial quantity in base unit</p>
+                    <p className="text-xs text-gray-500">
+                      {product ? "Current sellable quantity in base unit" : "Initial quantity in base unit"}
+                    </p>
                   </div>
                 </>
               )}

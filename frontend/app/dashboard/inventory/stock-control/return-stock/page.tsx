@@ -37,6 +37,7 @@ interface ReturnItem {
   id: string
   product_id: string
   product_name?: string
+  current_qty: number
   quantity: string
 }
 
@@ -72,6 +73,15 @@ export default function ReturnStockPage() {
   const [returnItems, setReturnItems] = useState<ReturnItem[]>([])
   const [showProductSelector, setShowProductSelector] = useState(false)
 
+  const parseQuantity = (value: string) => {
+    const qty = Number(value)
+    return Number.isFinite(qty) && qty > 0 ? qty : 0
+  }
+
+  const getQuantityAfter = (item: ReturnItem) => {
+    return Math.max(0, item.current_qty - parseQuantity(item.quantity))
+  }
+
   const handleAddItem = (product: Product) => {
     if (returnItems.some((item) => item.product_id === String(product.id))) {
       toast({
@@ -85,6 +95,7 @@ export default function ReturnStockPage() {
       id: String(Date.now()),
       product_id: String(product.id),
       product_name: product.name,
+      current_qty: Number(product.sellable_stock ?? product.stock ?? 0),
       quantity: "",
     }
 
@@ -179,13 +190,13 @@ export default function ReturnStockPage() {
         returnItems.map((item) => {
           const payload = {
             product_id: item.product_id,
-            outlet_id: String(currentOutlet.id),
-            movement_type: "transfer_out",
+            from_outlet_id: String(currentOutlet.id),
+            to_outlet_id: toOutletId,
             quantity: Number(item.quantity),
             reason: `Returned to ${selectedDestinationOutlet?.name || "outlet"}. ${reason}`,
-            reference_id: `outlet:${toOutletId}`,
+            is_return: true,
           }
-          return inventoryService.createMovement(payload)
+          return inventoryService.transfer(payload)
         })
       )
 
@@ -301,27 +312,42 @@ export default function ReturnStockPage() {
                         <TableHeader>
                           <TableRow className="bg-gray-50">
                             <TableHead>Product</TableHead>
-                            <TableHead>Quantity</TableHead>
+                            <TableHead>Quantity Before</TableHead>
+                            <TableHead>Adjustment</TableHead>
+                            <TableHead>Quantity After</TableHead>
                             <TableHead className="w-10"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {returnItems.map((item) => (
+                          {returnItems.map((item) => {
+                            const adjustment = parseQuantity(item.quantity)
+                            const quantityAfter = getQuantityAfter(item)
+
+                            return (
                             <TableRow key={item.id}>
                               <TableCell className="font-medium">
                                 {item.product_name}
                               </TableCell>
                               <TableCell>
-                                <Input
-                                  type="number"
-                                  placeholder="0"
-                                  value={item.quantity}
-                                  onChange={(e) =>
-                                    handleUpdateItem(item.id, "quantity", e.target.value)
-                                  }
-                                  className="w-24"
-                                  min="0"
-                                />
+                                {item.current_qty}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="number"
+                                    placeholder="0"
+                                    value={item.quantity}
+                                    onChange={(e) =>
+                                      handleUpdateItem(item.id, "quantity", e.target.value)
+                                    }
+                                    className="w-24"
+                                    min="0"
+                                  />
+                                  <span className="text-red-600">-{adjustment}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                {quantityAfter}
                               </TableCell>
                               <TableCell>
                                 <Button
@@ -334,7 +360,7 @@ export default function ReturnStockPage() {
                                 </Button>
                               </TableCell>
                             </TableRow>
-                          ))}
+                          )})}
                         </TableBody>
                       </Table>
                     </div>

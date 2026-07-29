@@ -69,6 +69,15 @@ export default function TransferStockPage() {
   const [transferItems, setTransferItems] = useState<TransferItem[]>([])
   const [showProductSelector, setShowProductSelector] = useState(false)
 
+  const parseQuantity = (value: string) => {
+    const qty = Number(value)
+    return Number.isFinite(qty) && qty > 0 ? qty : 0
+  }
+
+  const getQuantityAfter = (item: TransferItem) => {
+    return Math.max(0, item.current_qty - parseQuantity(item.quantity))
+  }
+
   const availableOutlets = useMemo(() => {
     return allOutlets.filter((o) => String(o.id) !== String(currentOutlet?.id))
   }, [allOutlets, currentOutlet?.id])
@@ -86,7 +95,7 @@ export default function TransferStockPage() {
       id: String(Date.now()),
       product_id: String(product.id),
       product_name: product.name,
-      current_qty: product.stock || 0,
+      current_qty: Number(product.sellable_stock ?? product.stock ?? 0),
       quantity: "",
     }
 
@@ -166,13 +175,12 @@ export default function TransferStockPage() {
     try {
       await Promise.all(
         transferItems.map((item) =>
-          inventoryService.createMovement({
+          inventoryService.transfer({
             product_id: item.product_id,
-            outlet_id: String(currentOutlet.id),
-            movement_type: "transfer_out",
+            from_outlet_id: String(currentOutlet.id),
+            to_outlet_id: toOutlet,
             quantity: Number(item.quantity),
             reason: `Transfer to ${availableOutlets.find((o) => String(o.id) === toOutlet)?.name || "outlet"}`,
-            reference_id: toOutlet,
           })
         )
       )
@@ -289,30 +297,39 @@ export default function TransferStockPage() {
                         <TableHeader>
                           <TableRow className="bg-gray-50">
                             <TableHead>Product</TableHead>
-                            <TableHead>Current Qty</TableHead>
-                            <TableHead>Quantity to Transfer</TableHead>
+                            <TableHead>Quantity Before</TableHead>
+                            <TableHead>Adjustment</TableHead>
+                            <TableHead>Quantity After</TableHead>
                             <TableHead className="w-10"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {transferItems.map((item) => (
+                          {transferItems.map((item) => {
+                            const adjustment = parseQuantity(item.quantity)
+                            const quantityAfter = getQuantityAfter(item)
+
+                            return (
                             <TableRow key={item.id}>
                               <TableCell className="font-medium">
                                 {item.product_name}
                               </TableCell>
                               <TableCell>{item.current_qty}</TableCell>
                               <TableCell>
-                                <Input
-                                  type="number"
-                                  placeholder="0"
-                                  value={item.quantity}
-                                  onChange={(e) =>
-                                    handleUpdateItem(item.id, "quantity", e.target.value)
-                                  }
-                                  className="w-24"
-                                  min="0"
-                                />
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="number"
+                                    placeholder="0"
+                                    value={item.quantity}
+                                    onChange={(e) =>
+                                      handleUpdateItem(item.id, "quantity", e.target.value)
+                                    }
+                                    className="w-24"
+                                    min="0"
+                                  />
+                                  <span className="text-red-600">-{adjustment}</span>
+                                </div>
                               </TableCell>
+                              <TableCell>{quantityAfter}</TableCell>
                               <TableCell>
                                 <Button
                                   type="button"
@@ -324,7 +341,7 @@ export default function TransferStockPage() {
                                 </Button>
                               </TableCell>
                             </TableRow>
-                          ))}
+                          )})}
                         </TableBody>
                       </Table>
                     </div>

@@ -96,6 +96,8 @@ export function SelectProductModal({
     if (hasMore) setPage(p => p + 1)
   }
 
+  const getDisplayStock = (product: Product) => Number(product.sellable_stock ?? product.stock ?? 0)
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh]">
@@ -152,7 +154,7 @@ export function SelectProductModal({
                             {product.sku && (
                               <span>SKU: {product.sku}</span>
                             )}
-                            <span>Stock: {product.stock || 0}</span>
+                            <span>Stock: {getDisplayStock(product)}</span>
                           </div>
                         </div>
                         <div className="text-right">

@@ -36,6 +36,7 @@ interface ReceiveItem {
   id: string
   product_id: string
   product_name?: string
+  current_qty: number
   quantity: string
 }
 
@@ -70,6 +71,15 @@ export default function ReceiveStockPage() {
   const [receiveItems, setReceiveItems] = useState<ReceiveItem[]>([])
   const [showProductSelector, setShowProductSelector] = useState(false)
 
+  const parseQuantity = (value: string) => {
+    const qty = Number(value)
+    return Number.isFinite(qty) && qty > 0 ? qty : 0
+  }
+
+  const getQuantityAfter = (item: ReceiveItem) => {
+    return item.current_qty + parseQuantity(item.quantity)
+  }
+
   const handleAddItem = (product: Product) => {
     if (receiveItems.some((item) => item.product_id === String(product.id))) {
       toast({
@@ -83,6 +93,7 @@ export default function ReceiveStockPage() {
       id: String(Date.now()),
       product_id: String(product.id),
       product_name: product.name,
+      current_qty: Number(product.sellable_stock ?? product.stock ?? 0),
       quantity: "",
     }
 
@@ -162,19 +173,17 @@ export default function ReceiveStockPage() {
 
     setIsSubmitting(true)
     try {
-      // Create receive movements
       await Promise.all(
         receiveItems.map((item) => {
           const payload = {
             product_id: item.product_id,
-            outlet_id: String(currentOutlet.id),
-            movement_type: "transfer_in",
+            from_outlet_id: fromOutletId,
+            to_outlet_id: String(currentOutlet.id),
             quantity: Number(item.quantity),
             reason: `Received from outlet ${selectedSourceOutlet?.name || fromOutletId}`,
-            reference_id: `outlet:${fromOutletId}`,
           }
-          console.log("Creating receive movement with payload:", payload)
-          return inventoryService.createMovement(payload)
+          console.log("Creating receive transfer with payload:", payload)
+          return inventoryService.transfer(payload)
         })
       )
 
@@ -279,28 +288,42 @@ export default function ReceiveStockPage() {
                         <TableHeader>
                           <TableRow className="bg-gray-50">
                             <TableHead>Product</TableHead>
-                            <TableHead>Quantity</TableHead>
+                            <TableHead>Quantity Before</TableHead>
+                            <TableHead>Adjustment</TableHead>
+                            <TableHead>Quantity After</TableHead>
                             <TableHead className="w-10"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {receiveItems.map((item) => {
+                            const adjustment = parseQuantity(item.quantity)
+                            const quantityAfter = getQuantityAfter(item)
+
                             return (
                               <TableRow key={item.id}>
                                 <TableCell className="font-medium">
                                   {item.product_name}
                                 </TableCell>
                                 <TableCell>
-                                  <Input
-                                    type="number"
-                                    placeholder="0"
-                                    value={item.quantity}
-                                    onChange={(e) =>
-                                      handleUpdateItem(item.id, "quantity", e.target.value)
-                                    }
-                                    className="w-24"
-                                    min="0"
-                                  />
+                                  {item.current_qty}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <Input
+                                      type="number"
+                                      placeholder="0"
+                                      value={item.quantity}
+                                      onChange={(e) =>
+                                        handleUpdateItem(item.id, "quantity", e.target.value)
+                                      }
+                                      className="w-24"
+                                      min="0"
+                                    />
+                                    <span className="text-green-600">+{adjustment}</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  {quantityAfter}
                                 </TableCell>
                                 <TableCell>
                                   <Button

@@ -219,7 +219,7 @@ export function StockAdjustmentModal({ open, onOpenChange, onSuccess }: StockAdj
         if (field === "product_id") {
           const product = products.find(p => p.id === value)
           updated.product_name = product?.name
-          updated.current_qty = product?.stock || 0
+          updated.current_qty = Number(product?.sellable_stock ?? product?.stock ?? 0)
         }
         return updated
       }

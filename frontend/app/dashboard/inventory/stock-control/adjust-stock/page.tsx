@@ -51,6 +51,20 @@ export default function AdjustStockPage() {
   const [adjustmentItems, setAdjustmentItems] = useState<AdjustmentItem[]>([])
   const [showProductSelector, setShowProductSelector] = useState(false)
 
+  const parseQuantity = (value: string) => {
+    const qty = Number(value)
+    return Number.isFinite(qty) && qty > 0 ? qty : 0
+  }
+
+  const getAdjustmentDelta = (item: AdjustmentItem) => {
+    const qty = parseQuantity(item.quantity)
+    return item.adjustmentType === "decrease" ? -qty : qty
+  }
+
+  const getQuantityAfter = (item: AdjustmentItem) => {
+    return Math.max(0, item.current_qty + getAdjustmentDelta(item))
+  }
+
   const handleAddItem = (product: Product) => {
     if (adjustmentItems.some((item) => item.product_id === String(product.id))) {
       toast({
@@ -64,7 +78,7 @@ export default function AdjustStockPage() {
       id: String(Date.now()),
       product_id: String(product.id),
       product_name: product.name,
-      current_qty: product.stock || 0,
+      current_qty: Number(product.sellable_stock ?? product.stock ?? 0),
       adjustmentType: "increase",
       quantity: "",
     }
@@ -148,19 +162,19 @@ export default function AdjustStockPage() {
 
     setIsSubmitting(true)
     try {
-      // Create adjustment movements
+      // Apply adjustments using the dedicated adjustment endpoint.
       await Promise.all(
         adjustmentItems.map((item) => {
+          const quantity = Number(item.quantity)
           const payload = {
             product_id: item.product_id,
             outlet_id: String(currentOutlet.id),
-            movement_type: "adjustment",
-            quantity: Number(item.quantity),
+            quantity: item.adjustmentType === "decrease" ? -quantity : quantity,
             reason: reason,
-            reference_id: item.adjustmentType === "decrease" ? "negative" : "positive",
+            type: "adjustment",
           }
           console.log("Creating adjustment with payload:", payload)
-          return inventoryService.createMovement(payload)
+          return inventoryService.adjust(payload)
         })
       )
 
@@ -245,47 +259,55 @@ export default function AdjustStockPage() {
                         <TableHeader>
                           <TableRow className="bg-gray-50">
                             <TableHead>Product</TableHead>
-                            <TableHead>Current Qty</TableHead>
-                            <TableHead>Adjustment Type</TableHead>
-                            <TableHead>Quantity</TableHead>
+                            <TableHead>Quantity Before</TableHead>
+                            <TableHead>Adjustment</TableHead>
+                            <TableHead>Quantity After</TableHead>
                             <TableHead className="w-10"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {adjustmentItems.map((item) => (
+                          {adjustmentItems.map((item) => {
+                            const adjustmentDelta = getAdjustmentDelta(item)
+                            const quantityAfter = getQuantityAfter(item)
+
+                            return (
                             <TableRow key={item.id}>
                               <TableCell className="font-medium">
                                 {item.product_name}
                               </TableCell>
                               <TableCell>{item.current_qty}</TableCell>
                               <TableCell>
-                                <Select
-                                  value={item.adjustmentType}
-                                  onValueChange={(value) =>
-                                    handleUpdateItem(item.id, "adjustmentType", value as "increase" | "decrease")
-                                  }
-                                >
-                                  <SelectTrigger className="w-32">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="increase">Increase</SelectItem>
-                                    <SelectItem value="decrease">Decrease</SelectItem>
-                                  </SelectContent>
-                                </Select>
+                                <div className="flex items-center gap-2">
+                                  <Select
+                                    value={item.adjustmentType}
+                                    onValueChange={(value) =>
+                                      handleUpdateItem(item.id, "adjustmentType", value as "increase" | "decrease")
+                                    }
+                                  >
+                                    <SelectTrigger className="w-32">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="increase">Increase</SelectItem>
+                                      <SelectItem value="decrease">Decrease</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                  <Input
+                                    type="number"
+                                    placeholder="0"
+                                    value={item.quantity}
+                                    onChange={(e) =>
+                                      handleUpdateItem(item.id, "quantity", e.target.value)
+                                    }
+                                    className="w-24"
+                                    min="0"
+                                  />
+                                  <span className={adjustmentDelta < 0 ? "text-red-600" : "text-green-600"}>
+                                    {adjustmentDelta >= 0 ? "+" : ""}{adjustmentDelta}
+                                  </span>
+                                </div>
                               </TableCell>
-                              <TableCell>
-                                <Input
-                                  type="number"
-                                  placeholder="0"
-                                  value={item.quantity}
-                                  onChange={(e) =>
-                                    handleUpdateItem(item.id, "quantity", e.target.value)
-                                  }
-                                  className="w-24"
-                                  min="0"
-                                />
-                              </TableCell>
+                              <TableCell>{quantityAfter}</TableCell>
                               <TableCell>
                                 <Button
                                   type="button"
@@ -297,7 +319,7 @@ export default function AdjustStockPage() {
                                 </Button>
                               </TableCell>
                             </TableRow>
-                          ))}
+                          )})}
                         </TableBody>
                       </Table>
                     </div>
