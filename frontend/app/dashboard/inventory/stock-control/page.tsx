@@ -88,6 +88,8 @@ export default function StockControlPage() {
           reason: m.reason || "",
           quantity: m.quantity || 0,
           quantity_delta: m.quantity_delta,
+          quantity_before: typeof m.quantity_before === 'number' ? m.quantity_before : null,
+          quantity_after: typeof m.quantity_after === 'number' ? m.quantity_after : null,
           user_name: m.user_name || (typeof m.user === 'string' ? m.user : m.user?.email) || "System",
           date: m.created_at || m.date || new Date().toISOString(),
         }))
@@ -647,8 +649,12 @@ export default function StockControlPage() {
                     ) : (
                       paginatedAdjustments.map((adjustment) => {
                         const delta = getAdjustmentDelta(adjustment)
-                        const quantityAfter = getCurrentStockForProduct(adjustment.product_id)
-                        const quantityBefore = Math.max(0, quantityAfter - delta)
+                        const quantityAfter = typeof adjustment.quantity_after === 'number'
+                          ? adjustment.quantity_after
+                          : getCurrentStockForProduct(adjustment.product_id)
+                        const quantityBefore = typeof adjustment.quantity_before === 'number'
+                          ? adjustment.quantity_before
+                          : Math.max(0, quantityAfter - delta)
 
                         return (
                         <TableRow key={adjustment.id} className="border-gray-300">

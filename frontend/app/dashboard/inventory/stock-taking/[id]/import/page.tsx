@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import * as XLSX from "xlsx"
-import { ArrowLeft, CheckCircle2, Download, Upload, XCircle, Plus } from "lucide-react"
+import { ArrowLeft, CheckCircle2, Download, Upload, XCircle, Plus, Search } from "lucide-react"
 
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { inventoryService } from "@/lib/services/inventoryService"
+import { productService } from "@/lib/services/productService"
 import { useToast } from "@/components/ui/use-toast"
 import { AddRejectedProductDialog } from "@/components/dialogs/add-rejected-product-dialog"
 
@@ -29,6 +30,7 @@ interface StockTakingItem {
   product_id: string
   product_name: string
   barcode: string
+  quantityBefore: number
 }
 
 interface ImportedStockTakeRow {
@@ -44,6 +46,8 @@ interface StockTakeImportDetailRow extends ImportedStockTakeRow {
   issue: string
   targetItemId?: string
   targetProductId?: string
+  quantityBefore: number
+  quantityAfter: number
 }
 
 interface StockTakeImportHistoryRow {
@@ -53,14 +57,15 @@ interface StockTakeImportHistoryRow {
   totalRows: number
   matchedRows: number
   rejectedRows: number
+  duplicateRows?: number
   updatedItems: number
   importedRows: number
   failedRows: number
   status: "Previewed" | "Applied" | "Applied With Errors"
+  processingTimeMs?: number
 }
 
 const PAGE_SIZE = 10
-const HISTORY_STORAGE_PREFIX = "stock-take-import-history"
 
 const normalizeHeader = (value: string) =>
   value.toLowerCase().trim().replace(/[\s\-_]+/g, "")
@@ -291,8 +296,16 @@ function formatDateTime(value: string) {
   }
 }
 
-function getHistoryStorageKey(stockTakeId: string) {
-  return `${HISTORY_STORAGE_PREFIX}:${stockTakeId}`
+function mapStockTakeItem(item: any): StockTakingItem {
+  return {
+    id: String(item.id),
+    product_id: String(item.product?.id || item.product_id || ""),
+    product_name: item.product?.name || "Unknown Product",
+    barcode: item.product?.barcode || "",
+    quantityBefore: typeof item.expected_quantity === "number"
+      ? item.expected_quantity
+      : parseInt(String(item.expected_quantity || 0)),
+  }
 }
 
 export default function StockTakingImportPage() {
@@ -311,14 +324,45 @@ export default function StockTakingImportPage() {
   const [previewRows, setPreviewRows] = useState<StockTakeImportDetailRow[]>([])
   const [historyRows, setHistoryRows] = useState<StockTakeImportHistoryRow[]>([])
   const [historySearchTerm, setHistorySearchTerm] = useState("")
+  const [uploadSearchTerm, setUploadSearchTerm] = useState("")
   const [detailSearchTerm, setDetailSearchTerm] = useState("")
+  const [previewPage, setPreviewPage] = useState(1)
   const [detailPage, setDetailPage] = useState(1)
+  const [rejectedPage, setRejectedPage] = useState(1)
   const [isParsingFile, setIsParsingFile] = useState(false)
   const [loadingAction, setLoadingAction] = useState<"" | "preview" | "apply">("")
   const [activeTab, setActiveTab] = useState("upload-preview")
+  const [currentImportBatchId, setCurrentImportBatchId] = useState<string>("")
   const [showAddRejectedDialog, setShowAddRejectedDialog] = useState(false)
   const [selectedRejectedRow, setSelectedRejectedRow] = useState<ImportedStockTakeRow | null>(null)
   const [viewingHistoricalImportId, setViewingHistoricalImportId] = useState<string | null>(null)
+
+  const mapImportRowResult = useCallback((row: any): StockTakeImportDetailRow => ({
+    rowNumber: row.row_number,
+    productName: row.product_name,
+    sku: row.sku,
+    barcode: row.barcode,
+    countedQuantity: row.counted_quantity,
+    status: row.status as any,
+    issue: row.reason || row.suggested_resolution || '-',
+    targetItemId: row.target_item_id,
+    targetProductId: row.target_product_id,
+    quantityBefore: row.quantity_before,
+    quantityAfter: row.quantity_after,
+  }), [])
+
+  const loadAllBatchRows = useCallback(async (batchId: string) => {
+    const firstPage = await inventoryService.getStockTakeImportRows(batchId, { page: 1, pageSize: 1000 })
+    const allRows = [...firstPage.results]
+    const totalPages = Math.max(1, Number(firstPage.total_pages || 1))
+
+    for (let page = 2; page <= totalPages; page += 1) {
+      const pageResponse = await inventoryService.getStockTakeImportRows(batchId, { page, pageSize: 1000 })
+      allRows.push(...pageResponse.results)
+    }
+
+    return allRows
+  }, [])
 
   const loadData = useCallback(async () => {
     setIsLoading(true)
@@ -330,14 +374,7 @@ export default function StockTakingImportPage() {
       ])
 
       setStockTake(stockTakeData)
-      setItems(
-        itemsData.map((item: any) => ({
-          id: String(item.id),
-          product_id: String(item.product?.id || item.product_id || ""),
-          product_name: item.product?.name || "Unknown Product",
-          barcode: item.product?.barcode || "",
-        }))
-      )
+      setItems(itemsData.map(mapStockTakeItem))
     } catch (error: any) {
       const status = error?.status
       setLoadError(
@@ -354,46 +391,83 @@ export default function StockTakingImportPage() {
     loadData()
   }, [loadData])
 
-  useEffect(() => {
-    if (typeof window === "undefined") return
-
+  const loadHistory = useCallback(async () => {
     try {
-      const raw = window.localStorage.getItem(getHistoryStorageKey(stockTakeId))
-      setHistoryRows(raw ? JSON.parse(raw) : [])
+      const response = await inventoryService.getStockTakeImportHistory(stockTakeId, {
+        search: historySearchTerm,
+        page: 1,
+        pageSize: 50,
+      })
+
+      setHistoryRows(
+        response.results.map((row) => ({
+          id: row.batch_id,
+          importedAt: row.import_date,
+          fileName: row.source_filename,
+          totalRows: row.total_rows,
+          matchedRows: row.accepted_rows,
+          rejectedRows: row.rejected_rows,
+          duplicateRows: row.duplicate_rows,
+          updatedItems: row.accepted_rows,
+          importedRows: row.accepted_rows,
+          failedRows: row.rejected_rows,
+          status: row.status === "applied" ? "Applied" : (row.rejected_rows > 0 ? "Applied With Errors" : "Previewed"),
+          processingTimeMs: row.processing_time_ms,
+        }))
+      )
     } catch {
       setHistoryRows([])
     }
-  }, [stockTakeId])
+  }, [historySearchTerm, stockTakeId])
+
+  useEffect(() => {
+    loadHistory()
+  }, [loadHistory])
 
   useEffect(() => {
     setDetailPage(1)
   }, [detailSearchTerm, previewRows.length])
 
-  // Load historical import if importId query param exists
   useEffect(() => {
-    if (typeof window === "undefined") return
+    setPreviewPage(1)
+  }, [importRows.length, importFile])
 
+  useEffect(() => {
+    setRejectedPage(1)
+  }, [previewRows.length])
+
+  const filteredImportRows = useMemo(() => {
+    const term = uploadSearchTerm.trim().toLowerCase()
+    if (!term) return importRows
+
+    return importRows.filter((row) =>
+      row.productName.toLowerCase().includes(term) ||
+      (row.sku || "").toLowerCase().includes(term) ||
+      (row.barcode || "").toLowerCase().includes(term)
+    )
+  }, [importRows, uploadSearchTerm])
+
+  useEffect(() => {
     const importId = searchParams?.get("importId")
     if (!importId) {
       setViewingHistoricalImportId(null)
       return
     }
 
-    try {
-      const raw = window.localStorage.getItem(getHistoryStorageKey(stockTakeId))
-      const history = raw ? JSON.parse(raw) : []
-      const historicalImport = history.find((h: StockTakeImportHistoryRow) => h.id === importId)
+    setViewingHistoricalImportId(importId)
+    setCurrentImportBatchId(importId)
+    setActiveTab("import-summary")
 
-      if (historicalImport) {
-        setViewingHistoricalImportId(importId)
-        // Reconstruct preview rows from historical data if available
-        // For now, show the summary stats
-        setActiveTab("import-summary")
+    const loadHistoricalRows = async () => {
+      try {
+        const rows = await loadAllBatchRows(importId)
+        setPreviewRows(rows.map(mapImportRowResult))
+      } catch (error) {
+        console.error("Failed to load historical import rows:", error)
       }
-    } catch (error) {
-      console.error("Failed to load historical import:", error)
     }
-  }, [searchParams, stockTakeId])
+    loadHistoricalRows()
+  }, [loadAllBatchRows, mapImportRowResult, searchParams, stockTakeId])
 
   const summary = useMemo(() => {
     const matchedRows = previewRows.filter((row) => row.status !== "Rejected").length
@@ -412,7 +486,7 @@ export default function StockTakingImportPage() {
     if (importedRowsCount > 0 && failedRows > 0) status = "Applied With Errors"
 
     return {
-      totalRows: importRows.length,
+      totalRows: importRows.length || previewRows.length,
       matchedRows,
       rejectedRows,
       updatedItems,
@@ -445,17 +519,17 @@ export default function StockTakingImportPage() {
         icon: Upload,
       },
       {
-        value: "import-summary",
-        label: "Import Count Summary",
-        icon: CheckCircle2,
-      },
-      {
         value: "rejected-counts",
         label: "Rejected",
         icon: XCircle,
         badgeCount: previewRows.filter((row) => row.status === "Rejected" || row.status === "Failed").length,
         badgeVariant: "destructive",
       },
+        {
+          value: "import-summary",
+          label: "Import Count Summary",
+          icon: CheckCircle2,
+        },
       {
         value: "history",
         label: "History",
@@ -482,12 +556,38 @@ export default function StockTakingImportPage() {
     return filteredDetailRows.slice(start, start + PAGE_SIZE)
   }, [detailPage, filteredDetailRows])
 
-  const previewPageRows = useMemo(() => importRows.slice(0, PAGE_SIZE), [importRows])
-
   const rejectedRows = useMemo(
     () => previewRows.filter((row) => row.status === "Rejected" || row.status === "Failed"),
     [previewRows]
   )
+
+  const previewRowLookup = useMemo(() => {
+    const lookup = new Map<number, StockTakeImportDetailRow>()
+    previewRows.forEach((row) => {
+      lookup.set(row.rowNumber, row)
+    })
+    return lookup
+  }, [previewRows])
+
+  const totalPreviewPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredImportRows.length / PAGE_SIZE)),
+    [filteredImportRows.length]
+  )
+
+  const previewPageRows = useMemo(() => {
+    const start = (previewPage - 1) * PAGE_SIZE
+    return filteredImportRows.slice(start, start + PAGE_SIZE)
+  }, [filteredImportRows, previewPage])
+
+  const totalRejectedPages = useMemo(
+    () => Math.max(1, Math.ceil(rejectedRows.length / PAGE_SIZE)),
+    [rejectedRows.length]
+  )
+
+  const paginatedRejectedRows = useMemo(() => {
+    const start = (rejectedPage - 1) * PAGE_SIZE
+    return rejectedRows.slice(start, start + PAGE_SIZE)
+  }, [rejectedRows, rejectedPage])
 
   const filteredHistoryRows = useMemo(() => {
     const term = historySearchTerm.trim().toLowerCase()
@@ -503,13 +603,21 @@ export default function StockTakingImportPage() {
   const buildPreviewRows = (rows: ImportedStockTakeRow[]): StockTakeImportDetailRow[] => {
     const savedStockTakeItems = items.filter((item) => !String(item.id).startsWith("placeholder-"))
 
+    return buildPreviewRowsForItems(rows, savedStockTakeItems)
+  }
+
+  const buildPreviewRowsForItems = (rows: ImportedStockTakeRow[], stockTakeItems: StockTakingItem[]): StockTakeImportDetailRow[] => {
+    const savedStockTakeItems = stockTakeItems.filter((item) => !String(item.id).startsWith("placeholder-"))
+
     return rows.map((row) => {
       const match = findBestStockTakeMatch(row, savedStockTakeItems)
       if (!match) {
         return {
           ...row,
           status: "Rejected",
-          issue: "No matching item found in this stock take session.",
+          issue: "No matching item found in this stock take session. New products need to be created or added first.",
+          quantityBefore: 0,
+          quantityAfter: row.countedQuantity,
         }
       }
 
@@ -519,19 +627,26 @@ export default function StockTakingImportPage() {
         issue: match.matchLabel,
         targetItemId: String(match.item.id),
         targetProductId: String(match.item.product_id || ""),
+        quantityBefore: match.item.quantityBefore,
+        quantityAfter: row.countedQuantity,
       }
     })
   }
 
-  const persistHistory = (entry: StockTakeImportHistoryRow) => {
-    setHistoryRows((prev) => {
-      const next = [entry, ...prev]
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(getHistoryStorageKey(stockTakeId), JSON.stringify(next))
-      }
-      return next
-    })
-  }
+  const reloadSessionAndRebuildPreview = useCallback(async () => {
+    const [stockTakeData, itemsData] = await Promise.all([
+      inventoryService.getStockTake(stockTakeId),
+      inventoryService.getStockTakeItems(stockTakeId),
+    ])
+
+    const nextItems = itemsData.map(mapStockTakeItem)
+    setStockTake(stockTakeData)
+    setItems(nextItems)
+
+    if (importRows.length > 0) {
+      setPreviewRows(buildPreviewRowsForItems(importRows, nextItems))
+    }
+  }, [importRows, stockTakeId])
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0]
@@ -585,12 +700,15 @@ export default function StockTakingImportPage() {
 
     setLoadingAction("preview")
     try {
-      const nextPreviewRows = buildPreviewRows(importRows)
-      setPreviewRows(nextPreviewRows)
+      const response = await inventoryService.previewStockTakeImport(stockTakeId, importFile, undefined, importRows)
+      setCurrentImportBatchId(response.batch_id)
+      const rows = await loadAllBatchRows(response.batch_id)
+      setPreviewRows(rows.map(mapImportRowResult))
+      await loadHistory()
       setActiveTab("import-summary")
       toast({
         title: "Preview Ready",
-        description: `Matched ${nextPreviewRows.filter((row) => row.status !== "Rejected").length} of ${nextPreviewRows.length} row(s).`,
+        description: `Matched ${rows.filter((row) => row.status !== "Rejected").length} of ${rows.length} row(s).`,
       })
     } finally {
       setLoadingAction("")
@@ -598,24 +716,10 @@ export default function StockTakingImportPage() {
   }
 
   const handleApplyImport = async () => {
-    if (!importFile || importRows.length === 0) {
+    if (!currentImportBatchId) {
       toast({
-        title: "No File Loaded",
-        description: "Select a valid import file before importing.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const currentPreviewRows = previewRows.length > 0 ? previewRows : buildPreviewRows(importRows)
-    setPreviewRows(currentPreviewRows)
-
-    const readyRows = currentPreviewRows.filter((row) => row.status !== "Rejected" && row.targetItemId)
-    if (readyRows.length === 0) {
-      setActiveTab("rejected-counts")
-      toast({
-        title: "Nothing To Import",
-        description: "No matched rows are available to import.",
+        title: "No Preview Batch",
+        description: "Preview the file before applying stock take counts.",
         variant: "destructive",
       })
       return
@@ -623,103 +727,24 @@ export default function StockTakingImportPage() {
 
     setLoadingAction("apply")
     try {
-      const groupedUpdates = new Map<string, {
-        itemId: string
-        productId?: string
-        quantity: number
-        rowNumbers: number[]
-      }>()
+      const response = await inventoryService.applyStockTakeImport(currentImportBatchId)
+      const rows = await loadAllBatchRows(currentImportBatchId)
+      setPreviewRows(rows.map(mapImportRowResult))
+      await loadHistory()
 
-      readyRows.forEach((row) => {
-        const key = row.targetProductId ? `product-${row.targetProductId}` : String(row.targetItemId)
-        const existing = groupedUpdates.get(key)
-        if (existing) {
-          existing.quantity += row.countedQuantity
-          existing.rowNumbers.push(row.rowNumber)
-          return
-        }
-
-        groupedUpdates.set(key, {
-          itemId: String(row.targetItemId),
-          productId: row.targetProductId,
-          quantity: row.countedQuantity,
-          rowNumbers: [row.rowNumber],
-        })
-      })
-
-      const plans = Array.from(groupedUpdates.entries())
-      const results = await Promise.allSettled(
-        plans.map(([_, plan]) =>
-          inventoryService.updateStockTakeItem(stockTakeId, plan.itemId, {
-            counted_quantity: plan.quantity,
-            notes: `Imported from ${importFile.name}`,
-          })
-        )
-      )
-
-      const outcomeMap = new Map<string, { success: boolean; reason: string }>()
-      plans.forEach(([key], index) => {
-        const result = results[index]
-        if (result.status === "fulfilled") {
-          outcomeMap.set(key, { success: true, reason: "Imported successfully." })
-          return
-        }
-
-        const reason = (result.reason as any)?.message || "Failed to update stock take item."
-        outcomeMap.set(key, { success: false, reason })
-      })
-
-      const nextPreviewRows = currentPreviewRows.map((row) => {
-        if (row.status === "Rejected") return row
-
-        const key = row.targetProductId ? `product-${row.targetProductId}` : String(row.targetItemId)
-        const outcome = outcomeMap.get(key)
-        if (!outcome) {
-          return {
-            ...row,
-            status: "Failed" as const,
-            issue: "Import outcome unavailable.",
-          }
-        }
-
-        if (outcome.success) {
-          return {
-            ...row,
-            status: "Imported" as const,
-            issue: "Imported successfully.",
-          }
-        }
-
-        return {
-          ...row,
-          status: "Failed" as const,
-          issue: outcome.reason,
-        }
-      })
-
-      setPreviewRows(nextPreviewRows)
-
-      const importedRowsCount = nextPreviewRows.filter((row) => row.status === "Imported").length
-      const failedRows = nextPreviewRows.filter((row) => row.status === "Failed").length
-      const rejectedCount = nextPreviewRows.filter((row) => row.status === "Rejected").length
-
-      persistHistory({
-        id: `${Date.now()}`,
-        importedAt: new Date().toISOString(),
-        fileName: importFile.name,
-        totalRows: nextPreviewRows.length,
-        matchedRows: nextPreviewRows.filter((row) => row.status !== "Rejected").length,
-        rejectedRows: rejectedCount,
-        updatedItems: plans.length,
-        importedRows: importedRowsCount,
-        failedRows,
-        status: failedRows > 0 ? "Applied With Errors" : "Applied",
-      })
+      const failedRows = Number(response?.apply_summary?.failed || 0)
+      const rejectedCount = Number(response?.apply_summary?.rejected_rows || 0)
+      const importedRowsCount = Number(response?.apply_summary?.imported || 0)
 
       if (failedRows > 0 || rejectedCount > 0) {
         setActiveTab("rejected-counts")
       } else {
-        setActiveTab("import-summary")
+        toast({
+          title: "Import Completed",
+          description: "Redirecting back to the stock take session so you can complete and close it.",
+        })
+        router.push(`/dashboard/inventory/stock-taking/${stockTakeId}`)
+        return
       }
 
       toast({
@@ -769,6 +794,85 @@ export default function StockTakingImportPage() {
       barcode: row.barcode,
     })
     setShowAddRejectedDialog(true)
+  }
+
+  const handleAddAllRejectedProducts = async () => {
+    if (!rejectedRows.length) return
+
+    setLoadingAction("apply")
+    try {
+      const outletId = stockTake?.outlet?.id ? String(stockTake.outlet.id) : ""
+      let addedCount = 0
+      let failedCount = 0
+
+      for (const row of rejectedRows) {
+        const searchTerm = row.productName || row.sku || row.barcode || ""
+        if (!searchTerm) {
+          failedCount += 1
+          continue
+        }
+
+        const response = await productService.list({
+          outlet: outletId,
+          search: searchTerm,
+          limit: 20,
+        })
+
+        const normalizedBarcode = (row.barcode || "").trim().toLowerCase()
+        const normalizedSku = (row.sku || "").trim().toLowerCase()
+        const normalizedName = (row.productName || "").trim().toLowerCase()
+
+        const candidate = response.results.find((product) => {
+          const productName = String(product.name || "").trim().toLowerCase()
+          const productSku = String(product.sku || "").trim().toLowerCase()
+          const productBarcode = String(product.barcode || "").trim().toLowerCase()
+
+          return (
+            (normalizedBarcode && productBarcode === normalizedBarcode) ||
+            (normalizedSku && productSku === normalizedSku) ||
+            (normalizedName && productName === normalizedName)
+          )
+        }) || response.results[0]
+
+        if (!candidate) {
+          failedCount += 1
+          continue
+        }
+
+        const expectedQuantity = Number(candidate.sellable_stock ?? candidate.stock ?? 0)
+        const existingItem = items.find((item) => String(item.product_id) === String(candidate.id))
+
+        if (existingItem) {
+          await inventoryService.updateStockTakeItem(stockTakeId, existingItem.id, {
+            counted_quantity: row.countedQuantity,
+            notes: `Updated from rejected import row ${row.rowNumber}`,
+          })
+        } else {
+          await inventoryService.createStockTakeItem(stockTakeId, {
+            product_id: String(candidate.id),
+            expected_quantity: Number.isFinite(expectedQuantity) ? expectedQuantity : 0,
+            counted_quantity: row.countedQuantity,
+            notes: `Bulk added from rejected import row ${row.rowNumber}`,
+          })
+        }
+        addedCount += 1
+      }
+
+      await reloadSessionAndRebuildPreview()
+      toast({
+        title: "Rejected Rows Processed",
+        description: `Added ${addedCount} row(s) to the stock take.${failedCount > 0 ? ` ${failedCount} row(s) could not be matched.` : ""}`,
+        variant: failedCount > 0 ? "destructive" : undefined,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Bulk Add Failed",
+        description: error?.message || "Failed to add rejected rows to the stock take.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingAction("")
+    }
   }
 
   const handleLoadHistoricalImport = (importId: string) => {
@@ -876,6 +980,21 @@ export default function StockTakingImportPage() {
                       </p>
                     </div>
 
+                    <div className="space-y-2">
+                      <Label htmlFor="upload-row-search">Search Uploaded Rows</Label>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                        <input
+                          id="upload-row-search"
+                          type="text"
+                          value={uploadSearchTerm}
+                          onChange={(e) => setUploadSearchTerm(e.target.value)}
+                          placeholder="Search by product name, SKU, or barcode"
+                          className="h-10 w-full rounded-md border border-gray-300 pl-10 pr-3 text-sm"
+                        />
+                      </div>
+                    </div>
+
                     <div className="flex flex-wrap gap-3">
                       <Button type="button" variant="outline" className="border-gray-300" onClick={handleDownloadImportTemplate}>
                         <Download className="mr-2 h-4 w-4" />
@@ -903,20 +1022,24 @@ export default function StockTakingImportPage() {
                         <TableHead>Product Name</TableHead>
                         <TableHead className="w-32">SKU</TableHead>
                         <TableHead className="w-40">Barcode</TableHead>
-                        <TableHead className="w-32 text-right">Counted Qty</TableHead>
+                          <TableHead className="w-28 text-right">Quantity Before</TableHead>
+                          <TableHead className="w-24 text-right">Count</TableHead>
+                          <TableHead className="w-28 text-right">Quantity After</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {isParsingFile ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center text-sm text-gray-600">
+                          <TableCell colSpan={7} className="text-center text-sm text-gray-600">
                             Reading stock take rows...
                           </TableCell>
                         </TableRow>
                       ) : previewPageRows.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={5} className="text-center text-sm text-gray-600">
-                            No rows loaded yet. Upload a file to preview stock take counts.
+                          <TableCell colSpan={7} className="text-center text-sm text-gray-600">
+                            {uploadSearchTerm.trim()
+                              ? "No rows match your search."
+                              : "No rows loaded yet. Upload a file to preview stock take counts."}
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -926,12 +1049,42 @@ export default function StockTakingImportPage() {
                             <TableCell>{row.productName || "-"}</TableCell>
                             <TableCell>{row.sku || "-"}</TableCell>
                             <TableCell>{row.barcode || "-"}</TableCell>
+                            <TableCell className="text-right">{previewRowLookup.get(row.rowNumber)?.quantityBefore ?? "-"}</TableCell>
                             <TableCell className="text-right">{row.countedQuantity}</TableCell>
+                            <TableCell className="text-right">{previewRowLookup.get(row.rowNumber)?.quantityAfter ?? ""}</TableCell>
                           </TableRow>
                         ))
                       )}
                     </TableBody>
                   </Table>
+                  {filteredImportRows.length > PAGE_SIZE && (
+                    <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm text-gray-600">
+                        Showing {(previewPage - 1) * PAGE_SIZE + 1}-{Math.min(previewPage * PAGE_SIZE, filteredImportRows.length)} of {filteredImportRows.length}
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-500">Page {previewPage} of {totalPreviewPages}</span>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPreviewPage((prev) => Math.max(1, prev - 1))}
+                            disabled={previewPage === 1}
+                          >
+                            Previous
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPreviewPage((prev) => Math.min(totalPreviewPages, prev + 1))}
+                            disabled={previewPage === totalPreviewPages}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -985,7 +1138,9 @@ export default function StockTakingImportPage() {
                         <TableHead>Product Name</TableHead>
                         <TableHead className="w-32">SKU</TableHead>
                         <TableHead className="w-40">Barcode</TableHead>
+                        <TableHead className="w-28 text-right">Quantity Before</TableHead>
                         <TableHead className="w-24 text-right">Count</TableHead>
+                        <TableHead className="w-28 text-right">Quantity After</TableHead>
                         <TableHead className="w-28">Status</TableHead>
                         <TableHead>Reason</TableHead>
                       </TableRow>
@@ -1006,7 +1161,9 @@ export default function StockTakingImportPage() {
                             <TableCell>{row.productName || "-"}</TableCell>
                             <TableCell>{row.sku || "-"}</TableCell>
                             <TableCell>{row.barcode || "-"}</TableCell>
-                            <TableCell className="text-right">{row.countedQuantity}</TableCell>
+                              <TableCell className="text-right">{row.quantityBefore}</TableCell>
+                              <TableCell className="text-right">{row.countedQuantity}</TableCell>
+                              <TableCell className="text-right">{row.quantityAfter}</TableCell>
                             <TableCell>
                               <Badge
                                 variant={
@@ -1081,98 +1238,88 @@ export default function StockTakingImportPage() {
                 {rejectedRows.length === 0 ? (
                   <p className="text-sm text-gray-600">No rejected rows.</p>
                 ) : (
-                  <div className="rounded-md border border-gray-300 bg-white">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-gray-50">
-                          <TableHead className="w-20">Row</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead className="w-32">SKU</TableHead>
-                          <TableHead className="w-40">Barcode</TableHead>
-                          <TableHead className="w-24 text-right">Count</TableHead>
-                          <TableHead>Reason</TableHead>
-                          <TableHead className="w-32 text-right">Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {rejectedRows.map((row) => (
-                          <TableRow key={`${row.rowNumber}-${row.productName}-${row.status}`}>
-                            <TableCell>{row.rowNumber}</TableCell>
-                            <TableCell>{row.productName || "-"}</TableCell>
-                            <TableCell>{row.sku || "-"}</TableCell>
-                            <TableCell>{row.barcode || "-"}</TableCell>
-                            <TableCell className="text-right font-medium">{row.countedQuantity}</TableCell>
-                            <TableCell className="text-sm text-orange-700">{row.issue}</TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleAddRejectedProduct(row)}
-                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                              >
-                                <Plus className="h-3 w-3 mr-1" />
-                                Add
-                              </Button>
-                            </TableCell>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-end gap-3">
+                      <Button
+                        variant="outline"
+                        className="border-gray-300"
+                        onClick={handleAddAllRejectedProducts}
+                        disabled={rejectedRows.length === 0 || loadingAction !== ""}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        {loadingAction === "apply" ? "Adding Rejected Rows..." : "Add All Rejected"}
+                      </Button>
+                    </div>
+                    <div className="rounded-md border border-gray-300 bg-white">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-gray-50">
+                            <TableHead className="w-20">Row</TableHead>
+                            <TableHead>Product</TableHead>
+                            <TableHead className="w-32">SKU</TableHead>
+                            <TableHead className="w-40">Barcode</TableHead>
+                            <TableHead className="w-24 text-right">Quantity Before</TableHead>
+                            <TableHead className="w-24 text-right">Count</TableHead>
+                            <TableHead className="w-24 text-right">Quantity After</TableHead>
+                            <TableHead>Reason</TableHead>
+                            <TableHead className="w-32 text-right">Action</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="rejected-counts" className="mt-0">
-            <Card>
-              <CardHeader>
-                <CardTitle>Rejected Products</CardTitle>
-                <CardDescription>
-                  Rows that could not be matched. Click &quot;Add&quot; to search for the product and add it to this stock take.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {rejectedRows.length === 0 ? (
-                  <p className="text-sm text-gray-600">No rejected rows.</p>
-                ) : (
-                  <div className="rounded-md border border-gray-300 bg-white">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-gray-50">
-                          <TableHead className="w-20">Row</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead className="w-32">SKU</TableHead>
-                          <TableHead className="w-40">Barcode</TableHead>
-                          <TableHead className="w-24 text-right">Count</TableHead>
-                          <TableHead>Reason</TableHead>
-                          <TableHead className="w-32 text-right">Action</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {rejectedRows.map((row) => (
-                          <TableRow key={`${row.rowNumber}-${row.productName}-${row.status}`}>
-                            <TableCell>{row.rowNumber}</TableCell>
-                            <TableCell>{row.productName || "-"}</TableCell>
-                            <TableCell>{row.sku || "-"}</TableCell>
-                            <TableCell>{row.barcode || "-"}</TableCell>
-                            <TableCell className="text-right font-medium">{row.countedQuantity}</TableCell>
-                            <TableCell className="text-sm text-orange-700">{row.issue}</TableCell>
-                            <TableCell className="text-right">
+                        </TableHeader>
+                        <TableBody>
+                          {paginatedRejectedRows.map((row) => (
+                            <TableRow key={`${row.rowNumber}-${row.productName}-${row.status}`}>
+                              <TableCell>{row.rowNumber}</TableCell>
+                              <TableCell>{row.productName || "-"}</TableCell>
+                              <TableCell>{row.sku || "-"}</TableCell>
+                              <TableCell>{row.barcode || "-"}</TableCell>
+                              <TableCell className="text-right font-medium">{row.quantityBefore}</TableCell>
+                              <TableCell className="text-right font-medium">{row.countedQuantity}</TableCell>
+                              <TableCell className="text-right font-medium">{row.quantityAfter}</TableCell>
+                              <TableCell className="text-sm text-orange-700">{row.issue}</TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleAddRejectedProduct(row)}
+                                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                >
+                                  <Plus className="h-3 w-3 mr-1" />
+                                  Add
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                      {rejectedRows.length > PAGE_SIZE && (
+                        <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm text-gray-600">
+                            Showing {(rejectedPage - 1) * PAGE_SIZE + 1}-{Math.min(rejectedPage * PAGE_SIZE, rejectedRows.length)} of {rejectedRows.length}
+                          </p>
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm text-gray-500">Page {rejectedPage} of {totalRejectedPages}</span>
+                            <div className="flex gap-2">
                               <Button
-                                size="sm"
                                 variant="outline"
-                                onClick={() => handleAddRejectedProduct(row)}
-                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                size="sm"
+                                onClick={() => setRejectedPage((prev) => Math.max(1, prev - 1))}
+                                disabled={rejectedPage === 1}
                               >
-                                <Plus className="h-3 w-3 mr-1" />
-                                Add
+                                Previous
                               </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setRejectedPage((prev) => Math.min(totalRejectedPages, prev + 1))}
+                                disabled={rejectedPage === totalRejectedPages}
+                              >
+                                Next
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -1252,14 +1399,14 @@ export default function StockTakingImportPage() {
           onOpenChange={setShowAddRejectedDialog}
           rejectedRow={selectedRejectedRow}
           stockTakeId={stockTakeId}
-          outletId={stockTake?.outlet?.id || ""}
-          existingProductIds={items.map((i) => i.product_id)}
-          onProductAdded={() => {
+          outletId={String(stockTake?.outlet?.id || stockTake?.outlet_id || stockTake?.outlet || "")}
+          existingItems={items.map((i) => ({ id: i.id, product_id: i.product_id }))}
+          onProductAdded={async () => {
             toast({
               title: "Product Added",
               description: "Reloading stock take data...",
             })
-            loadData()
+            await reloadSessionAndRebuildPreview()
           }}
         />
       </PageLayout>

@@ -15,6 +15,14 @@ from .views import (
     ProductImportRowsView,
     ProductImportSourceDownloadView,
     ProductImportStatusView,
+    StockTakeImportApplyView,
+    StockTakeImportHistoryView,
+    StockTakeImportPreviewView,
+    StockTakeImportReopenView,
+    StockTakeImportRowsView,
+    StockTakeImportRowUpdateView,
+    StockTakeImportSourceDownloadView,
+    StockTakeImportStatusView,
 )
 
 urlpatterns = [
@@ -32,4 +40,13 @@ urlpatterns = [
     path('imports/products/<uuid:batch_id>/rows/<int:row_number>/', ProductImportRowUpdateView.as_view(), name='imports-products-row-update'),
     path('imports/products/<uuid:batch_id>/missing/', ProductImportMissingProductsView.as_view(), name='imports-products-missing'),
     path('imports/products/<uuid:batch_id>/source/', ProductImportSourceDownloadView.as_view(), name='imports-products-source-download'),
+
+    path('imports/stock-takes/<int:stock_take_id>/preview/', StockTakeImportPreviewView.as_view(), name='imports-stock-takes-preview'),
+    path('imports/stock-takes/<int:stock_take_id>/history/', StockTakeImportHistoryView.as_view(), name='imports-stock-takes-history'),
+    path('imports/stock-takes/<uuid:batch_id>/status/', StockTakeImportStatusView.as_view(), name='imports-stock-takes-status'),
+    path('imports/stock-takes/<uuid:batch_id>/rows/', StockTakeImportRowsView.as_view(), name='imports-stock-takes-rows'),
+    path('imports/stock-takes/<uuid:batch_id>/rows/<int:row_number>/', StockTakeImportRowUpdateView.as_view(), name='imports-stock-takes-row-update'),
+    path('imports/stock-takes/<uuid:batch_id>/source/', StockTakeImportSourceDownloadView.as_view(), name='imports-stock-takes-source-download'),
+    path('imports/stock-takes/<uuid:batch_id>/reopen/', StockTakeImportReopenView.as_view(), name='imports-stock-takes-reopen'),
+    path('imports/stock-takes/<uuid:batch_id>/apply/', StockTakeImportApplyView.as_view(), name='imports-stock-takes-apply'),
 ]

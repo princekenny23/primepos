@@ -1,4 +1,6 @@
 from rest_framework import serializers  # pyright: ignore[reportMissingImports]
+from django.db.models import Case, F, IntegerField, Q, Sum, Value, When
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from .models import StockMovement, StockTake, StockTakeItem, LocationStock, Batch
 from apps.products.serializers import ProductSerializer
@@ -46,6 +48,8 @@ class StockMovementSerializer(serializers.ModelSerializer):
     outlet_id = serializers.PrimaryKeyRelatedField(write_only=True, required=False, source='outlet', queryset=Outlet.objects.all())
     user_name = serializers.SerializerMethodField()
     outlet_name = serializers.SerializerMethodField()
+    quantity_before = serializers.SerializerMethodField()
+    quantity_after = serializers.SerializerMethodField()
     
     def get_product_name(self, obj):
         """Get product name"""
@@ -64,6 +68,45 @@ class StockMovementSerializer(serializers.ModelSerializer):
         if obj.outlet:
             return obj.outlet.name if hasattr(obj.outlet, 'name') else str(obj.outlet.id)
         return "N/A"
+
+    def _effective_delta_expression(self):
+        negative_qty = F('quantity') * Value(-1)
+        return Case(
+            When(quantity_delta__isnull=False, then=F('quantity_delta')),
+            When(movement_type__in=['sale', 'transfer_out', 'damage', 'expiry'], then=negative_qty),
+            default=F('quantity'),
+            output_field=IntegerField(),
+        )
+
+    def _movement_delta(self, obj):
+        if obj.quantity_delta is not None:
+            return int(obj.quantity_delta)
+        if obj.movement_type in {'sale', 'transfer_out', 'damage', 'expiry'}:
+            return -int(obj.quantity or 0)
+        return int(obj.quantity or 0)
+
+    def _running_quantity_after(self, obj):
+        if not obj.product_id or not obj.outlet_id:
+            return 0
+
+        base_qs = StockMovement.objects.filter(
+            product_id=obj.product_id,
+            outlet_id=obj.outlet_id,
+        )
+
+        up_to_row_filter = Q(created_at__lt=obj.created_at) | Q(created_at=obj.created_at, id__lte=obj.id)
+        running_total = base_qs.aggregate(
+            total=Coalesce(Sum(self._effective_delta_expression(), filter=up_to_row_filter), Value(0))
+        ).get('total')
+
+        return max(0, int(running_total or 0))
+
+    def get_quantity_after(self, obj):
+        return self._running_quantity_after(obj)
+
+    def get_quantity_before(self, obj):
+        quantity_after = self._running_quantity_after(obj)
+        return max(0, quantity_after - self._movement_delta(obj))
     
     def validate(self, attrs):
         instance = getattr(self, 'instance', None)
@@ -85,7 +128,8 @@ class StockMovementSerializer(serializers.ModelSerializer):
         model = StockMovement
         fields = ('id', 'tenant', 'batch', 'batch_id', 'product', 'product_id', 'product_name', 
                   'outlet', 'outlet_id', 'outlet_name', 'user', 'user_name', 
-                  'movement_type', 'quantity', 'quantity_delta', 'unit_cost', 'reason', 'reference_id', 'created_at')
+                  'movement_type', 'quantity', 'quantity_delta', 'quantity_before', 'quantity_after',
+                  'unit_cost', 'reason', 'reference_id', 'created_at')
         read_only_fields = ('id', 'tenant', 'user', 'created_at', 'product_name', 'user_name', 'outlet_name', 'batch', 'outlet')
 
 

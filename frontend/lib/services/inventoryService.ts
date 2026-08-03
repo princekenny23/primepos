@@ -68,6 +68,54 @@ export interface StockTakeSummary {
   valuation_difference: string
 }
 
+export interface StockTakeImportHistoryRow {
+  batch_id: string
+  import_date: string
+  source_filename: string
+  status: string
+  stock_take_id: string
+  stock_take_status?: string
+  created_by?: string
+  outlet?: { id: string; name: string }
+  total_rows: number
+  accepted_rows: number
+  rejected_rows: number
+  duplicate_rows: number
+  processing_time_ms?: number
+  preview_summary?: any
+  apply_summary?: any
+  previewed_at?: string
+  applied_at?: string
+}
+
+export interface StockTakeImportRowResult {
+  row_number: number
+  product_name: string
+  sku: string
+  barcode: string
+  counted_quantity: number
+  quantity_before: number
+  quantity_after: number
+  status: string
+  reason: string
+  rejection_code?: string
+  suggested_resolution?: string
+  raw_data?: Record<string, any>
+  normalized_data?: Record<string, any>
+  target_item_id?: string
+  target_product_id?: string
+  expected_quantity?: number
+  duplicate_count?: number
+}
+
+export interface StockTakeImportParsedRow {
+  rowNumber: number
+  productName: string
+  countedQuantity: number
+  sku?: string
+  barcode?: string
+}
+
 export const inventoryService = {
   async adjust(data: StockAdjustmentData): Promise<any> {
     return api.post(apiEndpoints.inventory.adjust, data)
@@ -198,6 +246,90 @@ export const inventoryService = {
 
   async createStockTakeItem(stockTakeId: string, data: StockTakeItemData): Promise<any> {
     return api.post(`${apiEndpoints.inventory.stockTakes}${stockTakeId}/items/`, data)
+  },
+
+  async previewStockTakeImport(
+    stockTakeId: string,
+    file: File,
+    idempotencyKey?: string,
+    parsedRows?: StockTakeImportParsedRow[]
+  ): Promise<any> {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (parsedRows && parsedRows.length > 0) {
+      formData.append('rows_json', JSON.stringify(parsedRows))
+    }
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null
+    const headers: HeadersInit = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+    if (idempotencyKey) headers['X-Idempotency-Key'] = idempotencyKey
+
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+    const response = await fetch(`${API_BASE_URL}${apiEndpoints.imports.stockTakesPreview(stockTakeId)}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+
+    const responseData = await response.json().catch(() => ({ detail: 'Unknown error' }))
+    if (!response.ok) {
+      throw new Error(responseData.detail || responseData.error || `HTTP ${response.status}: ${response.statusText}`)
+    }
+    return responseData
+  },
+
+  async getStockTakeImportHistory(stockTakeId: string, filters?: { search?: string; page?: number; pageSize?: number }): Promise<{ results: StockTakeImportHistoryRow[]; count: number; page: number; total_pages: number }> {
+    const params = new URLSearchParams()
+    if (filters?.search) params.append('search', filters.search)
+    if (filters?.page) params.append('page', String(filters.page))
+    if (filters?.pageSize) params.append('page_size', String(filters.pageSize))
+    const query = params.toString()
+    return api.get(`${apiEndpoints.imports.stockTakesHistory(stockTakeId)}${query ? `?${query}` : ''}`)
+  },
+
+  async getStockTakeImportStatus(batchId: string): Promise<any> {
+    return api.get(apiEndpoints.imports.stockTakesStatus(batchId))
+  },
+
+  async getStockTakeImportRows(batchId: string, filters?: { search?: string; page?: number; pageSize?: number }): Promise<{ results: StockTakeImportRowResult[]; count: number; page: number; total_pages: number }> {
+    const params = new URLSearchParams()
+    if (filters?.search) params.append('search', filters.search)
+    if (filters?.page) params.append('page', String(filters.page))
+    if (filters?.pageSize) params.append('page_size', String(filters.pageSize))
+    const query = params.toString()
+    return api.get(`${apiEndpoints.imports.stockTakesRows(batchId)}${query ? `?${query}` : ''}`)
+  },
+
+  async updateStockTakeImportRow(batchId: string, rowNumber: number, data: Record<string, any>): Promise<any> {
+    return api.patch(apiEndpoints.imports.stockTakesRowUpdate(batchId, rowNumber), data)
+  },
+
+  async applyStockTakeImport(batchId: string, idempotencyKey?: string): Promise<any> {
+    const payload: Record<string, any> = {}
+    if (idempotencyKey) payload.idempotency_key = idempotencyKey
+    return api.post(apiEndpoints.imports.stockTakesApply(batchId), payload)
+  },
+
+  async reopenStockTakeImport(batchId: string): Promise<any> {
+    return api.post(apiEndpoints.imports.stockTakesReopen(batchId), {})
+  },
+
+  async downloadStockTakeImportSource(batchId: string): Promise<{ url: string; filename?: string }> {
+    const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null
+    const response = await fetch(`${base}${apiEndpoints.imports.stockTakesSource(batchId)}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+
+    if (!response.ok) {
+      throw new Error(`Download failed (${response.status})`)
+    }
+
+    const blob = await response.blob()
+    const downloadUrl = window.URL.createObjectURL(blob)
+    return { url: downloadUrl, filename: `stocktake-import-${batchId}.xlsx` }
   },
 
   async getStockTakeItems(stockTakeId: string): Promise<any[]> {

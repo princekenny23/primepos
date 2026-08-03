@@ -67,8 +67,19 @@ type BatchStatus = {
   }
   apply_summary?: {
     imported?: number
+    imported_rows?: number
+    imported_products?: number
     failed?: number
     total_rows?: number
+    skipped_or_collapsed_rows?: number
+    reconciliation?: {
+      total_rows?: number
+      imported_rows?: number
+      failed_rows?: number
+      skipped_or_collapsed_rows?: number
+      accounted_rows?: number
+      is_balanced?: boolean
+    }
     products_updated?: number
     new_products_created?: number
     stock_increases?: number
@@ -406,7 +417,7 @@ function ProductsImportPageContent() {
   const pageTitle = isSyncMode ? "Product & Inventory Sync" : "Import Products"
   const pageDescription = isSyncMode
     ? "Preview, reconcile, and apply product data with inventory adjustments and audit history."
-    : "Preview, approve, and safely apply product imports with full rejection visibility. New products are added to your existing catalog."
+    : "Preview, approve, and safely apply create-only product imports with full rejection visibility. Existing products are rejected here; use Product & Inventory Sync to update catalog records."
   const uploadTabLabel = isSyncMode ? "Upload & Preview Sync" : "Upload & Preview"
   const summaryTabLabel = isSyncMode ? "Sync Summary" : "Import Summary"
   const historyTabLabel = isSyncMode ? "Processes" : "Import History"
@@ -423,6 +434,7 @@ function ProductsImportPageContent() {
   const [chunkSize, setChunkSize] = useState<number>(100)
   const [continueOnError, setContinueOnError] = useState<boolean>(true)
   const [isParsingFile, setIsParsingFile] = useState<boolean>(false)
+  const [previewPage, setPreviewPage] = useState<number>(1)
   const [detailPage, setDetailPage] = useState<number>(1)
   const [rejectedPage, setRejectedPage] = useState<number>(1)
   const [detailSearchTerm, setDetailSearchTerm] = useState<string>("")
@@ -482,13 +494,18 @@ function ProductsImportPageContent() {
 
   const summary = useMemo(() => {
     const preview = batchStatus?.preview_summary || {}
+    const applySummary = batchStatus?.apply_summary || {}
     return {
       totalRows: preview.total_rows ?? batchStatus?.total_rows ?? 0,
       validRows: preview.valid_rows ?? batchStatus?.valid_rows ?? 0,
       invalidRows: preview.invalid_rows ?? batchStatus?.invalid_rows ?? 0,
       warningRows: preview.warning_rows ?? batchStatus?.warning_rows ?? 0,
-      importedRows: batchStatus?.apply_summary?.imported ?? 0,
-      failedRows: batchStatus?.apply_summary?.failed ?? 0,
+      importedRows: applySummary.imported_rows ?? applySummary.imported ?? 0,
+      importedProducts: applySummary.imported_products ?? 0,
+      skippedOrCollapsedRows: applySummary.skipped_or_collapsed_rows ?? 0,
+      failedRows: applySummary.failed ?? 0,
+      accountedRows: applySummary.reconciliation?.accounted_rows ?? 0,
+      isBalanced: applySummary.reconciliation?.is_balanced,
     }
   }, [batchStatus])
 
@@ -528,7 +545,11 @@ function ProductsImportPageContent() {
         { label: "Invalid Rows", value: String(summary.invalidRows) },
         { label: "Warning Rows", value: String(summary.warningRows) },
         { label: "Imported Rows", value: String(summary.importedRows) },
+        { label: "Imported Products", value: String(summary.importedProducts) },
+        { label: "Skipped/Collapsed Rows", value: String(summary.skippedOrCollapsedRows) },
         { label: "Failed Rows", value: String(summary.failedRows) },
+        { label: "Accounted Rows", value: String(summary.accountedRows) },
+        { label: "Reconciliation", value: summary.isBalanced === undefined ? "-" : summary.isBalanced ? "Balanced" : "Mismatch" },
       ]
     },
     [batchId, batchStatus?.status, batchStatus?.is_approved, batchStatus?.sync_strategy, batchStatus?.preview_summary?.sync_strategy, batchStatus?.apply_summary, summary, isSyncMode, selectedSyncStrategy]
@@ -542,26 +563,6 @@ function ProductsImportPageContent() {
         icon: Upload,
       },
       {
-        value: "import-summary",
-        label: summaryTabLabel,
-        icon: CheckCircle2,
-      },
-      ...(isSyncMode
-        ? [{
-            value: "new-products",
-            label: "New Products",
-            icon: Plus,
-            badgeCount: batchRows.filter((row) => row.action === "create").length,
-            badgeVariant: "secondary" as const,
-          }, {
-            value: "not-in-file",
-            label: "Not In File",
-            icon: Archive,
-            badgeCount: missingProducts.length,
-            badgeVariant: "secondary" as const,
-          }]
-        : []),
-      {
         value: "rejected-products",
         label: "Rejected Products",
         icon: XCircle,
@@ -569,12 +570,17 @@ function ProductsImportPageContent() {
         badgeVariant: "destructive",
       },
       {
+        value: "import-summary",
+        label: summaryTabLabel,
+        icon: CheckCircle2,
+      },
+      {
         value: "import-history",
         label: historyTabLabel,
         icon: CheckCircle2,
       },
     ],
-    [previewErrors.length, applyErrors.length, uploadTabLabel, summaryTabLabel, historyTabLabel, isSyncMode, batchRows, missingProducts.length]
+    [previewErrors.length, applyErrors.length, uploadTabLabel, summaryTabLabel, historyTabLabel]
   )
 
   const getRawValue = (rawData: Record<string, any> | undefined, keys: string[]) => {
@@ -623,6 +629,16 @@ function ProductsImportPageContent() {
     const start = (rejectedPage - 1) * PAGE_SIZE
     return rejectedRows.slice(start, start + PAGE_SIZE)
   }, [rejectedRows, rejectedPage])
+
+  const totalPreviewPages = useMemo(
+    () => Math.max(1, Math.ceil(importRows.length / PAGE_SIZE)),
+    [importRows.length]
+  )
+
+  const paginatedPreviewRows = useMemo(() => {
+    const start = (previewPage - 1) * PAGE_SIZE
+    return importRows.slice(start, start + PAGE_SIZE)
+  }, [importRows, previewPage])
 
   const newProductRows = useMemo(() => {
     if (!isSyncMode) return []
@@ -701,6 +717,14 @@ function ProductsImportPageContent() {
   useEffect(() => {
     setDetailPage(1)
   }, [batchId, importRows.length, detailSearchTerm, batchRows.length])
+
+  useEffect(() => {
+    setPreviewPage(1)
+  }, [file, importRows.length])
+
+  useEffect(() => {
+    setPreviewPage((prev) => Math.min(prev, totalPreviewPages))
+  }, [totalPreviewPages])
 
   useEffect(() => {
     setDetailPage((prev) => Math.min(prev, totalDetailPages))
@@ -1586,6 +1610,47 @@ function ProductsImportPageContent() {
     })
   }
 
+  const handleBulkRecoverRejectedRows = async () => {
+    if (!batchId || rejectedRows.length === 0) return
+
+    setLoadingAction("recover")
+    try {
+      const rowsToRescan = rejectedRows.map((row) => ({
+        rowNumber: row.rowNumber,
+        productName: getRawValue(row.rawData, ["name", "product_name", "product", "item_name"]) || row.productName,
+        sku: getRawValue(row.rawData, ["sku", "code", "product_code"]) || row.sku,
+        barcode: getRawValue(row.rawData, ["barcode", "bar_code"]) || row.barcode,
+        category: getRawValue(row.rawData, ["category", "category_name", "product_category"]) || "",
+        retailPrice: getRawValue(row.rawData, ["retail_price", "price", "sale_price"]) || "",
+        costPrice: getRawValue(row.rawData, ["cost_price", "cost"]) || "",
+        stock: getRawValue(row.rawData, ["stock", "quantity", "opening_stock"]) || "",
+        lowStockThreshold: getRawValue(row.rawData, ["low_stock_threshold", "lowStockThreshold"]) || "0",
+        description: getRawValue(row.rawData, ["description", "notes"]) || "",
+        isActive: true,
+      }))
+
+      const { rescanned, failed } = await rescanBatchRows(rowsToRescan)
+      await refreshBatch(batchId)
+
+      toast({
+        title: failed > 0 ? "Bulk Add Completed With Warnings" : "Bulk Add Completed",
+        description:
+          failed > 0
+            ? `${rescanned} rejected row(s) were revalidated, ${failed} row(s) could not be revalidated.`
+            : `${rescanned} rejected row(s) were revalidated successfully.`,
+        variant: failed > 0 ? "destructive" : undefined,
+      })
+    } catch (error: any) {
+      toast({
+        title: "Bulk Add Failed",
+        description: error?.message || "Unable to bulk add rejected rows.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingAction("")
+    }
+  }
+
   const saveEditedRow = async () => {
     if (!batchId || editRowDraft.rowNumber <= 0) return
 
@@ -1880,6 +1945,81 @@ function ProductsImportPageContent() {
                     Download Outlet Products
                   </Button>
                 </div>
+
+                <div className="rounded-md border border-gray-300 bg-white">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead className="w-16">Row</TableHead>
+                        <TableHead>Product Name</TableHead>
+                        <TableHead className="w-32">SKU</TableHead>
+                        <TableHead className="w-32">Barcode</TableHead>
+                        <TableHead className="w-28">Category</TableHead>
+                        <TableHead className="w-24">Price</TableHead>
+                        <TableHead className="w-24">Cost</TableHead>
+                        <TableHead className="w-24">Stock</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isParsingFile ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center text-sm text-gray-600">
+                            Reading product rows...
+                          </TableCell>
+                        </TableRow>
+                      ) : paginatedPreviewRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="text-center text-sm text-gray-600">
+                            {file
+                              ? "No products loaded yet. Upload a file to see a preview."
+                              : "Upload a file to see product preview rows."}
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        paginatedPreviewRows.map((row) => (
+                          <TableRow key={row.rowNumber}>
+                            <TableCell>{row.rowNumber}</TableCell>
+                            <TableCell>{row.productName || "-"}</TableCell>
+                            <TableCell>{row.sku || "-"}</TableCell>
+                            <TableCell>{row.barcode || "-"}</TableCell>
+                            <TableCell>{row.category || "-"}</TableCell>
+                            <TableCell>{row.retailPrice || "-"}</TableCell>
+                            <TableCell>{row.costPrice || "-"}</TableCell>
+                            <TableCell>{row.stock || "-"}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                  {importRows.length > PAGE_SIZE && (
+                    <div className="flex flex-col gap-2 border-t border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm text-gray-600">
+                        Showing {(previewPage - 1) * PAGE_SIZE + 1}-{Math.min(previewPage * PAGE_SIZE, importRows.length)} of {importRows.length}
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <span className="text-sm text-gray-500">Page {previewPage} of {totalPreviewPages}</span>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPreviewPage((prev) => Math.max(1, prev - 1))}
+                            disabled={previewPage === 1}
+                          >
+                            Previous
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPreviewPage((prev) => Math.min(totalPreviewPages, prev + 1))}
+                            disabled={previewPage === totalPreviewPages}
+                          >
+                            Next
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -2111,7 +2251,19 @@ function ProductsImportPageContent() {
                 {rejectedRows.length === 0 ? (
                   <p className="text-sm text-gray-600">No rejected products.</p>
                 ) : (
-                  <div className="rounded-md border border-gray-300">
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-end gap-3">
+                      <Button
+                        variant="outline"
+                        className="border-gray-300"
+                        onClick={handleBulkRecoverRejectedRows}
+                        disabled={!batchId || loadingAction !== ""}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        {loadingAction === "recover" ? "Bulk Adding..." : "Bulk Add Rejected"}
+                      </Button>
+                    </div>
+                    <div className="rounded-md border border-gray-300">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -2177,6 +2329,7 @@ function ProductsImportPageContent() {
                         </div>
                       </div>
                     )}
+                    </div>
                   </div>
                 )}
               </CardContent>

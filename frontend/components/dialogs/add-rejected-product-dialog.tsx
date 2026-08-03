@@ -33,14 +33,19 @@ interface ImportedStockTakeRow {
   barcode?: string
 }
 
+interface ExistingStockTakeItem {
+  id: string
+  product_id: string
+}
+
 interface AddRejectedProductDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   rejectedRow: ImportedStockTakeRow | null
   stockTakeId: string
   outletId: string
-  existingProductIds: string[]
-  onProductAdded: () => void
+  existingItems: ExistingStockTakeItem[]
+  onProductAdded: () => void | Promise<void>
 }
 
 export function AddRejectedProductDialog({
@@ -49,7 +54,7 @@ export function AddRejectedProductDialog({
   rejectedRow,
   stockTakeId,
   outletId,
-  existingProductIds,
+  existingItems,
   onProductAdded,
 }: AddRejectedProductDialogProps) {
   const { toast } = useToast()
@@ -86,7 +91,7 @@ export function AddRejectedProductDialog({
 
         // Filter out products already in stock take and sort by relevance
         const filtered = response.results
-          .filter((p: any) => !existingProductIds.includes(String(p.id)))
+          .filter((p: any) => !existingItems.some((item) => String(item.product_id) === String(p.id)))
           .sort((a: any, b: any) => {
             // Prioritize exact name matches
             const aNameMatch = a.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -111,30 +116,40 @@ export function AddRejectedProductDialog({
 
     const timer = setTimeout(searchProducts, 300)
     return () => clearTimeout(timer)
-  }, [searchTerm, outletId, existingProductIds])
+  }, [searchTerm, outletId, existingItems])
 
   const handleAddProduct = async () => {
     if (!selectedProduct || !rejectedRow) return
 
     setIsAdding(true)
     try {
-      // Create stock take item with the counted quantity from rejected row
-      await inventoryService.createStockTakeItem(stockTakeId, {
-        product_id: String(selectedProduct.id),
-        counted_quantity: rejectedRow.countedQuantity,
-        notes: `Added from rejected import row ${rejectedRow.rowNumber}`,
-      })
+      const expectedQuantity = Number(selectedProduct.sellable_stock ?? selectedProduct.stock ?? 0)
+      const existingItem = existingItems.find((item) => String(item.product_id) === String(selectedProduct.id))
+
+      if (existingItem) {
+        await inventoryService.updateStockTakeItem(stockTakeId, existingItem.id, {
+          counted_quantity: rejectedRow.countedQuantity,
+          notes: `Updated from rejected import row ${rejectedRow.rowNumber}`,
+        })
+      } else {
+        await inventoryService.createStockTakeItem(stockTakeId, {
+          product_id: String(selectedProduct.id),
+          expected_quantity: Number.isFinite(expectedQuantity) ? expectedQuantity : 0,
+          counted_quantity: rejectedRow.countedQuantity,
+          notes: `Added from rejected import row ${rejectedRow.rowNumber}`,
+        })
+      }
 
       toast({
-        title: "Product Added",
-        description: `${selectedProduct.name} added to stock take with count ${rejectedRow.countedQuantity}.`,
+        title: existingItem ? "Product Updated" : "Product Added",
+        description: `${selectedProduct.name} saved to stock take with count ${rejectedRow.countedQuantity}.`,
       })
 
       // Reset and close
       setSearchTerm("")
       setSelectedProduct(null)
       setSearchResults([])
-      onProductAdded()
+      await Promise.resolve(onProductAdded())
       onOpenChange(false)
     } catch (error: any) {
       toast({

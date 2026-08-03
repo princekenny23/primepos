@@ -116,6 +116,42 @@ Medium priority:
 - Expanded analytics.
 - Barcode scanner integration improvements.
 
+## Stocktake Import Phases
+Use this rollout order for the stocktake/import work so the UI and data flow stay consistent across session tables, import tables, and rejected-row recovery.
+
+```text
+Phase 1 - Import Count Table Alignment
+- Update the stocktake import count summary table to show:
+  - Quantity Before
+  - Count
+  - Quantity After
+- Keep the current row matching, preview, and import logic unchanged.
+- Ensure rejected rows and summary metrics still render correctly after the column change.
+
+Phase 2 - Stocktake Session Table Alignment
+- Update the stocktake session detail table to use the same quantity model:
+  - Quantity Before
+  - Count
+  - Quantity After
+- Preserve edit and completion actions.
+- Ensure the completed difference math still matches the session totals.
+
+Phase 3 - Rejected Row Recovery
+- Add or complete bulk add behavior for rejected stocktake rows.
+- Keep single-row recovery available as a fallback.
+- Reload the active session after each recovery action.
+
+Phase 4 - Archive Handling Rules
+- Keep archived products excluded from POS product selection.
+- Define whether archived products can still appear in stocktake import matching.
+- If they are allowed in stocktake, mark them clearly as archived and prevent accidental POS reactivation.
+
+Phase 5 - Validation
+- Run frontend linting on the touched inventory screens.
+- Confirm stocktake import, session counts, and archive behavior on a live outlet dataset.
+- Verify that Quantity Before / Count / Quantity After stays consistent between the import flow and the session detail view.
+```
+
 ## Development Quick Start
 
 ### Backend

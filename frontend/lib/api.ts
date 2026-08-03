@@ -876,6 +876,14 @@ export const apiEndpoints = {
     productsRowUpdate: (batchId: string, rowNumber: number) => `/imports/products/${batchId}/rows/${rowNumber}/`,
     productsMissing: (batchId: string) => `/imports/products/${batchId}/missing/`,
     productsSource: (batchId: string) => `/imports/products/${batchId}/source/`,
+    stockTakesHistory: (stockTakeId: string) => `/imports/stock-takes/${stockTakeId}/history/`,
+    stockTakesPreview: (stockTakeId: string) => `/imports/stock-takes/${stockTakeId}/preview/`,
+    stockTakesStatus: (batchId: string) => `/imports/stock-takes/${batchId}/status/`,
+    stockTakesApply: (batchId: string) => `/imports/stock-takes/${batchId}/apply/`,
+    stockTakesRows: (batchId: string) => `/imports/stock-takes/${batchId}/rows/`,
+    stockTakesRowUpdate: (batchId: string, rowNumber: number) => `/imports/stock-takes/${batchId}/rows/${rowNumber}/`,
+    stockTakesSource: (batchId: string) => `/imports/stock-takes/${batchId}/source/`,
+    stockTakesReopen: (batchId: string) => `/imports/stock-takes/${batchId}/reopen/`,
   },
   // Shifts
   shifts: {

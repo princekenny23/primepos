@@ -52,19 +52,36 @@ import { useState, useEffect, useMemo } from "react"
 import { useRouter, useParams, useSearchParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { inventoryService } from "@/lib/services/inventoryService"
+import { productService } from "@/lib/services/productService"
 import { useToast } from "@/components/ui/use-toast"
 import { exportToXLSX, type ExportColumn } from "@/lib/services/exportService"
+import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
 
 interface StockTakingItem {
   id: string
   product_id: string
   product_name: string
   barcode: string
+  isActive: boolean
+  quantityBefore: number
   expectedQty: number
   countedQty: number
   difference: number
+  quantityAfter: number
   isCounted: boolean
   notes?: string
+}
+
+interface ImportRejectedItem {
+  rowNumber: number
+  productName: string
+  sku: string
+  barcode: string
+  quantityBefore: number
+  countedQuantity: number
+  quantityAfter: number
+  reason: string
+  status: string
 }
 
 export default function StockTakingDetailPage() {
@@ -84,7 +101,12 @@ export default function StockTakingDetailPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
+  const [rejectedPage, setRejectedPage] = useState(1)
+  const [importRejectedPage, setImportRejectedPage] = useState(1)
   const [searchPage, setSearchPage] = useState(1)
+  const [stockViewTab, setStockViewTab] = useState("counted-stock")
+  const [importRejectedItems, setImportRejectedItems] = useState<ImportRejectedItem[]>([])
+  const [isLoadingImportRejected, setIsLoadingImportRejected] = useState(false)
   const itemsPerPage = 10
   const [isCompleting, setIsCompleting] = useState(false)
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false)
@@ -104,8 +126,66 @@ export default function StockTakingDetailPage() {
 
   useEffect(() => {
     setCurrentPage(1)
+    setRejectedPage(1)
+    setImportRejectedPage(1)
     setSearchPage(1)
-  }, [items.length, searchTerm, searchFilter])
+  }, [items.length, importRejectedItems.length, searchTerm, searchFilter])
+
+  useEffect(() => {
+    const loadImportRejectedRows = async () => {
+      setIsLoadingImportRejected(true)
+      try {
+        const history = await inventoryService.getStockTakeImportHistory(stockTakeId, {
+          page: 1,
+          pageSize: 1,
+        })
+
+        const latestBatch = history.results?.[0]
+        if (!latestBatch?.batch_id) {
+          setImportRejectedItems([])
+          return
+        }
+
+        const firstPage = await inventoryService.getStockTakeImportRows(latestBatch.batch_id, {
+          page: 1,
+          pageSize: 1000,
+        })
+
+        const allRows = [...(firstPage.results || [])]
+        const totalPages = Math.max(1, Number(firstPage.total_pages || 1))
+        for (let page = 2; page <= totalPages; page += 1) {
+          const pageResponse = await inventoryService.getStockTakeImportRows(latestBatch.batch_id, {
+            page,
+            pageSize: 1000,
+          })
+          allRows.push(...(pageResponse.results || []))
+        }
+
+        const rejected = allRows
+          .filter((row) => row.status === "Rejected" || row.status === "Failed")
+          .map((row) => ({
+            rowNumber: row.row_number,
+            productName: row.product_name || "-",
+            sku: row.sku || "-",
+            barcode: row.barcode || "-",
+            quantityBefore: Number(row.quantity_before || 0),
+            countedQuantity: Number(row.counted_quantity || 0),
+            quantityAfter: Number(row.quantity_after || 0),
+            reason: row.reason || row.suggested_resolution || "-",
+            status: row.status,
+          }))
+
+        setImportRejectedItems(rejected)
+      } catch (error) {
+        console.error("Failed to load import rejected rows:", error)
+        setImportRejectedItems([])
+      } finally {
+        setIsLoadingImportRejected(false)
+      }
+    }
+
+    loadImportRejectedRows()
+  }, [stockTakeId])
 
   const loadStockTakeData = async (showLoading = true) => {
     if (showLoading) setIsLoading(true)
@@ -125,6 +205,12 @@ export default function StockTakingDetailPage() {
         const countedQty = typeof item.counted_quantity === 'number' 
           ? item.counted_quantity 
           : parseInt(String(item.counted_quantity || 0))
+        const expectedQty = typeof item.expected_quantity === 'number'
+          ? item.expected_quantity
+          : parseInt(String(item.expected_quantity || 0))
+        const difference = typeof item.difference === 'number'
+          ? item.difference
+          : parseInt(String(item.difference || 0))
         const isCounted =
           (typeof item.is_counted === "boolean" && item.is_counted) ||
           Boolean(item.counted_at) ||
@@ -135,13 +221,12 @@ export default function StockTakingDetailPage() {
           product_id: String(item.product?.id || item.product_id || ""),
           product_name: item.product?.name || "Unknown Product",
           barcode: item.product?.barcode || "",
-          expectedQty: typeof item.expected_quantity === 'number'
-            ? item.expected_quantity
-            : parseInt(String(item.expected_quantity || 0)),
+          isActive: item.product?.is_active !== false,
+          quantityBefore: expectedQty,
+          expectedQty: expectedQty,
           countedQty: countedQty,
-          difference: typeof item.difference === 'number'
-            ? item.difference
-            : parseInt(String(item.difference || 0)),
+          difference: difference,
+          quantityAfter: expectedQty + difference,
           isCounted: isCounted,
           notes: item.notes || "",
         }
@@ -249,8 +334,49 @@ export default function StockTakingDetailPage() {
     return countedItems.slice(startIndex, startIndex + itemsPerPage)
   }, [countedItems, currentPage, itemsPerPage])
 
+  const rejectedItems = useMemo(() => {
+    return items
+      .filter((item) => !item.isCounted)
+      .sort((a, b) => a.product_name.localeCompare(b.product_name))
+  }, [items])
+
+  const paginatedRejectedItems = useMemo(() => {
+    const startIndex = (rejectedPage - 1) * itemsPerPage
+    return rejectedItems.slice(startIndex, startIndex + itemsPerPage)
+  }, [rejectedItems, rejectedPage, itemsPerPage])
+
+  const paginatedImportRejectedItems = useMemo(() => {
+    const startIndex = (importRejectedPage - 1) * itemsPerPage
+    return importRejectedItems.slice(startIndex, startIndex + itemsPerPage)
+  }, [importRejectedItems, importRejectedPage, itemsPerPage])
+
   const totalCountedPages = Math.max(1, Math.ceil(countedItems.length / itemsPerPage))
+  const totalRejectedPages = Math.max(1, Math.ceil(rejectedItems.length / itemsPerPage))
+  const totalImportRejectedPages = Math.max(1, Math.ceil(importRejectedItems.length / itemsPerPage))
   const totalSearchPages = Math.max(1, Math.ceil(searchableItems.length / itemsPerPage))
+
+  const stockTabs: TabConfig[] = useMemo(
+    () => [
+      {
+        value: "counted-stock",
+        label: "Stock Count",
+        badgeCount: countedItems.length,
+      },
+      {
+        value: "uncounted-stock",
+        label: "Uncounted Items",
+        badgeCount: rejectedItems.length,
+        badgeVariant: "destructive",
+      },
+      {
+        value: "import-rejected",
+        label: "Import Rejected",
+        badgeCount: importRejectedItems.length,
+        badgeVariant: "destructive",
+      },
+    ],
+    [countedItems.length, rejectedItems.length, importRejectedItems.length]
+  )
 
   const handleCountChange = async (itemId: string, value: string) => {
     const numValue = parseInt(value) || 0
@@ -336,6 +462,10 @@ export default function StockTakingDetailPage() {
             product_id: String(newItem.product?.id || newItem.product_id || ""),
             product_name: newItem.product?.name || "Unknown Product",
             barcode: newItem.product?.barcode || "",
+            isActive: newItem.product?.is_active !== false,
+            quantityBefore: typeof newItem.expected_quantity === 'number'
+              ? newItem.expected_quantity
+              : parseInt(String(newItem.expected_quantity || 0)),
             expectedQty: typeof newItem.expected_quantity === 'number'
               ? newItem.expected_quantity
               : parseInt(String(newItem.expected_quantity || 0)),
@@ -345,6 +475,7 @@ export default function StockTakingDetailPage() {
             difference: typeof newItem.difference === 'number'
               ? newItem.difference
               : parseInt(String(newItem.difference || 0)),
+            quantityAfter: (typeof newItem.expected_quantity === 'number' ? newItem.expected_quantity : parseInt(String(newItem.expected_quantity || 0))) + (typeof newItem.difference === 'number' ? newItem.difference : parseInt(String(newItem.difference || 0))),
             isCounted: (typeof newItem.counted_quantity === 'number' ? newItem.counted_quantity : parseInt(String(newItem.counted_quantity || 0))) > 0,
             notes: newItem.notes || "",
           }
@@ -441,20 +572,63 @@ export default function StockTakingDetailPage() {
   const handleExportSessionStock = async () => {
     setIsExportingSession(true)
     try {
-      const exportRows = items.map((item) => ({
-        product_name: item.product_name || "",
-        sku: item.barcode ? "" : "", // Placeholder for sku if available
-        barcode: item.barcode || "",
-        expected_quantity: item.expectedQty || 0,
-        counted_quantity: item.countedQty || "",
-      }))
+      const outletId = String(
+        stockTake?.outlet?.id ||
+        stockTake?.outlet_id ||
+        (typeof stockTake?.outlet === "string" || typeof stockTake?.outlet === "number"
+          ? stockTake.outlet
+          : "")
+      )
+      const exportRows: Array<{
+        product_name: string
+        sku: string
+        barcode: string
+        quantity_before: number
+        count: string
+        quantity_after: string
+      }> = []
+
+      if (!outletId) {
+        throw new Error("Unable to determine the outlet for this stock take session.")
+      }
+
+      let page = 1
+      let hasNext = true
+      while (hasNext) {
+        const response = await productService.list({
+          outlet: outletId,
+          is_active: true,
+          page,
+          limit: 100,
+        })
+
+        const pageItems = Array.isArray(response.results) ? response.results : []
+        pageItems.forEach((product) => {
+          exportRows.push({
+            product_name: product.name || "",
+            sku: product.sku || "",
+            barcode: product.barcode || "",
+            quantity_before: Number(product.sellable_stock || product.stock || 0),
+            count: "",
+            quantity_after: "",
+          })
+        })
+
+        hasNext = Boolean(response.next)
+        page += 1
+      }
+
+      if (exportRows.length === 0) {
+        throw new Error("No active products found for this outlet.")
+      }
 
       const columns: ExportColumn[] = [
         { key: "product_name", label: "Product Name", width: 32 },
         { key: "sku", label: "SKU", width: 20 },
         { key: "barcode", label: "Barcode", width: 22 },
-        { key: "expected_quantity", label: "Expected Quantity", format: "number", width: 18 },
-        { key: "counted_quantity", label: "Counted Quantity", width: 18 },
+        { key: "quantity_before", label: "Quantity Before", format: "number", width: 18 },
+        { key: "count", label: "Count", width: 18 },
+        { key: "quantity_after", label: "Quantity After", width: 18 },
       ]
 
       await exportToXLSX({
@@ -468,7 +642,7 @@ export default function StockTakingDetailPage() {
 
       toast({
         title: "Export Successful",
-        description: `Exported ${items.length} product record(s) for this stock take session.`,
+        description: `Exported ${exportRows.length} active product record(s) for this stock take session.`,
       })
     } catch (error: any) {
       console.error("Failed to export session stock:", error)
@@ -720,92 +894,255 @@ export default function StockTakingDetailPage() {
           </CardContent>
         </Card>
 
-        {/* Stock Count Table - Only Counted Items */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Stock Count</CardTitle>
-            <CardDescription>
-              Items that have been counted ({countedItems.length} items)
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {countedItems.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <p>No items counted yet. Use the search bar above to find and count items.</p>
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Barcode</TableHead>
-                    <TableHead>Item Name</TableHead>
-                    <TableHead className="text-right">Expected</TableHead>
-                    <TableHead className="text-right">Counted</TableHead>
-                    <TableHead className="text-right">Difference</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedCountedItems.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-mono text-sm">{item.barcode || "N/A"}</TableCell>
-                      <TableCell className="font-medium">{item.product_name}</TableCell>
-                      <TableCell className="text-right">{item.expectedQty}</TableCell>
-                      <TableCell className="text-right">{item.countedQty}</TableCell>
-                      <TableCell className={cn(
-                        "text-right font-semibold",
-                        item.difference === 0 
-                          ? "text-muted-foreground" 
-                          : item.difference > 0 
-                          ? "text-green-600" 
-                          : "text-red-600"
-                      )}>
-                        {item.difference >= 0 ? "+" : ""}{item.difference}
-                      </TableCell>
-                      <TableCell>
-                        <Badge className="bg-green-600">Counted</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleItemClick(item)}
-                          disabled={isCompleted}
-                        >
-                          Edit
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-            {countedItems.length > itemsPerPage && (
-              <div className="mt-4 flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
-                <span>Page {currentPage} of {totalCountedPages}</span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    Prev
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage((prev) => Math.min(totalCountedPages, prev + 1))}
-                    disabled={currentPage === totalCountedPages}
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <FilterableTabs
+          tabs={stockTabs}
+          activeTab={stockViewTab}
+          onTabChange={setStockViewTab}
+          tabsListClassName="grid w-full grid-cols-3"
+        >
+          <TabsContent value="counted-stock" className="mt-0">
+            <Card>
+              <CardHeader>
+                <CardTitle>Stock Count</CardTitle>
+                <CardDescription>
+                  Items that have been counted ({countedItems.length} items)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {countedItems.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>No items counted yet. Use the search bar above to find and count items.</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Barcode</TableHead>
+                        <TableHead>Item Name</TableHead>
+                        <TableHead className="text-right">Quantity Before</TableHead>
+                        <TableHead className="text-right">Count</TableHead>
+                        <TableHead className="text-right">Quantity After</TableHead>
+                        <TableHead className="text-right">Difference</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedCountedItems.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-mono text-sm">{item.barcode || "N/A"}</TableCell>
+                          <TableCell className="font-medium">{item.product_name}</TableCell>
+                          <TableCell className="text-right">{item.quantityBefore}</TableCell>
+                          <TableCell className="text-right">{item.countedQty}</TableCell>
+                          <TableCell className="text-right">{item.quantityAfter}</TableCell>
+                          <TableCell className={cn(
+                            "text-right font-semibold",
+                            item.difference === 0
+                              ? "text-muted-foreground"
+                              : item.difference > 0
+                              ? "text-green-600"
+                              : "text-red-600"
+                          )}>
+                            {item.difference >= 0 ? "+" : ""}{item.difference}
+                          </TableCell>
+                          <TableCell>
+                            <Badge className="bg-green-600">Counted</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleItemClick(item)}
+                              disabled={isCompleted}
+                            >
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+                {countedItems.length > itemsPerPage && (
+                  <div className="mt-4 flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
+                    <span>Page {currentPage} of {totalCountedPages}</span>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage((prev) => Math.min(totalCountedPages, prev + 1))}
+                        disabled={currentPage === totalCountedPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="uncounted-stock" className="mt-0">
+            <Card>
+              <CardHeader>
+                <CardTitle>Uncounted Items</CardTitle>
+                <CardDescription>
+                  Session items that are not counted yet ({rejectedItems.length} items)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {rejectedItems.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>No uncounted items. All session items are counted.</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Barcode</TableHead>
+                        <TableHead>Item Name</TableHead>
+                        <TableHead className="text-right">Quantity Before</TableHead>
+                        <TableHead className="text-right">Count</TableHead>
+                        <TableHead className="text-right">Quantity After</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedRejectedItems.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-mono text-sm">{item.barcode || "N/A"}</TableCell>
+                          <TableCell className="font-medium">{item.product_name}</TableCell>
+                          <TableCell className="text-right">{item.quantityBefore}</TableCell>
+                          <TableCell className="text-right">{item.countedQty}</TableCell>
+                          <TableCell className="text-right">{item.quantityAfter}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">Uncounted</Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleItemClick(item)}
+                              disabled={isCompleted}
+                            >
+                              Count Now
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+                {rejectedItems.length > itemsPerPage && (
+                  <div className="mt-4 flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
+                    <span>Page {rejectedPage} of {totalRejectedPages}</span>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRejectedPage((prev) => Math.max(1, prev - 1))}
+                        disabled={rejectedPage === 1}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRejectedPage((prev) => Math.min(totalRejectedPages, prev + 1))}
+                        disabled={rejectedPage === totalRejectedPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="import-rejected" className="mt-0">
+            <Card>
+              <CardHeader>
+                <CardTitle>Import Rejected</CardTitle>
+                <CardDescription>
+                  Rejected rows from the latest stock count import ({importRejectedItems.length} rows)
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {isLoadingImportRejected ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>Loading rejected import rows...</p>
+                  </div>
+                ) : importRejectedItems.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>No rejected rows found in the latest import batch.</p>
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-16">Row</TableHead>
+                        <TableHead>Product</TableHead>
+                        <TableHead className="w-28">SKU</TableHead>
+                        <TableHead className="w-36">Barcode</TableHead>
+                        <TableHead className="text-right w-28">Quantity Before</TableHead>
+                        <TableHead className="text-right w-24">Count</TableHead>
+                        <TableHead className="text-right w-28">Quantity After</TableHead>
+                        <TableHead>Reason</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedImportRejectedItems.map((row) => (
+                        <TableRow key={`${row.rowNumber}-${row.productName}-${row.status}`}>
+                          <TableCell>{row.rowNumber}</TableCell>
+                          <TableCell className="font-medium">{row.productName}</TableCell>
+                          <TableCell>{row.sku}</TableCell>
+                          <TableCell>{row.barcode}</TableCell>
+                          <TableCell className="text-right">{row.quantityBefore}</TableCell>
+                          <TableCell className="text-right">{row.countedQuantity}</TableCell>
+                          <TableCell className="text-right">{row.quantityAfter}</TableCell>
+                          <TableCell className="text-sm text-orange-700">{row.reason}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+                {importRejectedItems.length > itemsPerPage && (
+                  <div className="mt-4 flex items-center justify-between border-t pt-4 text-sm text-muted-foreground">
+                    <span>Page {importRejectedPage} of {totalImportRejectedPages}</span>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setImportRejectedPage((prev) => Math.max(1, prev - 1))}
+                        disabled={importRejectedPage === 1}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setImportRejectedPage((prev) => Math.min(totalImportRejectedPages, prev + 1))}
+                        disabled={importRejectedPage === totalImportRejectedPages}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </FilterableTabs>
       </div>
 
       {/* Edit Count Dialog */}

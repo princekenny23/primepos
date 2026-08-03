@@ -991,6 +991,17 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 logger.info(f"Auto-created category: {normalized} for tenant {tenant.name}")
         
         return category_map
+
+    def _build_import_identity(self, name: str, sku: str, barcode: str) -> str:
+        sku_value = str(sku or '').strip().lower()
+        barcode_value = str(barcode or '').strip().lower()
+        name_value = str(name or '').strip().lower()
+
+        if sku_value:
+            return f'sku:{sku_value}'
+        if barcode_value:
+            return f'barcode:{barcode_value}'
+        return f'name:{name_value}'
     
     @action(detail=False, methods=['post'], url_path='bulk-import')
     def bulk_import(self, request):
@@ -1077,7 +1088,10 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             'success': False,
             'total_rows': 0,
             'imported': 0,
+            'imported_rows': 0,
+            'imported_products': 0,
             'failed': 0,
+            'skipped_or_collapsed_rows': 0,
             'categories_created': 0,
             'categories_existing': 0,
             'errors': [],
@@ -1143,24 +1157,42 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     else:
                         results['categories_created'] += 1
             
-            # Group rows by product_name for variation support
-            # Process products and their variations together
+            # Group by the same identity priority used in preview: SKU > Barcode > Name.
             from collections import defaultdict
             product_groups = defaultdict(list)
             
             for idx, row in df.iterrows():
                 product_name = str(row[product_name_col]).strip() if pd.notna(row[product_name_col]) else ""
-                if product_name:
-                    product_groups[product_name].append((idx, row))
+
+                sku_value = ""
+                if 'sku' in column_mapping:
+                    sku_raw = row[column_mapping['sku']]
+                    if pd.notna(sku_raw):
+                        sku_value = str(sku_raw).strip()
+
+                barcode_value = ""
+                if 'barcode' in column_mapping:
+                    barcode_raw = row[column_mapping['barcode']]
+                    if pd.notna(barcode_raw):
+                        barcode_value = str(barcode_raw).strip()
+
+                if not (product_name or sku_value or barcode_value):
+                    continue
+
+                identity = self._build_import_identity(product_name, sku_value, barcode_value)
+                product_groups[identity].append((idx, row))
             
             results['total_rows'] = len(df)
             
-            # Process each product group
-            for product_name, rows in product_groups.items():
+            # Process each identity group.
+            for identity_key, rows in product_groups.items():
                 try:
                     # Get first row for product-level data
                     first_idx, first_row = rows[0]
                     row_num = first_idx + 2  # Excel row number
+                    collapsed_count = max(0, len(rows) - 1)
+
+                    product_name = str(first_row[product_name_col]).strip() if pd.notna(first_row[product_name_col]) else ""
                     
                     # Extract product-level data from first row
                     price_col = column_mapping[price_col_key]
@@ -1175,7 +1207,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                             'product_name': 'Unknown',
                             'error': 'Name is required'
                         })
-                        results['failed'] += 1
+                        results['failed'] += len(rows)
                         continue
                     
                     try:
@@ -1186,7 +1218,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                                 'product_name': name,
                                 'error': 'Price must be greater than 0.01'
                             })
-                            results['failed'] += 1
+                            results['failed'] += len(rows)
                             continue
                     except (ValueError, TypeError):
                         results['errors'].append({
@@ -1194,7 +1226,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                             'product_name': name,
                             'error': f'Invalid price value: {price_str}'
                         })
-                        results['failed'] += 1
+                        results['failed'] += len(rows)
                         continue
                     
                     # Get optional fields from first row (product-level)
@@ -1441,20 +1473,32 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                     # Outlet is already validated earlier, use it directly
                     # outlet_id and outlet are already set above
                     
-                    # Create or update product (outlet-specific)
+                    # Create/update match precedence must align with preview identity:
+                    # SKU > Barcode > Name. Do not fall back to name when SKU/barcode is present.
+                    existing_qs = Product.objects.filter(tenant=tenant, outlet=outlet)
+                    product = None
+                    if sku:
+                        product = existing_qs.filter(sku__iexact=sku).first()
+                    elif barcode:
+                        product = existing_qs.filter(barcode__iexact=barcode).first()
+                    else:
+                        product = existing_qs.filter(name__iexact=name).first()
+
                     create_defaults = {
                         **product_data,
                         'stock': stock,
                     }
-                    product, product_created = Product.objects.get_or_create(
-                        tenant=tenant,
-                        outlet=outlet,
-                        name=name,
-                        defaults=create_defaults
-                    )
-                    
-                    if not product_created:
-                        # Update existing product
+
+                    product_created = False
+                    if product is None:
+                        product = Product.objects.create(
+                            tenant=tenant,
+                            outlet=outlet,
+                            **create_defaults,
+                        )
+                        product_created = True
+                    else:
+                        # Update existing product fields while preserving existing name behavior.
                         for key, value in product_data.items():
                             if key != 'name':  # Don't update name
                                 setattr(product, key, value)
@@ -1477,134 +1521,21 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                             defaults={'quantity': max(0, int(product.stock or 0))}
                         )
 
-                    # Now process variations for this product
-                    
-                    for var_idx, (row_idx, row) in enumerate(rows):
-                        var_row_num = row_idx + 2
-                        try:
-                            # Get variation name (empty = default)
-                            variation_name_col = column_mapping.get('variation_name')
-                            if variation_name_col:
-                                variation_name = str(row[variation_name_col]).strip() if pd.notna(row[variation_name_col]) else ""
-                            else:
-                                variation_name = ""
-                            
-                            if not variation_name:
-                                variation_name = "Default"
-                            
-                            # Get variation price (required)
-                            var_price_str = str(row[price_col]).strip() if pd.notna(row[price_col]) else "0"
-                            try:
-                                var_price = float(var_price_str)
-                                if var_price < 0.01:
-                                    results['errors'].append({
-                                        'row': var_row_num,
-                                        'product_name': name,
-                                        'variation_name': variation_name,
-                                        'error': 'Variation price must be greater than 0.01'
-                                    })
-                                    results['failed'] += 1
-                                    continue
-                            except (ValueError, TypeError):
-                                results['errors'].append({
-                                    'row': var_row_num,
-                                    'product_name': name,
-                                    'variation_name': variation_name,
-                                    'error': f'Invalid variation price: {var_price_str}'
-                                })
-                                results['failed'] += 1
-                                continue
-                            
-                            # Get variation fields
-                            var_cost = None
-                            if 'cost' in column_mapping:
-                                var_cost_val = row[column_mapping['cost']]
-                                if pd.notna(var_cost_val):
-                                    try:
-                                        var_cost = float(var_cost_val)
-                                        if var_cost < 0:
-                                            var_cost = 0
-                                    except (ValueError, TypeError):
-                                        var_cost = None
-                            
-                            var_sku = ""
-                            if 'variation_sku' in column_mapping:
-                                var_sku_val = row[column_mapping['variation_sku']]
-                                if pd.notna(var_sku_val):
-                                    var_sku = str(var_sku_val).strip()
-                            
-                            var_barcode = ""
-                            if 'variation_barcode' in column_mapping:
-                                var_barcode_val = row[column_mapping['variation_barcode']]
-                                if pd.notna(var_barcode_val):
-                                    var_barcode = str(var_barcode_val).strip()
-                            
-                            var_track_inventory = True
-                            if 'track_inventory' in column_mapping:
-                                track_val = row[column_mapping['track_inventory']]
-                                if pd.notna(track_val):
-                                    track_str = str(track_val).strip().lower()
-                                    var_track_inventory = track_str in ('yes', 'true', '1', 'y')
-                            
-                            var_unit = unit  # Default to product unit
-                            if 'unit' in column_mapping:
-                                var_unit_val = row[column_mapping['unit']]
-                                if pd.notna(var_unit_val):
-                                    var_unit = str(var_unit_val).strip() or unit
-                            
-                            var_low_stock = 0
-                            if 'low_stock_threshold' in column_mapping:
-                                var_low_val = row[column_mapping['low_stock_threshold']]
-                                if pd.notna(var_low_val):
-                                    try:
-                                        var_low_stock = int(float(var_low_val))
-                                    except (ValueError, TypeError):
-                                        var_low_stock = 0
-                            
-                            var_sort_order = var_idx
-                            if 'sort_order' in column_mapping:
-                                var_sort_val = row[column_mapping['sort_order']]
-                                if pd.notna(var_sort_val):
-                                    try:
-                                        var_sort_order = int(float(var_sort_val))
-                                    except (ValueError, TypeError):
-                                        var_sort_order = var_idx
-                            
-                            var_is_active = True
-                            if 'is_active' in column_mapping:
-                                var_active_val = row[column_mapping['is_active']]
-                                if pd.notna(var_active_val):
-                                    var_active_str = str(var_active_val).strip().lower()
-                                    var_is_active = var_active_str in ('yes', 'true', '1', 'y')
-                            
-                            # Handle restaurant-specific is_menu_item field (affects track_inventory)
-                            if 'is_menu_item' in column_mapping:
-                                menu_val = row[column_mapping['is_menu_item']]
-                                if pd.notna(menu_val):
-                                    menu_str = str(menu_val).strip().lower()
-                                    is_menu = menu_str in ('yes', 'true', '1', 'y')
-                                    # If is_menu_item=No, typically don't track inventory
-                                    if not is_menu:
-                                        var_track_inventory = False
-                            
-                            # Note: Business-specific fields (volume_ml, alcohol_percentage, preparation_time)
-                            # are added to the product description at product level (from first row)
-                            # Variation-level business-specific info would go here if needed in the future
-                            
-                            # UNITS ONLY ARCHITECTURE: Variations removed from imports
-                            # Skip variation creation as the ItemVariation model has been deleted
-                        
-                        except Exception as e:
-                            logger.error(f"Error processing variation row {var_row_num}: {str(e)}", exc_info=True)
-                            results['errors'].append({
-                                'row': var_row_num,
-                                'product_name': name,
-                                'variation_name': variation_name if 'variation_name' in locals() else 'Unknown',
-                                'error': str(e)
-                            })
-                            results['failed'] += 1
-                    
-                    results['imported'] += 1
+                    if collapsed_count > 0:
+                        collapsed_rows = [row_idx + 2 for row_idx, _ in rows[1:]]
+                        results['warnings'].append({
+                            'row': row_num,
+                            'product_name': name,
+                            'warning': (
+                                f'Collapsed {collapsed_count} duplicate row(s) for identity {identity_key}. '
+                                'Rows were grouped by SKU/Barcode/Name precedence.'
+                            ),
+                            'collapsed_rows': collapsed_rows,
+                        })
+                        results['skipped_or_collapsed_rows'] += collapsed_count
+
+                    results['imported_products'] += 1
+                    results['imported_rows'] += 1
                 
                 except Exception as e:
                     logger.error(f"Error processing product {product_name}: {str(e)}", exc_info=True)
@@ -1613,7 +1544,19 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         'product_name': product_name,
                         'error': str(e)
                     })
-                    results['failed'] += 1
+                    results['failed'] += len(rows)
+
+            # Keep legacy field for clients that already consume `imported`.
+            results['imported'] = int(results.get('imported_rows', 0))
+            reconciled_total = int(results['imported_rows']) + int(results['failed']) + int(results['skipped_or_collapsed_rows'])
+            results['reconciliation'] = {
+                'total_rows': int(results['total_rows']),
+                'imported_rows': int(results['imported_rows']),
+                'failed_rows': int(results['failed']),
+                'skipped_or_collapsed_rows': int(results['skipped_or_collapsed_rows']),
+                'accounted_rows': reconciled_total,
+                'is_balanced': int(results['total_rows']) == reconciled_total,
+            }
             
             results['success'] = True
             

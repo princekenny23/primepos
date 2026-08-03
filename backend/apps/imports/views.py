@@ -1,8 +1,10 @@
 import io
+import json
 import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Tuple
+from difflib import SequenceMatcher
 
 import pandas as pd
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -18,6 +20,7 @@ from rest_framework.views import APIView
 
 from apps.outlets.models import Outlet
 from apps.products.models import Product, Category
+from apps.inventory.models import StockTake, StockTakeItem
 from apps.products.views import ProductViewSet
 from apps.tenants.permissions import HasTenantModuleAccess
 from .models import ImportApplyError, ImportAuditEvent, ImportBatch, ImportRowResult, ImportStockMutation
@@ -196,6 +199,126 @@ class BaseImportView(APIView):
             return False
         return default
 
+    def _structured_rejection(
+        self,
+        code: str,
+        reason: str,
+        resolution: str,
+        *,
+        field: str = '',
+        details: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            'code': code,
+            'reason': reason,
+            'resolution': resolution,
+        }
+        if field:
+            payload['field'] = field
+        if details:
+            payload['details'] = details
+        return payload
+
+    def _clean_text(self, value: Any) -> str:
+        return str(value or '').strip()
+
+    def _normalize_identity(self, name: str, sku: str, barcode: str) -> str:
+        if sku:
+            return f'sku:{sku.lower()}'
+        if barcode:
+            return f'barcode:{barcode.lower()}'
+        return f'name:{name.lower()}' if name else ''
+
+    def _similarity(self, left: str, right: str) -> float:
+        left_value = self._clean_text(left).lower()
+        right_value = self._clean_text(right).lower()
+        if not left_value or not right_value:
+            return 0.0
+        return SequenceMatcher(None, left_value, right_value).ratio()
+
+    def _stocktake_item_payload(self, item) -> Dict[str, Any]:
+        product = getattr(item, 'product', None)
+        return {
+            'id': str(item.id),
+            'product_id': str(getattr(product, 'id', '') or ''),
+            'product_name': getattr(product, 'name', '') or 'Unknown Product',
+            'sku': getattr(product, 'sku', '') or '',
+            'barcode': getattr(product, 'barcode', '') or '',
+            'quantity_before': int(getattr(item, 'expected_quantity', 0) or 0),
+        }
+
+    def _match_stocktake_item(self, row_name: str, row_sku: str, row_barcode: str, stocktake_items: List[Dict[str, Any]]):
+        normalized_name = self._clean_text(row_name).lower()
+        normalized_sku = self._clean_text(row_sku).lower()
+        normalized_barcode = self._clean_text(row_barcode).lower()
+
+        barcode_matches = [item for item in stocktake_items if normalized_barcode and self._clean_text(item.get('barcode')).lower() == normalized_barcode]
+        sku_matches = [item for item in stocktake_items if normalized_sku and self._clean_text(item.get('sku')).lower() == normalized_sku]
+        name_matches = [item for item in stocktake_items if normalized_name and self._clean_text(item.get('product_name')).lower() == normalized_name]
+
+        if normalized_barcode and normalized_sku and barcode_matches and sku_matches:
+            barcode_ids = {item.get('product_id') for item in barcode_matches}
+            sku_ids = {item.get('product_id') for item in sku_matches}
+            if barcode_ids != sku_ids:
+                return None, self._structured_rejection(
+                    'BARCODE_SKU_CONFLICT',
+                    'Barcode and SKU point to different products.',
+                    'Correct the file so both identifiers refer to the same product.',
+                    field='barcode,sku',
+                    details={'barcode_matches': list(barcode_ids), 'sku_matches': list(sku_ids)},
+                )
+
+        if len(barcode_matches) > 1 or len(sku_matches) > 1 or len(name_matches) > 1:
+            return None, self._structured_rejection(
+                'DUPLICATE_SESSION_PRODUCT',
+                'Multiple session items matched this row.',
+                'Resolve duplicate products in the stock take session before re-importing.',
+                details={
+                    'barcode_matches': len(barcode_matches),
+                    'sku_matches': len(sku_matches),
+                    'name_matches': len(name_matches),
+                },
+            )
+
+        if barcode_matches:
+            return barcode_matches[0], None
+        if sku_matches:
+            return sku_matches[0], None
+        if name_matches:
+            return name_matches[0], None
+
+        if not normalized_name:
+            return None, self._structured_rejection(
+                'MISSING_REQUIRED_FIELDS',
+                'Provide Product Name, SKU, or Barcode.',
+                'Add at least one identifier before re-importing.',
+                field='product_name,sku,barcode',
+            )
+
+        fuzzy_matches = []
+        for item in stocktake_items:
+            score = self._similarity(normalized_name, self._clean_text(item.get('product_name')).lower())
+            if score >= 0.86:
+                fuzzy_matches.append((score, item))
+
+        if len(fuzzy_matches) == 1:
+            return fuzzy_matches[0][1], None
+        if len(fuzzy_matches) > 1:
+            return None, self._structured_rejection(
+                'AMBIGUOUS_NAME_MATCH',
+                'More than one stock take item matched this product name.',
+                'Use the exact SKU or barcode to resolve the match.',
+                field='product_name',
+                details={'matches': len(fuzzy_matches)},
+            )
+
+        return None, self._structured_rejection(
+            'NEW_PRODUCT_REQUIRED',
+            'No matching item found in this stock take session.',
+            'New products need to be created or added first, then re-import the corrected file.',
+            field='product_name,sku,barcode',
+        )
+
     def _recompute_batch_preview_totals(self, batch: ImportBatch):
         total_rows = batch.rows.count()
         invalid_rows = batch.rows.filter(status=ImportRowResult.STATUS_INVALID).count()
@@ -348,7 +471,8 @@ class BaseImportView(APIView):
                 existing = existing.filter(name__iexact=name)
 
             if existing.exists():
-                action = ImportRowResult.ACTION_UPDATE
+                errors.append('Product already exists in this outlet. Use Product & Inventory Sync mode to update existing products.')
+                action = ImportRowResult.ACTION_SKIP
 
         if errors:
             status_value = ImportRowResult.STATUS_INVALID
@@ -881,7 +1005,7 @@ class BaseImportView(APIView):
             identity = self._build_identity(name, sku, barcode) if name else ''
             if identity:
                 if identity in seen_identity:
-                    warnings.append('Duplicate row detected in file')
+                    errors.append('Duplicate product row detected in file. Keep one row per product in Import Products mode.')
                 seen_identity.add(identity)
 
             action = ImportRowResult.ACTION_CREATE
@@ -895,7 +1019,8 @@ class BaseImportView(APIView):
                     existing = existing.filter(name__iexact=name)
 
                 if existing.exists():
-                    action = ImportRowResult.ACTION_UPDATE
+                    errors.append('Product already exists in this outlet. Use Product & Inventory Sync mode to update existing products.')
+                    action = ImportRowResult.ACTION_SKIP
 
             if errors:
                 status_value = ImportRowResult.STATUS_INVALID
@@ -1128,8 +1253,10 @@ class ProductImportApplyView(BaseImportView):
                 for i in range(0, len(valid_rows), chunk_size)
             ]
 
-            total_imported = 0
+            total_imported_rows = 0
+            total_imported_products = 0
             total_failed = 0
+            total_skipped_or_collapsed = 0
             chunk_reports: List[Dict[str, Any]] = []
 
             for chunk_index, chunk_rows in enumerate(chunks, start=1):
@@ -1162,18 +1289,28 @@ class ProductImportApplyView(BaseImportView):
                             raise RuntimeError(f"Chunk request failed ({response_status}): {response_data}")
 
                         chunk_failed = int(response_data.get('failed', 0)) if isinstance(response_data, dict) else 0
-                        chunk_imported = int(response_data.get('imported', 0)) if isinstance(response_data, dict) else 0
+                        chunk_imported_rows = int(response_data.get('imported_rows', response_data.get('imported', 0))) if isinstance(response_data, dict) else 0
+                        chunk_imported_products = int(response_data.get('imported_products', chunk_imported_rows)) if isinstance(response_data, dict) else 0
+                        chunk_skipped_or_collapsed = int(response_data.get('skipped_or_collapsed_rows', max(0, len(chunk_rows) - chunk_imported_rows - chunk_failed))) if isinstance(response_data, dict) else 0
 
                         # Enforce all-or-nothing semantics per chunk.
                         if chunk_failed > 0:
                             raise RuntimeError(f"Chunk validation failed: {response_data}")
 
-                        total_imported += chunk_imported
+                        total_imported_rows += chunk_imported_rows
+                        total_imported_products += chunk_imported_products
+                        total_skipped_or_collapsed += chunk_skipped_or_collapsed
+                        chunk_accounted_rows = chunk_imported_rows + chunk_failed + chunk_skipped_or_collapsed
                         chunk_reports.append({
                             'chunk_index': chunk_index,
                             'rows': len(chunk_rows),
-                            'imported': chunk_imported,
+                            'imported': chunk_imported_rows,
+                            'imported_rows': chunk_imported_rows,
+                            'imported_products': chunk_imported_products,
                             'failed': chunk_failed,
+                            'skipped_or_collapsed_rows': chunk_skipped_or_collapsed,
+                            'accounted_rows': chunk_accounted_rows,
+                            'is_balanced': len(chunk_rows) == chunk_accounted_rows,
                             'row_numbers': row_numbers,
                         })
 
@@ -1196,7 +1333,12 @@ class ProductImportApplyView(BaseImportView):
                         'chunk_index': chunk_index,
                         'rows': len(chunk_rows),
                         'imported': 0,
+                        'imported_rows': 0,
+                        'imported_products': 0,
                         'failed': len(chunk_rows),
+                        'skipped_or_collapsed_rows': 0,
+                        'accounted_rows': len(chunk_rows),
+                        'is_balanced': True,
                         'row_numbers': row_numbers,
                         'error': str(chunk_exc),
                     })
@@ -1205,17 +1347,29 @@ class ProductImportApplyView(BaseImportView):
                         break
 
             final_status = ImportBatch.STATUS_APPLIED if total_failed == 0 else ImportBatch.STATUS_FAILED
+            accounted_rows = total_imported_rows + total_failed + total_skipped_or_collapsed
             response_data = {
                 'success': total_failed == 0,
-                'imported': total_imported,
+                'imported': total_imported_rows,
+                'imported_rows': total_imported_rows,
+                'imported_products': total_imported_products,
                 'failed': total_failed,
                 'total_rows': len(valid_rows),
+                'skipped_or_collapsed_rows': total_skipped_or_collapsed,
+                'reconciliation': {
+                    'total_rows': len(valid_rows),
+                    'imported_rows': total_imported_rows,
+                    'failed_rows': total_failed,
+                    'skipped_or_collapsed_rows': total_skipped_or_collapsed,
+                    'accounted_rows': accounted_rows,
+                    'is_balanced': len(valid_rows) == accounted_rows,
+                },
                 'chunks': chunk_reports,
             }
 
             with transaction.atomic():
                 batch.status = final_status
-                batch.applied_rows = max(0, total_imported)
+                batch.applied_rows = max(0, total_imported_rows)
                 batch.applied_at = timezone.now() if final_status == ImportBatch.STATUS_APPLIED else None
                 batch.apply_summary = response_data
                 batch.save(update_fields=['status', 'applied_rows', 'applied_at', 'apply_summary', 'updated_at'])
@@ -1433,7 +1587,7 @@ class ProductImportRowsView(BaseImportView):
             return Response({'detail': 'page must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            page_size = max(1, min(int(request.query_params.get('page_size', 10)), 100))
+            page_size = max(1, min(int(request.query_params.get('page_size', 10)), 1000))
         except (TypeError, ValueError):
             return Response({'detail': 'page_size must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1477,12 +1631,12 @@ class ProductImportRowsView(BaseImportView):
                 display_status = 'Invalid'
             elif row.row_number in apply_error_map:
                 display_status = 'Failed'
+            elif row.status == ImportRowResult.STATUS_WARNING:
+                display_status = 'Warning'
             elif batch.status == ImportBatch.STATUS_APPLIED and row.action != ImportRowResult.ACTION_SKIP:
                 display_status = 'Imported'
             elif batch.is_approved and row.action != ImportRowResult.ACTION_SKIP:
                 display_status = 'Ready'
-            elif row.status == ImportRowResult.STATUS_WARNING:
-                display_status = 'Warning'
             else:
                 display_status = 'Pending'
 
@@ -2349,3 +2503,877 @@ class ProductImportErrorsView(BaseImportView):
                 for err in apply_errors
             ],
         })
+
+
+class StockTakeImportPreviewView(BaseImportView):
+    def post(self, request, stock_take_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            stock_take = StockTake.objects.select_related('outlet', 'tenant').get(id=stock_take_id, tenant=tenant)
+        except StockTake.DoesNotExist:
+            return Response({'detail': 'Stock take not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        outlet_hint = request.headers.get('X-Outlet-ID') or request.query_params.get('outlet') or request.data.get('outlet')
+        if outlet_hint not in (None, ''):
+            try:
+                outlet_hint_id = int(outlet_hint)
+            except (TypeError, ValueError):
+                return Response({'detail': f'Invalid outlet: {outlet_hint}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if outlet_hint_id != stock_take.outlet_id:
+                return Response({'detail': 'Stock take does not belong to the current outlet.'}, status=status.HTTP_403_FORBIDDEN)
+
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({'detail': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        rows_json_payload = request.data.get('rows_json')
+        parsed_rows_payload: List[Dict[str, Any]] = []
+        if rows_json_payload not in (None, ''):
+            try:
+                decoded_rows = json.loads(rows_json_payload) if isinstance(rows_json_payload, str) else rows_json_payload
+            except Exception:
+                return Response({'detail': 'rows_json must be valid JSON.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            if not isinstance(decoded_rows, list):
+                return Response({'detail': 'rows_json must be a JSON array.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            for payload_row in decoded_rows:
+                if not isinstance(payload_row, dict):
+                    continue
+
+                parsed_rows_payload.append({
+                    'Product Name': payload_row.get('productName') or payload_row.get('product_name') or payload_row.get('Product Name') or '',
+                    'SKU': payload_row.get('sku') or payload_row.get('SKU') or '',
+                    'Barcode': payload_row.get('barcode') or payload_row.get('Barcode') or '',
+                    'Counted Quantity': payload_row.get('countedQuantity') if payload_row.get('countedQuantity') is not None else payload_row.get('counted_quantity', payload_row.get('Counted Quantity', '')),
+                })
+
+        idempotency_key = request.headers.get('X-Idempotency-Key') or request.data.get('idempotency_key')
+        if idempotency_key:
+            existing_batch = ImportBatch.objects.filter(
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_STOCK_TAKE,
+                stock_take=stock_take,
+                idempotency_key=idempotency_key,
+            ).first()
+            if existing_batch:
+                return Response({
+                    'batch_id': str(existing_batch.id),
+                    'status': existing_batch.status,
+                    'summary': existing_batch.preview_summary,
+                    'idempotent_reuse': True,
+                })
+
+        processing_started_at = timezone.now()
+        try:
+            try:
+                df = self._read_dataframe(uploaded_file)
+            except Exception as file_parse_exc:
+                if not parsed_rows_payload:
+                    raise file_parse_exc
+
+                logger.warning(
+                    'Stock take preview file parser failed; using rows_json fallback. stock_take_id=%s error=%s',
+                    stock_take_id,
+                    file_parse_exc,
+                )
+                df = pd.DataFrame(parsed_rows_payload)
+
+            df, column_mapping = self._normalize_columns(df)
+
+            name_col = self._pick_first_column(column_mapping, 'product_name', 'name', 'product', 'item_name')
+            sku_col = self._pick_first_column(column_mapping, 'sku', 'code', 'product_code')
+            barcode_col = self._pick_first_column(column_mapping, 'barcode', 'bar_code', 'barcodevalue')
+            qty_col = self._pick_first_column(column_mapping, 'counted_quantity', 'quantity', 'count', 'stock')
+
+            if not qty_col:
+                return Response({'detail': 'Counted Quantity column is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            stocktake_items = [self._stocktake_item_payload(item) for item in stock_take.items.select_related('product').all()]
+            item_lookup = {item['product_id']: item for item in stocktake_items if item.get('product_id')}
+            seen_identity: Dict[str, int] = {}
+            row_results: List[Dict[str, Any]] = []
+
+            for idx, row in df.iterrows():
+                if self._is_effectively_blank_row(row):
+                    continue
+
+                row_number = idx + 2
+                raw_data = {str(k): (None if pd.isna(v) else str(v)) for k, v in row.to_dict().items()}
+                errors: List[Dict[str, Any]] = []
+                warnings: List[Dict[str, Any]] = []
+
+                product_name = self._clean_text(row[name_col]) if name_col in row else ''
+                sku = self._clean_text(row[sku_col]) if sku_col in row else ''
+                barcode = self._clean_text(row[barcode_col]) if barcode_col in row else ''
+                identity = self._normalize_identity(product_name or sku or barcode, sku, barcode)
+
+                qty_value = row[qty_col] if qty_col in row else None
+                counted_quantity = None
+                if pd.notna(qty_value) and self._clean_text(qty_value) != '':
+                    try:
+                        counted_quantity = int(float(qty_value))
+                        if counted_quantity < 0:
+                            errors.append(self._structured_rejection(
+                                'INVALID_QUANTITY',
+                                'Counted quantity must be 0 or greater.',
+                                'Enter a valid non-negative quantity.',
+                                field='counted_quantity',
+                            ))
+                    except (TypeError, ValueError):
+                        errors.append(self._structured_rejection(
+                            'INVALID_QUANTITY',
+                            f'Invalid counted quantity: {qty_value}',
+                            'Enter a whole number for counted quantity.',
+                            field='counted_quantity',
+                        ))
+                else:
+                    errors.append(self._structured_rejection(
+                        'MISSING_REQUIRED_FIELDS',
+                        'Counted quantity is required.',
+                        'Add a counted quantity before re-importing.',
+                        field='counted_quantity',
+                    ))
+
+                match_item = None
+                match_error = None
+                if not errors:
+                    match_item, match_error = self._match_stocktake_item(product_name, sku, barcode, stocktake_items)
+                    if match_error:
+                        errors.append(match_error)
+
+                duplicate_count = seen_identity.get(identity, 0)
+                if duplicate_count > 0:
+                    warnings.append(self._structured_rejection(
+                        'DUPLICATE_PRODUCT_IN_FILE',
+                        'This product appears more than once in the uploaded file.',
+                        'Keep one row per product or review the aggregated count before applying.',
+                    ))
+                seen_identity[identity] = duplicate_count + 1
+
+                quantity_before = int(match_item.get('quantity_before', 0) if match_item else 0)
+                quantity_after = int(counted_quantity if counted_quantity is not None else quantity_before)
+
+                status_value = ImportRowResult.STATUS_VALID
+                action_value = ImportRowResult.ACTION_UPDATE
+                if errors:
+                    status_value = ImportRowResult.STATUS_INVALID
+                    action_value = ImportRowResult.ACTION_SKIP
+                elif warnings:
+                    status_value = ImportRowResult.STATUS_WARNING
+
+                normalized_data = {
+                    'product_name': product_name,
+                    'sku': sku,
+                    'barcode': barcode,
+                    'counted_quantity': str(counted_quantity if counted_quantity is not None else ''),
+                    'matched_product_id': match_item['product_id'] if match_item else '',
+                    'matched_item_id': match_item['id'] if match_item else '',
+                    'expected_quantity': str(quantity_before),
+                    'quantity_after': str(quantity_after),
+                    'duplicate_count': str(duplicate_count),
+                }
+
+                row_results.append({
+                    'row_number': row_number,
+                    'status': status_value,
+                    'action': action_value,
+                    'identity_key': identity,
+                    'errors': errors,
+                    'warnings': warnings,
+                    'raw_data': raw_data,
+                    'normalized_data': normalized_data,
+                })
+
+            total_rows = len(row_results)
+            accepted_rows = sum(1 for row in row_results if row['status'] in {ImportRowResult.STATUS_VALID, ImportRowResult.STATUS_WARNING})
+            rejected_rows = sum(1 for row in row_results if row['status'] == ImportRowResult.STATUS_INVALID)
+            duplicate_rows = sum(1 for row in row_results if any(err.get('code') == 'DUPLICATE_PRODUCT_IN_FILE' for err in row['warnings']))
+            processing_time_ms = int((timezone.now() - processing_started_at).total_seconds() * 1000)
+
+            summary_payload = {
+                'stock_take_id': str(stock_take.id),
+                'stock_take_status': stock_take.status,
+                'source_filename': uploaded_file.name,
+                'total_rows': total_rows,
+                'accepted_rows': accepted_rows,
+                'rejected_rows': rejected_rows,
+                'duplicate_rows': duplicate_rows,
+                'processing_time_ms': processing_time_ms,
+                'validation_messages': [
+                    err
+                    for row in row_results
+                    for err in row['errors']
+                ],
+            }
+
+            with transaction.atomic():
+                batch_kwargs = {
+                    'tenant': tenant,
+                    'outlet': stock_take.outlet,
+                    'stock_take': stock_take,
+                    'entity_type': ImportBatch.ENTITY_STOCK_TAKE,
+                    'sync_mode': ImportBatch.MODE_UPSERT_ADJUST,
+                    'status': ImportBatch.STATUS_PREVIEW_READY,
+                    'source_filename': uploaded_file.name,
+                    'source_file': uploaded_file,
+                    'idempotency_key': idempotency_key,
+                    'total_rows': total_rows,
+                    'valid_rows': accepted_rows,
+                    'invalid_rows': rejected_rows,
+                    'warning_rows': duplicate_rows,
+                    'preview_summary': summary_payload,
+                    'created_by': request.user,
+                    'previewed_at': timezone.now(),
+                }
+
+                try:
+                    # Use an inner savepoint so storage upload failures do not poison the outer transaction.
+                    with transaction.atomic():
+                        batch = ImportBatch.objects.create(**batch_kwargs)
+                except Exception as source_file_exc:
+                    error_text = str(source_file_exc).lower()
+                    if 'unsupported zip file' not in error_text:
+                        raise
+
+                    logger.warning(
+                        'Stock take preview source file upload failed; retrying without source_file. stock_take_id=%s error=%s',
+                        stock_take.id,
+                        source_file_exc,
+                    )
+
+                    # Continue preview even when storage rejects workbook formats (e.g., zipped xlsx upload restrictions).
+                    summary_payload = {
+                        **summary_payload,
+                        'source_file_storage_warning': 'Source file could not be stored by configured media storage. Preview and apply remain available.',
+                    }
+                    batch_kwargs['preview_summary'] = summary_payload
+                    batch_kwargs['source_file'] = None
+                    with transaction.atomic():
+                        batch = ImportBatch.objects.create(**batch_kwargs)
+
+                ImportRowResult.objects.bulk_create([
+                    ImportRowResult(
+                        batch=batch,
+                        row_number=row['row_number'],
+                        status=row['status'],
+                        action=row['action'],
+                        identity_key=row['identity_key'],
+                        errors=row['errors'],
+                        warnings=row['warnings'],
+                        raw_data=row['raw_data'],
+                        normalized_data=row['normalized_data'],
+                    ) for row in row_results
+                ], batch_size=500)
+
+                ImportAuditEvent.objects.create(
+                    batch=batch,
+                    event_type='stock_take_preview_created',
+                    message='Stock take import preview completed and staged.',
+                    metadata=summary_payload,
+                    created_by=request.user,
+                )
+
+            return Response({
+                'batch_id': str(batch.id),
+                'status': batch.status,
+                'summary': batch.preview_summary,
+                'sample_errors': [
+                    {
+                        'row_number': row.row_number,
+                        'errors': row.errors,
+                    }
+                    for row in batch.rows.filter(status=ImportRowResult.STATUS_INVALID).order_by('row_number')[:20]
+                ],
+            }, status=status.HTTP_201_CREATED)
+        except Exception as exc:
+            logger.error('Stock take import preview failed: %s', exc, exc_info=True)
+            return Response({'detail': f'Preview failed: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class StockTakeImportStatusView(BaseImportView):
+    def get(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            batch = ImportBatch.objects.select_related('outlet', 'stock_take', 'created_by').get(
+                id=batch_id,
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_STOCK_TAKE,
+            )
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        created_by = None
+        if batch.created_by:
+            created_by = getattr(batch.created_by, 'username', None) or getattr(batch.created_by, 'email', None) or str(batch.created_by)
+
+        return Response({
+            'batch_id': str(batch.id),
+            'status': batch.status,
+            'stock_take_id': str(batch.stock_take_id) if batch.stock_take_id else '',
+            'is_approved': batch.is_approved,
+            'source_filename': batch.source_filename,
+            'created_by': created_by,
+            'outlet': {
+                'id': str(batch.outlet_id),
+                'name': getattr(batch.outlet, 'name', ''),
+            },
+            'total_rows': batch.total_rows,
+            'valid_rows': batch.valid_rows,
+            'invalid_rows': batch.invalid_rows,
+            'warning_rows': batch.warning_rows,
+            'applied_rows': batch.applied_rows,
+            'preview_summary': batch.preview_summary,
+            'apply_summary': batch.apply_summary,
+            'created_at': batch.created_at,
+            'previewed_at': batch.previewed_at,
+            'applied_at': batch.applied_at,
+        })
+
+
+class StockTakeImportHistoryView(BaseImportView):
+    def get(self, request, stock_take_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            stock_take = StockTake.objects.get(id=stock_take_id, tenant=tenant)
+        except StockTake.DoesNotExist:
+            return Response({'detail': 'Stock take not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        batches = ImportBatch.objects.filter(
+            tenant=tenant,
+            entity_type=ImportBatch.ENTITY_STOCK_TAKE,
+            stock_take=stock_take,
+        ).select_related('outlet', 'created_by').order_by('-created_at')
+
+        search = (request.query_params.get('search') or '').strip()
+        if search:
+            search_filters = (
+                Q(source_filename__icontains=search)
+                | Q(status__icontains=search)
+                | Q(outlet__name__icontains=search)
+                | Q(created_by__username__icontains=search)
+                | Q(created_by__email__icontains=search)
+            )
+            if len(search) >= 4:
+                search_filters = search_filters | Q(id__icontains=search)
+            batches = batches.filter(search_filters)
+
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            return Response({'detail': 'page must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            page_size = max(1, min(int(request.query_params.get('page_size', 10)), 50))
+        except (TypeError, ValueError):
+            return Response({'detail': 'page_size must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        total_count = batches.count()
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        if page > total_pages:
+            page = total_pages
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        items = list(batches[start:end])
+
+        results = []
+        for batch in items:
+            created_by = None
+            if batch.created_by:
+                created_by = getattr(batch.created_by, 'username', None) or getattr(batch.created_by, 'email', None) or str(batch.created_by)
+
+            results.append({
+                'batch_id': str(batch.id),
+                'import_date': batch.created_at,
+                'source_filename': batch.source_filename,
+                'status': batch.status,
+                'stock_take_id': str(stock_take.id),
+                'stock_take_status': stock_take.status,
+                'created_by': created_by,
+                'outlet': {
+                    'id': str(batch.outlet_id),
+                    'name': getattr(batch.outlet, 'name', ''),
+                },
+                'total_rows': batch.total_rows,
+                'accepted_rows': (batch.preview_summary or {}).get('accepted_rows', batch.valid_rows),
+                'rejected_rows': (batch.preview_summary or {}).get('rejected_rows', batch.invalid_rows),
+                'duplicate_rows': (batch.preview_summary or {}).get('duplicate_rows', batch.warning_rows),
+                'processing_time_ms': (batch.preview_summary or {}).get('processing_time_ms', 0),
+                'preview_summary': batch.preview_summary,
+                'apply_summary': batch.apply_summary,
+                'previewed_at': batch.previewed_at,
+                'applied_at': batch.applied_at,
+            })
+
+        return Response({
+            'count': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+            'results': results,
+        })
+
+
+class StockTakeImportRowsView(BaseImportView):
+    def get(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            batch = ImportBatch.objects.select_related('outlet', 'stock_take').get(
+                id=batch_id,
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_STOCK_TAKE,
+            )
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            page = max(1, int(request.query_params.get('page', 1)))
+        except (TypeError, ValueError):
+            return Response({'detail': 'page must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            page_size = max(1, min(int(request.query_params.get('page_size', 10)), 100))
+        except (TypeError, ValueError):
+            return Response({'detail': 'page_size must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        search = (request.query_params.get('search') or '').strip().lower()
+        applied_lookup = {
+            str(item.product_id): item
+            for item in batch.stock_take.items.select_related('product').all()
+        } if batch.stock_take_id else {}
+
+        rows = []
+        for row in batch.rows.all().order_by('row_number'):
+            raw_data = row.raw_data if isinstance(row.raw_data, dict) else {}
+            normalized_data = row.normalized_data if isinstance(row.normalized_data, dict) else {}
+            target_product_id = str(normalized_data.get('matched_product_id') or '')
+            matched_item = applied_lookup.get(target_product_id)
+
+            status_value = 'Rejected' if row.status == ImportRowResult.STATUS_INVALID else ('Imported' if batch.status == ImportBatch.STATUS_APPLIED else 'Ready')
+            if row.status == ImportRowResult.STATUS_WARNING and batch.status != ImportBatch.STATUS_APPLIED:
+                status_value = 'Ready'
+
+            issue_messages = []
+            for error in row.errors or []:
+                if isinstance(error, dict):
+                    issue_messages.append(str(error.get('reason') or error.get('resolution') or '').strip())
+                else:
+                    issue_messages.append(str(error))
+            for warning in row.warnings or []:
+                if isinstance(warning, dict):
+                    issue_messages.append(str(warning.get('reason') or warning.get('resolution') or '').strip())
+                else:
+                    issue_messages.append(str(warning))
+
+            item = {
+                'row_number': row.row_number,
+                'product_name': normalized_data.get('product_name') or raw_data.get('Product Name') or raw_data.get('name') or '-',
+                'sku': normalized_data.get('sku') or raw_data.get('SKU') or raw_data.get('sku') or '-',
+                'barcode': normalized_data.get('barcode') or raw_data.get('Barcode') or raw_data.get('barcode') or '-',
+                'counted_quantity': int(float(normalized_data.get('counted_quantity') or 0)) if str(normalized_data.get('counted_quantity') or '').strip() else 0,
+                'quantity_before': int(float(normalized_data.get('expected_quantity') or 0)) if str(normalized_data.get('expected_quantity') or '').strip() else 0,
+                'quantity_after': int(float(normalized_data.get('quantity_after') or normalized_data.get('counted_quantity') or 0)) if str(normalized_data.get('quantity_after') or normalized_data.get('counted_quantity') or '').strip() else 0,
+                'status': status_value,
+                'reason': '; '.join(issue_messages) if issue_messages else (row.warnings[0].get('reason') if row.warnings and isinstance(row.warnings[0], dict) else '-'),
+                'rejection_code': next((err.get('code') for err in row.errors or [] if isinstance(err, dict)), ''),
+                'suggested_resolution': next((err.get('resolution') for err in row.errors or [] if isinstance(err, dict)), ''),
+                'raw_data': raw_data,
+                'normalized_data': normalized_data,
+                'target_item_id': normalized_data.get('matched_item_id') or '',
+                'target_product_id': target_product_id,
+                'expected_quantity': int(float(normalized_data.get('expected_quantity') or 0)) if str(normalized_data.get('expected_quantity') or '').strip() else 0,
+                'duplicate_count': int(float(normalized_data.get('duplicate_count') or 0)) if str(normalized_data.get('duplicate_count') or '').strip() else 0,
+                'matched_item_quantity_before': int(getattr(matched_item, 'expected_quantity', 0) or 0),
+            }
+
+            if search:
+                searchable = ' '.join([
+                    str(item['row_number']),
+                    item['product_name'],
+                    item['sku'],
+                    item['barcode'],
+                    item['status'],
+                    item['reason'],
+                    item['rejection_code'],
+                ]).lower()
+                if search not in searchable:
+                    continue
+
+            rows.append(item)
+
+        total_count = len(rows)
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        if page > total_pages:
+            page = total_pages
+
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        return Response({
+            'batch_id': str(batch.id),
+            'status': batch.status,
+            'stock_take_id': str(batch.stock_take_id) if batch.stock_take_id else '',
+            'is_approved': batch.is_approved,
+            'source_filename': batch.source_filename,
+            'outlet': {
+                'id': str(batch.outlet_id),
+                'name': getattr(batch.outlet, 'name', ''),
+            },
+            'count': total_count,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages,
+            'results': rows[start:end],
+        })
+
+
+class StockTakeImportRowUpdateView(BaseImportView):
+    def patch(self, request, batch_id, row_number):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            batch = ImportBatch.objects.select_related('outlet', 'stock_take').get(
+                id=batch_id,
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_STOCK_TAKE,
+            )
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if batch.status == ImportBatch.STATUS_APPLYING:
+            return Response({'detail': 'Cannot edit rows while apply is running.'}, status=status.HTTP_409_CONFLICT)
+
+        try:
+            row = ImportRowResult.objects.get(batch=batch, row_number=row_number)
+        except ImportRowResult.DoesNotExist:
+            return Response({'detail': 'Import row not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        payload = request.data if isinstance(request.data, dict) else {}
+        product_name = self._clean_text(payload.get('product_name') or payload.get('productName') or row.normalized_data.get('product_name'))
+        sku = self._clean_text(payload.get('sku') or row.normalized_data.get('sku'))
+        barcode = self._clean_text(payload.get('barcode') or row.normalized_data.get('barcode'))
+        counted_quantity_raw = payload.get('counted_quantity', payload.get('countedQuantity', row.normalized_data.get('counted_quantity', '0')))
+
+        try:
+            counted_quantity = max(0, int(float(counted_quantity_raw)))
+        except (TypeError, ValueError):
+            return Response({'detail': 'counted_quantity must be a valid integer'}, status=status.HTTP_400_BAD_REQUEST)
+
+        stocktake_items = [self._stocktake_item_payload(item) for item in batch.stock_take.items.select_related('product').all()]
+        match_item, match_error = self._match_stocktake_item(product_name, sku, barcode, stocktake_items)
+
+        errors = []
+        warnings = []
+        if match_error:
+            errors.append(match_error)
+        if counted_quantity < 0:
+            errors.append(self._structured_rejection(
+                'INVALID_QUANTITY',
+                'Counted quantity must be 0 or greater.',
+                'Enter a valid non-negative quantity.',
+                field='counted_quantity',
+            ))
+
+        quantity_before = int(match_item.get('quantity_before', 0) if match_item else 0)
+        quantity_after = counted_quantity
+        status_value = ImportRowResult.STATUS_INVALID if errors else ImportRowResult.STATUS_VALID
+        action_value = ImportRowResult.ACTION_SKIP if errors else ImportRowResult.ACTION_UPDATE
+
+        row.raw_data = {
+            'Product Name': product_name,
+            'SKU': sku,
+            'Barcode': barcode,
+            'Counted Quantity': counted_quantity,
+        }
+        row.normalized_data = {
+            'product_name': product_name,
+            'sku': sku,
+            'barcode': barcode,
+            'counted_quantity': str(counted_quantity),
+            'matched_product_id': match_item['product_id'] if match_item else '',
+            'matched_item_id': match_item['id'] if match_item else '',
+            'expected_quantity': str(quantity_before),
+            'quantity_after': str(quantity_after),
+            'duplicate_count': row.normalized_data.get('duplicate_count', '0') if isinstance(row.normalized_data, dict) else '0',
+        }
+        row.status = status_value
+        row.action = action_value
+        row.errors = errors
+        row.warnings = warnings
+        row.identity_key = self._normalize_identity(product_name or sku or barcode, sku, barcode)
+        row.save(update_fields=['raw_data', 'normalized_data', 'status', 'action', 'errors', 'warnings', 'identity_key'])
+
+        batch.total_rows = batch.rows.count()
+        batch.valid_rows = batch.rows.exclude(status=ImportRowResult.STATUS_INVALID).count()
+        batch.invalid_rows = batch.rows.filter(status=ImportRowResult.STATUS_INVALID).count()
+        batch.warning_rows = batch.rows.filter(status=ImportRowResult.STATUS_WARNING).count()
+        batch.preview_summary = {
+            **(batch.preview_summary if isinstance(batch.preview_summary, dict) else {}),
+            'total_rows': batch.total_rows,
+            'accepted_rows': batch.valid_rows,
+            'rejected_rows': batch.invalid_rows,
+            'duplicate_rows': batch.warning_rows,
+        }
+        batch.save(update_fields=['total_rows', 'valid_rows', 'invalid_rows', 'warning_rows', 'preview_summary', 'updated_at'])
+
+        ImportAuditEvent.objects.create(
+            batch=batch,
+            event_type='stock_take_row_updated',
+            message=f'Stock take import row {row.row_number} updated.',
+            metadata={'row_number': row.row_number, 'status': row.status, 'errors': row.errors},
+            created_by=request.user,
+        )
+
+        return Response({
+            'batch_id': str(batch.id),
+            'row_number': row.row_number,
+            'status': row.status,
+            'action': row.action,
+            'errors': row.errors,
+            'warnings': row.warnings,
+            'normalized_data': row.normalized_data,
+            'preview_summary': batch.preview_summary,
+        })
+
+
+class StockTakeImportSourceDownloadView(BaseImportView):
+    def get(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            batch = ImportBatch.objects.get(id=batch_id, tenant=tenant, entity_type=ImportBatch.ENTITY_STOCK_TAKE)
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not batch.source_file:
+            return Response({'detail': 'No source file available for this batch.'}, status=status.HTTP_404_NOT_FOUND)
+
+        return FileResponse(batch.source_file.open('rb'), as_attachment=True, filename=batch.source_filename)
+
+
+class StockTakeImportReopenView(BaseImportView):
+    def post(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            source_batch = ImportBatch.objects.get(id=batch_id, tenant=tenant, entity_type=ImportBatch.ENTITY_STOCK_TAKE)
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not source_batch.stock_take_id:
+            return Response({'detail': 'This batch is not linked to a stock take.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            reopened_batch = ImportBatch.objects.create(
+                tenant=source_batch.tenant,
+                outlet=source_batch.outlet,
+                stock_take=source_batch.stock_take,
+                entity_type=ImportBatch.ENTITY_STOCK_TAKE,
+                sync_mode=ImportBatch.MODE_UPSERT_ADJUST,
+                status=ImportBatch.STATUS_PREVIEW_READY,
+                source_filename=source_batch.source_filename,
+                source_file=source_batch.source_file,
+                total_rows=source_batch.total_rows,
+                valid_rows=source_batch.valid_rows,
+                invalid_rows=source_batch.invalid_rows,
+                warning_rows=source_batch.warning_rows,
+                preview_summary=dict(source_batch.preview_summary or {}),
+                apply_summary={},
+                created_by=request.user,
+                previewed_at=timezone.now(),
+            )
+
+            ImportRowResult.objects.bulk_create([
+                ImportRowResult(
+                    batch=reopened_batch,
+                    row_number=row.row_number,
+                    status=row.status,
+                    action=row.action,
+                    identity_key=row.identity_key,
+                    errors=row.errors,
+                    warnings=row.warnings,
+                    raw_data=row.raw_data,
+                    normalized_data=row.normalized_data,
+                )
+                for row in source_batch.rows.all().order_by('row_number')
+            ], batch_size=500)
+
+            ImportAuditEvent.objects.create(
+                batch=reopened_batch,
+                event_type='stock_take_reopened',
+                message='Stock take import reopened from history.',
+                metadata={'source_batch_id': str(source_batch.id)},
+                created_by=request.user,
+            )
+
+        return Response({
+            'batch_id': str(reopened_batch.id),
+            'status': reopened_batch.status,
+            'stock_take_id': str(reopened_batch.stock_take_id) if reopened_batch.stock_take_id else '',
+        }, status=status.HTTP_201_CREATED)
+
+
+class StockTakeImportApplyView(BaseImportView):
+    def post(self, request, batch_id):
+        tenant = self._resolve_tenant(request)
+        if not tenant:
+            return Response({'detail': 'Tenant is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            batch = ImportBatch.objects.select_related('outlet', 'stock_take').get(
+                id=batch_id,
+                tenant=tenant,
+                entity_type=ImportBatch.ENTITY_STOCK_TAKE,
+            )
+        except ImportBatch.DoesNotExist:
+            return Response({'detail': 'Import batch not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if batch.status == ImportBatch.STATUS_APPLIED:
+            return Response({
+                'batch_id': str(batch.id),
+                'status': batch.status,
+                'apply_summary': batch.apply_summary,
+                'already_applied': True,
+            })
+
+        valid_rows_qs = batch.rows.filter(status__in=[ImportRowResult.STATUS_VALID, ImportRowResult.STATUS_WARNING]).exclude(action=ImportRowResult.ACTION_SKIP).order_by('row_number')
+        valid_rows = list(valid_rows_qs)
+        if not valid_rows:
+            return Response({'detail': 'No valid rows to apply'}, status=status.HTTP_400_BAD_REQUEST)
+
+        start_time = timezone.now()
+        with transaction.atomic():
+            batch.status = ImportBatch.STATUS_APPLYING
+            batch.approved_by = request.user
+            batch.is_approved = True
+            batch.approved_at = timezone.now()
+            batch.apply_idempotency_key = request.headers.get('X-Idempotency-Key') or request.data.get('idempotency_key')
+            batch.save(update_fields=['status', 'approved_by', 'is_approved', 'approved_at', 'apply_idempotency_key', 'updated_at'])
+            ImportAuditEvent.objects.create(
+                batch=batch,
+                event_type='stock_take_apply_started',
+                message='Stock take import apply started',
+                metadata={'valid_rows': len(valid_rows)},
+                created_by=request.user,
+            )
+
+        applied_rows = 0
+        failed_rows = 0
+        grouped_updates: Dict[str, Dict[str, Any]] = {}
+
+        for row in valid_rows:
+            normalized_data = row.normalized_data if isinstance(row.normalized_data, dict) else {}
+            target_item_id = str(normalized_data.get('matched_item_id') or '')
+            target_product_id = str(normalized_data.get('matched_product_id') or '')
+            counted_quantity = int(float(normalized_data.get('counted_quantity') or 0)) if str(normalized_data.get('counted_quantity') or '').strip() else 0
+
+            group_key = target_item_id or f'product:{target_product_id}'
+            entry = grouped_updates.get(group_key)
+            if entry:
+                entry['counted_quantity'] += counted_quantity
+                entry['rows'].append(row)
+                continue
+
+            grouped_updates[group_key] = {
+                'target_item_id': target_item_id,
+                'target_product_id': target_product_id,
+                'counted_quantity': counted_quantity,
+                'rows': [row],
+            }
+
+        apply_errors = []
+        with transaction.atomic():
+            for group_key, entry in grouped_updates.items():
+                counted_quantity = int(entry['counted_quantity'])
+                rows_in_group = entry['rows']
+                first_row = rows_in_group[0]
+                normalized_data = first_row.normalized_data if isinstance(first_row.normalized_data, dict) else {}
+                expected_quantity = int(float(normalized_data.get('expected_quantity') or 0)) if str(normalized_data.get('expected_quantity') or '').strip() else 0
+                product_id = str(normalized_data.get('matched_product_id') or '')
+
+                try:
+                    if entry['target_item_id']:
+                        item = StockTakeItem.objects.select_for_update().get(id=entry['target_item_id'], stock_take=batch.stock_take)
+                    elif product_id:
+                        item = StockTakeItem.objects.select_for_update().filter(stock_take=batch.stock_take, product_id=product_id).first()
+                        if item is None:
+                            item = StockTakeItem.objects.create(
+                                stock_take=batch.stock_take,
+                                product_id=product_id,
+                                expected_quantity=expected_quantity,
+                                counted_quantity=0,
+                                notes=f'Created during stock take import apply for batch {batch.id}',
+                            )
+                    else:
+                        raise ValueError('Matched product not found for row.')
+
+                    item.expected_quantity = expected_quantity if expected_quantity >= 0 else 0
+                    item.counted_quantity = counted_quantity
+                    item.is_counted = True
+                    item.counted_at = timezone.now()
+                    item.counted_by = request.user
+                    item.notes = f'Imported via stock take batch {batch.id}'
+                    item.save()
+                    applied_rows += len(rows_in_group)
+                except Exception as exc:
+                    failed_rows += len(rows_in_group)
+                    apply_errors.append({
+                        'group_key': group_key,
+                        'error': str(exc),
+                        'row_numbers': [row.row_number for row in rows_in_group],
+                    })
+
+            processing_time_ms = int((timezone.now() - start_time).total_seconds() * 1000)
+            total_rows = batch.rows.count()
+            rejected_rows = batch.rows.filter(status=ImportRowResult.STATUS_INVALID).count()
+            duplicate_rows = batch.rows.filter(status=ImportRowResult.STATUS_WARNING).count()
+            apply_summary = {
+                'imported': applied_rows,
+                'failed': failed_rows,
+                'total_rows': total_rows,
+                'accepted_rows': total_rows - rejected_rows,
+                'rejected_rows': rejected_rows,
+                'duplicate_rows': duplicate_rows,
+                'processing_time_ms': processing_time_ms,
+                'errors': apply_errors,
+            }
+
+            batch.status = ImportBatch.STATUS_APPLIED if failed_rows == 0 else ImportBatch.STATUS_FAILED
+            batch.applied_rows = applied_rows
+            batch.applied_at = timezone.now() if failed_rows == 0 else None
+            batch.apply_summary = apply_summary
+            batch.save(update_fields=['status', 'applied_rows', 'applied_at', 'apply_summary', 'updated_at'])
+
+            ImportAuditEvent.objects.create(
+                batch=batch,
+                event_type='stock_take_apply_completed' if failed_rows == 0 else 'stock_take_apply_completed_with_errors',
+                message='Stock take import applied' if failed_rows == 0 else 'Stock take import applied with errors',
+                metadata=apply_summary,
+                created_by=request.user,
+            )
+
+        return Response({
+            'batch_id': str(batch.id),
+            'status': batch.status,
+            'apply_summary': batch.apply_summary,
+        }, status=status.HTTP_200_OK if failed_rows == 0 else status.HTTP_207_MULTI_STATUS)

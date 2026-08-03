@@ -8,8 +8,10 @@ from apps.products.models import Product
 
 class ImportBatch(models.Model):
     ENTITY_PRODUCTS = 'products'
+    ENTITY_STOCK_TAKE = 'stock_take'
     ENTITY_CHOICES = [
         (ENTITY_PRODUCTS, 'Products'),
+        (ENTITY_STOCK_TAKE, 'Stock Take'),
     ]
 
     STATUS_UPLOADED = 'uploaded'
@@ -39,6 +41,13 @@ class ImportBatch(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='import_batches')
     outlet = models.ForeignKey(Outlet, on_delete=models.CASCADE, related_name='import_batches')
+    stock_take = models.ForeignKey(
+        'inventory.StockTake',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='import_batches',
+    )
     entity_type = models.CharField(max_length=50, choices=ENTITY_CHOICES, default=ENTITY_PRODUCTS)
     sync_mode = models.CharField(max_length=50, choices=MODE_CHOICES, default=MODE_UPSERT_ADJUST)
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default=STATUS_UPLOADED)
@@ -72,6 +81,7 @@ class ImportBatch(models.Model):
         indexes = [
             models.Index(fields=['tenant', 'entity_type', 'status']),
             models.Index(fields=['tenant', 'outlet', 'created_at']),
+            models.Index(fields=['tenant', 'stock_take', 'created_at']),
             models.Index(fields=['idempotency_key']),
         ]
         constraints = [
