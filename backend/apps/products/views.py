@@ -570,7 +570,6 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
         """Get products with low stock"""
-        from apps.inventory.models import LocationStock
         from apps.outlets.models import Outlet
         
         queryset = self.filter_queryset(self.get_queryset())
@@ -594,11 +593,16 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         low_stock_products = []
         
         for product in queryset:
-            # Check product-level stock (UNITS ONLY ARCHITECTURE)
-            if product.low_stock_threshold > 0:
-                total_stock = product.get_total_stock(outlet=outlet)
-                if total_stock <= product.low_stock_threshold:
-                    low_stock_products.append(product)
+            total_stock = product.get_total_stock(outlet=outlet)
+
+            # Always include out-of-stock/negative stock, even if threshold is unset.
+            if total_stock <= 0:
+                low_stock_products.append(product)
+                continue
+
+            # Include configured low-stock threshold items.
+            if product.low_stock_threshold > 0 and total_stock <= product.low_stock_threshold:
+                low_stock_products.append(product)
         
         page = self.paginate_queryset(low_stock_products)
         if page is not None:

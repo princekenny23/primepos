@@ -270,7 +270,7 @@ export default function ProductsPage() {
 
     // Check if backend already marked it as low stock
     if (product.is_low_stock) {
-      if (stock === 0) return "out-of-stock"
+      if (stock <= 0) return "out-of-stock"
       return "low-stock"
     }
 
@@ -278,8 +278,8 @@ export default function ProductsPage() {
       ? parseFloat(product.lowStockThreshold) 
       : (product.lowStockThreshold || 0)
     
-    // Only show out of stock if stock is exactly 0
-    if (stock === 0 || stock === null || stock === undefined) return "out-of-stock"
+    // Show out-of-stock for zero or negative quantities.
+    if (stock === null || stock === undefined || stock <= 0) return "out-of-stock"
     
     // Show low stock if threshold is set and stock is at or below threshold
     if (lowStockThreshold > 0 && stock <= lowStockThreshold) return "low-stock"

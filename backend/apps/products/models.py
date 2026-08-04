@@ -131,10 +131,17 @@ class Product(models.Model):
         Uses get_sellable_stock as the single source of truth so this always
         agrees with the sellable_stock value shown in the POS.
         """
+        from apps.inventory.stock_helpers import get_sellable_stock
+        current_stock = get_sellable_stock(self, outlet)
+
+        # Always flag depleted/negative stock as low stock, even when threshold is unset.
+        if current_stock <= 0:
+            return True
+
         if self.low_stock_threshold <= 0:
             return False
-        from apps.inventory.stock_helpers import get_sellable_stock
-        return get_sellable_stock(self, outlet) <= self.low_stock_threshold
+
+        return current_stock <= self.low_stock_threshold
 
     @property
     def is_low_stock(self):
@@ -143,15 +150,19 @@ class Product(models.Model):
         Uses get_sellable_stock as the single source of truth so this always
         agrees with the sellable_stock value shown in the POS.
         """
-        if self.low_stock_threshold <= 0:
-            return False
         from apps.inventory.stock_helpers import get_sellable_stock
         from apps.outlets.models import Outlet
         outlets = Outlet.objects.filter(tenant=self.tenant)
         if not outlets.exists():
-            return int(self.stock or 0) <= self.low_stock_threshold
+            fallback_stock = int(self.stock or 0)
+            if fallback_stock <= 0:
+                return True
+            return self.low_stock_threshold > 0 and fallback_stock <= self.low_stock_threshold
         for outlet in outlets:
-            if get_sellable_stock(self, outlet) <= self.low_stock_threshold:
+            current_stock = get_sellable_stock(self, outlet)
+            if current_stock <= 0:
+                return True
+            if self.low_stock_threshold > 0 and current_stock <= self.low_stock_threshold:
                 return True
         return False
     
