@@ -100,6 +100,7 @@ export default function ProductsPage() {
   const [activeTab, setActiveTab] = useState("all")
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 10
+  const fetchPageSize = 250
 
   const [products, setProducts] = useState<any[]>([])
   const [categories, setCategories] = useState<any[]>([])
@@ -212,6 +213,7 @@ export default function ProductsPage() {
       do {
         const filters: any = {
           page,
+          pageSize: fetchPageSize,
           outlet: outlet?.id ? String(outlet.id) : undefined,
         }
 

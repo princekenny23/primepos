@@ -284,8 +284,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         if not is_saas_admin:
             if tenant:
                 queryset = queryset.filter(tenant=tenant)
-                count = queryset.count()
-                logger.info(f"Applied tenant filter: {tenant.id} ({tenant.name}) - {count} products found")
+                logger.info(f"Applied tenant filter: {tenant.id} ({tenant.name})")
             else:
                 logger.error(f"CRITICAL: No tenant found for user {user.email} (ID: {user.id}). User must have a tenant assigned to view products.")
                 logger.error(f"User tenant: {user_tenant}, Request tenant: {request_tenant}")
@@ -298,7 +297,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             outlet = self.get_outlet_for_request(self.request)
             if outlet:
                 queryset = queryset.filter(outlet=outlet)
-                logger.info(f"Applied outlet filter: {outlet.id} ({outlet.name}) - {queryset.count()} products found")
+                logger.info(f"Applied outlet filter: {outlet.id} ({outlet.name})")
             else:
                 # If no outlet specified, return empty queryset (products require outlet)
                 logger.warning(f"No outlet specified in request - returning empty queryset")
@@ -308,7 +307,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             outlet = self.get_outlet_for_request(self.request)
             if outlet:
                 queryset = queryset.filter(outlet=outlet)
-                logger.info(f"SaaS admin - Applied outlet filter: {outlet.id} ({outlet.name}) - {queryset.count()} products found")
+                logger.info(f"SaaS admin - Applied outlet filter: {outlet.id} ({outlet.name})")
 
         include_archived = str(self.request.query_params.get('include_archived', 'false')).lower() in ('1', 'true', 'yes', 'y')
         if not include_archived:

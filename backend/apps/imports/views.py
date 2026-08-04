@@ -169,6 +169,49 @@ class BaseImportView(APIView):
                 return column_mapping[key]
         return ''
 
+    def _serialize_product_state(self, product: Product) -> Dict[str, Any]:
+        return {
+            'name': product.name or '',
+            'sku': product.sku or '',
+            'barcode': product.barcode or '',
+            'category_id': product.category_id,
+            'retail_price': str(product.retail_price) if product.retail_price is not None else '',
+            'wholesale_price': str(product.wholesale_price) if product.wholesale_price is not None else '',
+            'cost': str(product.cost) if product.cost is not None else '',
+            'low_stock_threshold': int(product.low_stock_threshold or 0),
+            'description': product.description or '',
+            'is_active': bool(product.is_active),
+            'is_archived': bool(getattr(product, 'is_archived', False)),
+            'archived_reason': getattr(product, 'archived_reason', '') or '',
+            'archived_by_id': getattr(product, 'archived_by_id', None),
+        }
+
+    def _restore_product_state(self, product: Product, state: Dict[str, Any]):
+        product.name = str(state.get('name') or '').strip() or product.name
+        product.sku = str(state.get('sku') or '').strip() or None
+        product.barcode = str(state.get('barcode') or '').strip()
+        product.category_id = state.get('category_id') or None
+
+        retail_price = state.get('retail_price')
+        if retail_price not in (None, ''):
+            product.retail_price = Decimal(str(retail_price))
+
+        wholesale_price = state.get('wholesale_price')
+        product.wholesale_price = Decimal(str(wholesale_price)) if wholesale_price not in (None, '') else None
+
+        cost = state.get('cost')
+        product.cost = Decimal(str(cost)) if cost not in (None, '') else None
+        product.low_stock_threshold = int(state.get('low_stock_threshold') or 0)
+        product.description = str(state.get('description') or '')
+        product.is_active = bool(state.get('is_active', True))
+        product.is_archived = bool(state.get('is_archived', False))
+        product.archived_reason = str(state.get('archived_reason') or '')
+        product.archived_by_id = state.get('archived_by_id') or None
+        if not product.is_archived:
+            product.archived_at = None
+            product.archived_reason = ''
+            product.archived_by = None
+
     def _parse_optional_decimal(self, value, *, min_value=None, zero_is_blank=False):
         if value is None:
             return None, []
@@ -831,6 +874,7 @@ class BaseImportView(APIView):
                     skipped_by_strategy += 1
                     continue
 
+                before_product_state = self._serialize_product_state(product)
                 original_retail_price = product.retail_price
                 original_cost = product.cost
                 original_name = product.name
@@ -919,25 +963,36 @@ class BaseImportView(APIView):
                         reason=movement_reason,
                     )
 
-                    # Persist exact delta for deterministic rollback.
-                    ImportStockMutation.objects.create(
-                        batch=batch,
-                        row_number=row_number,
-                        product=product,
-                        outlet=outlet,
-                        before_quantity=original_stock,
-                        applied_quantity=target_stock,
-                        quantity_delta=(target_stock - original_stock),
-                        sync_strategy=sync_strategy,
-                        movement_reason=movement_reason,
-                    )
-
                     if target_stock > original_stock:
                         stock_increases += 1
                     else:
                         stock_decreases += 1
                 elif not changed and product.id:
                     products_updated += 0
+
+                product.refresh_from_db()
+                after_product_state = self._serialize_product_state(product)
+                quantity_delta = 0 if target_stock is None else int(target_stock - original_stock)
+                catalog_changed = before_product_state != after_product_state
+                if product_was_created or catalog_changed or quantity_delta != 0:
+                    movement_reason = movement_reason if quantity_delta != 0 else ''
+                    ImportStockMutation.objects.update_or_create(
+                        batch=batch,
+                        row_number=row_number,
+                        product=product,
+                        defaults={
+                            'outlet': outlet,
+                            'before_quantity': original_stock,
+                            'applied_quantity': int(target_stock if target_stock is not None else original_stock),
+                            'quantity_delta': quantity_delta,
+                            'sync_strategy': sync_strategy,
+                            'movement_reason': movement_reason,
+                            'product_created': product_was_created,
+                            'catalog_changed': catalog_changed,
+                            'before_product_state': before_product_state,
+                            'after_product_state': after_product_state,
+                        },
+                    )
 
                 total_imported += 1
             except Exception as row_exc:
@@ -2388,6 +2443,8 @@ class ProductImportRollbackPreviewView(BaseImportView):
         reversed_increases = 0
         reversed_decreases = 0
         would_be_negative = 0
+        catalog_restores = 0
+        created_products_to_archive = 0
 
         for mutation in mutations:
             current_quantity = int(get_available_stock(mutation.product, mutation.outlet) or 0)
@@ -2403,6 +2460,10 @@ class ProductImportRollbackPreviewView(BaseImportView):
                 reversed_decreases += 1
 
             net_delta += reverse_delta
+            if mutation.catalog_changed:
+                catalog_restores += 1
+            if mutation.product_created:
+                created_products_to_archive += 1
             results.append({
                 'mutation_id': mutation.id,
                 'row_number': mutation.row_number,
@@ -2416,6 +2477,8 @@ class ProductImportRollbackPreviewView(BaseImportView):
                 'current_quantity': current_quantity,
                 'projected_quantity': projected_quantity,
                 'would_be_negative': is_negative,
+                'product_created': bool(mutation.product_created),
+                'catalog_changed': bool(mutation.catalog_changed),
             })
 
         return Response({
@@ -2427,6 +2490,8 @@ class ProductImportRollbackPreviewView(BaseImportView):
                 'net_delta': net_delta,
                 'estimated_reversed_increases': reversed_increases,
                 'estimated_reversed_decreases': reversed_decreases,
+                'catalog_restores': catalog_restores,
+                'created_products_to_archive': created_products_to_archive,
                 'would_be_negative': would_be_negative,
             },
             'results': results,
@@ -2490,6 +2555,8 @@ class ProductImportRollbackExecuteView(BaseImportView):
         try:
             with transaction.atomic():
                 adjusted = 0
+                restored_catalog = 0
+                archived_created_products = 0
                 errors = []
 
                 for mutation in mutations:
@@ -2508,13 +2575,28 @@ class ProductImportRollbackExecuteView(BaseImportView):
                         })
                         continue
 
-                    adjust_stock(
-                        product=mutation.product,
-                        outlet=mutation.outlet,
-                        new_quantity=target_quantity,
-                        user=request.user,
-                        reason=f'Inventory sync rollback batch {batch.id} row {mutation.row_number}',
-                    )
+                    if int(mutation.quantity_delta or 0) != 0:
+                        adjust_stock(
+                            product=mutation.product,
+                            outlet=mutation.outlet,
+                            new_quantity=target_quantity,
+                            user=request.user,
+                            reason=f'Inventory sync rollback batch {batch.id} row {mutation.row_number}',
+                        )
+
+                    if mutation.product_created:
+                        mutation.product.is_active = False
+                        mutation.product.is_archived = True
+                        mutation.product.archived_at = timezone.now()
+                        mutation.product.archived_reason = f'Rolled back from inventory sync batch {batch.id}'
+                        mutation.product.archived_by = request.user
+                        mutation.product.save(update_fields=['is_active', 'is_archived', 'archived_at', 'archived_reason', 'archived_by', 'updated_at'])
+                        archived_created_products += 1
+                    elif mutation.catalog_changed and isinstance(mutation.before_product_state, dict) and mutation.before_product_state:
+                        self._restore_product_state(mutation.product, mutation.before_product_state)
+                        mutation.product.save()
+                        restored_catalog += 1
+
                     mutation.rolled_back = True
                     mutation.rolled_back_at = timezone.now()
                     mutation.save(update_fields=['rolled_back', 'rolled_back_at'])
@@ -2527,6 +2609,8 @@ class ProductImportRollbackExecuteView(BaseImportView):
                     'batch_id': str(batch.id),
                     'mutations_total': len(mutations),
                     'mutations_reversed': adjusted,
+                    'catalog_restored': restored_catalog,
+                    'created_products_archived': archived_created_products,
                     'rollback_idempotency_key': rollback_idempotency_key,
                     'rolled_back_at': timezone.now().isoformat(),
                 }
@@ -2542,6 +2626,8 @@ class ProductImportRollbackExecuteView(BaseImportView):
                 apply_summary['rollback'] = {
                     'completed': True,
                     'mutations_reversed': adjusted,
+                    'catalog_restored': restored_catalog,
+                    'created_products_archived': archived_created_products,
                     'rolled_back_at': timezone.now().isoformat(),
                 }
                 batch.apply_summary = apply_summary
@@ -2564,6 +2650,8 @@ class ProductImportRollbackExecuteView(BaseImportView):
             'rollback': {
                 'mutations_total': len(mutations),
                 'mutations_reversed': len(mutations),
+                'catalog_restored': restored_catalog,
+                'created_products_archived': archived_created_products,
             },
         })
 

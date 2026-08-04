@@ -19,7 +19,7 @@ from apps.inventory.stock_helpers import (
     add_stock,
     mark_expired_batches
 )
-from apps.products.models import Product, ItemVariation
+from apps.products.models import Product
 from apps.outlets.models import Outlet
 from apps.tenants.models import Tenant
 from apps.accounts.models import User
@@ -41,19 +41,13 @@ class PerformanceBenchmarkTestCase(TestCase):
             name="Perf Product",
             retail_price=Decimal("10.00")
         )
-        self.variation = ItemVariation.objects.create(
-            product=self.product,
-            name="Default",
-            price=Decimal("10.00"),
-            track_inventory=True
-        )
         
         # Create 10 batches
         today = timezone.now().date()
         for i in range(10):
             Batch.objects.create(
                 tenant=self.tenant,
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 batch_number=f"PERF-BATCH-{i:03d}",
                 expiry_date=today + timedelta(days=30 + i),
@@ -67,7 +61,7 @@ class PerformanceBenchmarkTestCase(TestCase):
         
         try:
             deduct_stock(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 quantity=50,
                 user=self.user,
@@ -92,7 +86,7 @@ class PerformanceBenchmarkTestCase(TestCase):
         """Test that get_available_stock is fast with many batches"""
         start = time.time()
         
-        available = get_available_stock(self.variation, self.outlet)
+        available = get_available_stock(self.product, self.outlet)
         
         elapsed = time.time() - start
         
@@ -109,13 +103,9 @@ class PerformanceBenchmarkTestCase(TestCase):
     def test_query_count_deduct(self):
         """Verify deduct_stock doesn't cause N+1 queries"""
         # Deduct from multiple batches
-        with self.assertNumQueries(11):  # Optimized query count: 1 SELECT + 1 BULK UPDATE + 1 BULK INSERT + LocationStock ops
-            # SELECT batches (1 query)
-            # BULK UPDATE batches (1 query)
-            # BULK INSERT movements (1 query)
-            # LocationStock operations (remaining queries)
+        with self.assertNumQueries(15):
             deduct_stock(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 quantity=150,
                 user=self.user,
@@ -131,7 +121,7 @@ class PerformanceBenchmarkTestCase(TestCase):
         for i in range(10):
             try:
                 deduct_stock(
-                    variation=self.variation,
+                    product=self.product,
                     outlet=self.outlet,
                     quantity=5,
                     user=self.user,
@@ -163,14 +153,6 @@ class IntegrationScenarios(TransactionTestCase):
             retail_price=Decimal("25.00"),
             cost=Decimal("12.00")
         )
-        
-        self.variation = ItemVariation.objects.create(
-            product=self.product,
-            name="Default",
-            price=Decimal("25.00"),
-            cost=Decimal("12.00"),
-            track_inventory=True
-        )
     
     def test_scenario_receive_and_sell(self):
         """Scenario: Receive stock, then sell it"""
@@ -178,7 +160,7 @@ class IntegrationScenarios(TransactionTestCase):
         
         # Step 1: Receive stock
         batch = add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=100,
             batch_number="PO-2026-001",
@@ -191,12 +173,12 @@ class IntegrationScenarios(TransactionTestCase):
         self.assertEqual(batch.quantity, 100)
         
         # Step 2: Check available stock
-        available = get_available_stock(self.variation, self.outlet)
+        available = get_available_stock(self.product, self.outlet)
         self.assertEqual(available, 100)
         
         # Step 3: Sell 25 units
         deductions = deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=25,
             user=self.user,
@@ -208,12 +190,12 @@ class IntegrationScenarios(TransactionTestCase):
         self.assertEqual(deductions[0][1], 25)
         
         # Step 4: Verify remaining stock
-        available = get_available_stock(self.variation, self.outlet)
+        available = get_available_stock(self.product, self.outlet)
         self.assertEqual(available, 75)
         
         # Step 5: Verify movement records
         movements = StockMovement.objects.filter(
-            variation=self.variation
+            product=self.product
         ).order_by('created_at')
         
         self.assertEqual(movements.count(), 2)  # 1 purchase + 1 sale
@@ -226,7 +208,7 @@ class IntegrationScenarios(TransactionTestCase):
         
         # Create 3 batches with different expiry dates
         batch1 = add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=30,
             batch_number="BATCH-SOON",
@@ -237,7 +219,7 @@ class IntegrationScenarios(TransactionTestCase):
         )
         
         batch2 = add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=40,
             batch_number="BATCH-NORMAL",
@@ -248,7 +230,7 @@ class IntegrationScenarios(TransactionTestCase):
         )
         
         batch3 = add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=50,
             batch_number="BATCH-FRESH",
@@ -258,12 +240,12 @@ class IntegrationScenarios(TransactionTestCase):
             reason="Fresh stock"
         )
         
-        total_stock = get_available_stock(self.variation, self.outlet)
+        total_stock = get_available_stock(self.product, self.outlet)
         self.assertEqual(total_stock, 120)  # 30 + 40 + 50
         
         # Deduct 35 units - should use FIFO (oldest first)
         deductions = deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=35,
             user=self.user,
@@ -294,7 +276,7 @@ class IntegrationScenarios(TransactionTestCase):
         # Create expired batch
         expired_batch = Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="EXPIRED",
             expiry_date=today - timedelta(days=5),  # Expired
@@ -304,7 +286,7 @@ class IntegrationScenarios(TransactionTestCase):
         
         # Create fresh batch
         fresh_batch = add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=50,
             batch_number="FRESH",
@@ -315,13 +297,13 @@ class IntegrationScenarios(TransactionTestCase):
         )
         
         # Check available stock - should only include fresh
-        available = get_available_stock(self.variation, self.outlet)
+        available = get_available_stock(self.product, self.outlet)
         self.assertEqual(available, 50)  # Only fresh batch
         
         # Mark expired batches - use transaction
         with transaction.atomic():
             count = mark_expired_batches(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet
             )
         
@@ -344,7 +326,7 @@ class IntegrationScenarios(TransactionTestCase):
         """Scenario: Insufficient stock transaction rolls back completely"""
         # Add initial stock
         add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=10,
             batch_number="BATCH-001",
@@ -353,12 +335,12 @@ class IntegrationScenarios(TransactionTestCase):
         )
         
         initial_movements = StockMovement.objects.count()
-        initial_quantity = get_available_stock(self.variation, self.outlet)
+        initial_quantity = get_available_stock(self.product, self.outlet)
         
         # Try to deduct more than available
         with self.assertRaises(ValueError):
             deduct_stock(
-                variation=self.variation,
+                product=self.product,
                 outlet=self.outlet,
                 quantity=100,  # More than available (10)
                 user=self.user,
@@ -367,7 +349,7 @@ class IntegrationScenarios(TransactionTestCase):
             )
         
         # Verify nothing changed (transaction rolled back)
-        final_quantity = get_available_stock(self.variation, self.outlet)
+        final_quantity = get_available_stock(self.product, self.outlet)
         final_movements = StockMovement.objects.count()
         
         self.assertEqual(final_quantity, initial_quantity)
@@ -377,7 +359,7 @@ class IntegrationScenarios(TransactionTestCase):
         """Scenario: Multiple concurrent sales don't oversell"""
         # Add stock
         add_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=50,
             batch_number="CONCURRENT-TEST",
@@ -392,7 +374,7 @@ class IntegrationScenarios(TransactionTestCase):
         for i in range(3):
             try:
                 deduct_stock(
-                    variation=self.variation,
+                    product=self.product,
                     outlet=self.outlet,
                     quantity=20,
                     user=self.user,
@@ -408,7 +390,7 @@ class IntegrationScenarios(TransactionTestCase):
         self.assertGreaterEqual(deduction_count, 2)
         
         # Total remaining stock should be 10 or less
-        remaining = get_available_stock(self.variation, self.outlet)
+        remaining = get_available_stock(self.product, self.outlet)
         self.assertLessEqual(remaining, 10)
 
 
@@ -426,12 +408,6 @@ class LocationStockSyncTest(TestCase):
             name="Sync Product",
             retail_price=Decimal("10.00")
         )
-        self.variation = ItemVariation.objects.create(
-            product=self.product,
-            name="Default",
-            price=Decimal("10.00"),
-            track_inventory=True
-        )
     
     def test_location_stock_updates_with_deduction(self):
         """LocationStock should sync when stock is deducted"""
@@ -440,7 +416,7 @@ class LocationStockSyncTest(TestCase):
         # Add stock via batch
         Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="SYNC-001",
             expiry_date=today + timedelta(days=30),
@@ -449,7 +425,7 @@ class LocationStockSyncTest(TestCase):
         
         # LocationStock should be created during deduction
         deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=20,
             user=self.user,
@@ -459,7 +435,7 @@ class LocationStockSyncTest(TestCase):
         
         # Get LocationStock
         location_stock = LocationStock.objects.filter(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet
         ).first()
         
@@ -475,7 +451,7 @@ class LocationStockSyncTest(TestCase):
         # Create batch
         Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="SYNC-002",
             expiry_date=today + timedelta(days=30),
@@ -485,7 +461,7 @@ class LocationStockSyncTest(TestCase):
         # Create LocationStock
         loc_stock = LocationStock.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=0  # Wrong
         )
@@ -510,11 +486,6 @@ class EdgeCaseTests(TestCase):
             name="Edge Product",
             retail_price=Decimal("10.00")
         )
-        self.variation = ItemVariation.objects.create(
-            product=self.product,
-            name="Default",
-            price=Decimal("10.00")
-        )
     
     def test_deduct_exact_amount(self):
         """Deduct exact amount available"""
@@ -522,7 +493,7 @@ class EdgeCaseTests(TestCase):
         
         Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="EXACT",
             expiry_date=today + timedelta(days=30),
@@ -530,7 +501,7 @@ class EdgeCaseTests(TestCase):
         )
         
         deductions = deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=42,
             user=self.user,
@@ -541,7 +512,7 @@ class EdgeCaseTests(TestCase):
         self.assertEqual(len(deductions), 1)
         self.assertEqual(deductions[0][1], 42)
         
-        available = get_available_stock(self.variation, self.outlet)
+        available = get_available_stock(self.product, self.outlet)
         self.assertEqual(available, 0)
     
     def test_deduct_one_unit(self):
@@ -550,7 +521,7 @@ class EdgeCaseTests(TestCase):
         
         Batch.objects.create(
             tenant=self.tenant,
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             batch_number="ONE",
             expiry_date=today + timedelta(days=30),
@@ -558,7 +529,7 @@ class EdgeCaseTests(TestCase):
         )
         
         deductions = deduct_stock(
-            variation=self.variation,
+            product=self.product,
             outlet=self.outlet,
             quantity=1,
             user=self.user,

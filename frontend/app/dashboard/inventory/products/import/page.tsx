@@ -87,6 +87,9 @@ type BatchStatus = {
     prices_changed?: number
     skipped_by_strategy?: number
     sync_strategy?: SyncStrategyValue
+    sync_options?: {
+      stock_update_method?: StockUpdateMethodValue
+    }
     errors?: number
     chunks?: Array<{
       chunk_index: number
@@ -580,6 +583,9 @@ function ProductsImportPageContent() {
     () => {
       if (isSyncMode) {
         const applySummary = batchStatus?.apply_summary || {}
+        const stockUpdateMethod = applySummary.sync_options?.stock_update_method || selectedSyncStrategy
+        const stockIncreaseLabel = stockUpdateMethod === "replace_quantity" ? "Rows Raised By Sync" : "Stock Increases"
+        const stockDecreaseLabel = stockUpdateMethod === "replace_quantity" ? "Rows Lowered By Sync" : "Stock Decreases"
         const syncStrategy =
           batchStatus?.sync_strategy ||
           batchStatus?.preview_summary?.sync_strategy ||
@@ -595,8 +601,8 @@ function ProductsImportPageContent() {
           { label: "Invalid Rows", value: String(summary.invalidRows) },
           { label: "Products Updated", value: String(applySummary.products_updated ?? 0) },
           { label: "New Products Created", value: String(applySummary.new_products_created ?? 0) },
-          { label: "Stock Increases", value: String(applySummary.stock_increases ?? 0) },
-          { label: "Stock Decreases", value: String(applySummary.stock_decreases ?? 0) },
+          { label: stockIncreaseLabel, value: String(applySummary.stock_increases ?? 0) },
+          { label: stockDecreaseLabel, value: String(applySummary.stock_decreases ?? 0) },
           { label: "Prices Changed", value: String(applySummary.prices_changed ?? 0) },
           { label: "Skipped By Strategy", value: String(applySummary.skipped_by_strategy ?? 0) },
           { label: "Errors", value: String(applySummary.errors ?? summary.failedRows) },

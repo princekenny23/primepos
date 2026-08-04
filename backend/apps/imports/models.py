@@ -188,6 +188,10 @@ class ImportStockMutation(models.Model):
     quantity_delta = models.IntegerField(default=0)
     sync_strategy = models.CharField(max_length=64, blank=True)
     movement_reason = models.CharField(max_length=255, blank=True)
+    product_created = models.BooleanField(default=False)
+    catalog_changed = models.BooleanField(default=False)
+    before_product_state = models.JSONField(default=dict, blank=True)
+    after_product_state = models.JSONField(default=dict, blank=True)
 
     rolled_back = models.BooleanField(default=False)
     rolled_back_at = models.DateTimeField(null=True, blank=True)

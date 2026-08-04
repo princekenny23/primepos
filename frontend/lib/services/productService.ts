@@ -30,6 +30,7 @@ export interface ProductFilters {
   include_archived?: boolean
   search?: string
   page?: number
+  pageSize?: number
   tenant?: string
   businessId?: string
   outlet?: string
@@ -346,10 +347,11 @@ export const productService = {
     if (filters?.is_active !== undefined) params.append("is_active", String(filters.is_active))
     if (filters?.search) params.append("search", filters.search)
     if (filters?.page) params.append("page", String(filters.page))
+    if (filters?.pageSize) params.append("page_size", String(filters.pageSize))
     if (filters?.tenant) params.append("tenant", filters.tenant)
     if (filters?.businessId) params.append("business", filters.businessId)
     if (filters?.outlet) params.append("outlet", filters.outlet)
-    if (filters?.limit) params.append("limit", String(filters.limit))
+    if (filters?.limit) params.append("page_size", String(filters.limit))
     if (filters?.include_archived !== undefined) params.append("include_archived", String(filters.include_archived))
     
     const query = params.toString()

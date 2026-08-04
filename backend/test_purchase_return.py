@@ -1,67 +1,45 @@
-#!/usr/bin/env python
-"""Test purchase return serializer"""
-import os
-import django
-
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'primepos.settings')
-django.setup()
-
-from apps.suppliers.serializers import PurchaseReturnSerializer
-from apps.suppliers.models import Supplier, PurchaseReturn
-from apps.outlets.models import Outlet
-from apps.tenants.models import Tenant
-from apps.accounts.models import User
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
-# Get first tenant and outlet
-tenant = Tenant.objects.first()
-outlet = Outlet.objects.filter(tenant=tenant).first()
-supplier = Supplier.objects.filter(tenant=tenant).first()
-user = User.objects.filter(tenant=tenant).first()
+from django.test import TestCase
 
-if not all([tenant, outlet, supplier, user]):
-    print("Missing required objects:")
-    print(f"  Tenant: {tenant}")
-    print(f"  Outlet: {outlet}")
-    print(f"  Supplier: {supplier}")
-    print(f"  User: {user}")
-    exit(1)
+from apps.accounts.models import User
+from apps.outlets.models import Outlet
+from apps.suppliers.models import PurchaseReturn, Supplier
+from apps.suppliers.serializers import PurchaseReturnSerializer
+from apps.tenants.models import Tenant
 
-# Test data
-data = {
-    'supplier_id': supplier.id,
-    'outlet_id': outlet.id,
-    'return_date': date.today().isoformat(),
-    'reason': 'Defective items',
-    'total': Decimal('100.00'),
-    'notes': 'Test return'
-}
 
-# Create serializer with context
-context = {
-    'request': type('Request', (), {
-        'tenant': tenant,
-        'user': user
-    })()
-}
+class PurchaseReturnSerializerTest(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(name="Purchase Return Tenant")
+        self.user = User.objects.create_user(username="purchase-return-user", tenant=self.tenant)
+        self.outlet = Outlet.objects.create(tenant=self.tenant, name="Purchase Return Outlet")
+        self.supplier = Supplier.objects.create(
+            tenant=self.tenant,
+            outlet=self.outlet,
+            name="Return Supplier",
+            is_active=True,
+        )
 
-serializer = PurchaseReturnSerializer(data=data, context=context)
+    def test_purchase_return_serializer_creates_return(self):
+        data = {
+            'supplier_id': self.supplier.id,
+            'outlet_id': self.outlet.id,
+            'return_date': date.today().isoformat(),
+            'reason': 'Defective items',
+            'total': Decimal('100.00'),
+            'notes': 'Test return',
+        }
 
-if serializer.is_valid():
-    # Test with perform_create style save
-    ret = serializer.save(tenant=tenant, outlet=outlet, created_by=user)
-    print(f"✅ Purchase return created successfully!")
-    print(f"  ID: {ret.id}")
-    print(f"  Return Number: {ret.return_number}")
-    print(f"  Supplier: {ret.supplier.name}")
-    print(f"  Outlet: {ret.outlet.name}")
-    print(f"  Created By: {ret.created_by.username}")
-    
-    # Clean up
-    ret.delete()
-    print(f"✅ Test completed successfully!")
-else:
-    print(f"❌ Serializer validation failed:")
-    for field, errors in serializer.errors.items():
-        print(f"  {field}: {errors}")
+        request = type('Request', (), {'tenant': self.tenant, 'user': self.user})()
+        serializer = PurchaseReturnSerializer(data=data, context={'request': request})
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        purchase_return = serializer.save(tenant=self.tenant, outlet=self.outlet, created_by=self.user)
+
+        self.assertIsInstance(purchase_return, PurchaseReturn)
+        self.assertEqual(purchase_return.supplier, self.supplier)
+        self.assertEqual(purchase_return.outlet, self.outlet)
+        self.assertEqual(purchase_return.created_by, self.user)
+        self.assertTrue(str(purchase_return.return_number).startswith('RET-'))
