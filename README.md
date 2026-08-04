@@ -31,6 +31,7 @@ PrimePOS is a full-stack, multi-tenant SaaS POS platform for small and medium bu
   - Report settings modal changed to conditional mount.
   - Non-blocking receipt printing behavior improved in bar POS flow.
   - Local print health endpoint now responds gracefully when agent is unreachable.
+  - Products export now includes the full low-stock replenishment list, covering items that are low in stock and completely out of stock.
 - Dashboard/report defaults:
   - Date range defaults aligned to today for key dashboard flows.
 

@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx"
+import * as XLSX from "xlsx-js-style"
 
 export interface ExportColumn {
   key: string
@@ -89,6 +89,31 @@ function styleWorksheet(
   // Freeze header row
   if (includeHeaders) {
     worksheet["!freeze"] = { xSplit: 0, ySplit: 1 }
+
+    const range = XLSX.utils.decode_range(worksheet["!ref"] || "A1")
+    const headerRow = range.s.r
+
+    for (let colIndex = range.s.c; colIndex <= range.e.c; colIndex += 1) {
+      const cellRef = XLSX.utils.encode_cell({ r: headerRow, c: colIndex })
+      const cell = worksheet[cellRef]
+
+      if (cell) {
+        cell.s = {
+          font: { bold: true, color: { rgb: "FFFFFF" } },
+          fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+          alignment: { horizontal: "center", vertical: "center", wrapText: true },
+          border: {
+            top: { style: "thin", color: { rgb: "D9E2F3" } },
+            bottom: { style: "thin", color: { rgb: "D9E2F3" } },
+            left: { style: "thin", color: { rgb: "D9E2F3" } },
+            right: { style: "thin", color: { rgb: "D9E2F3" } },
+          },
+        }
+      }
+    }
+
+    worksheet["!rows"] = worksheet["!rows"] || []
+    worksheet["!rows"][headerRow] = { hpt: 24, hpx: 24 }
   }
 
   return worksheet
@@ -135,6 +160,16 @@ export async function exportToXLSX(config: ExportConfig): Promise<void> {
 
     // Create worksheet from array
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
+
+    if (includeHeaders && worksheet["!ref"]) {
+      const range = XLSX.utils.decode_range(worksheet["!ref"])
+      worksheet["!autofilter"] = {
+        ref: XLSX.utils.encode_range({
+          s: { r: range.s.r, c: range.s.c },
+          e: { r: range.e.r, c: range.e.c },
+        }),
+      }
+    }
 
     // Apply styling
     styleWorksheet(worksheet, columns, includeHeaders)
