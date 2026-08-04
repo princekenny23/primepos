@@ -86,6 +86,20 @@ def get_stock_valuation(product, outlet):
         Batch.objects.filter(product=product, outlet=outlet, expiry_date__gt=today, quantity__gt=0).order_by('expiry_date', 'created_at')
     )
 
+    if active_batches:
+        quantity = sum(int(batch.quantity or 0) for batch in active_batches)
+        value = Decimal('0.00')
+        for batch in active_batches:
+            unit_cost = _coerce_decimal(batch.cost_price if batch.cost_price is not None else product.cost)
+            value += unit_cost * Decimal(int(batch.quantity or 0))
+        unit_cost = (value / Decimal(quantity)).quantize(Decimal('0.01')) if quantity else _coerce_decimal(product.cost)
+        return {
+            'quantity': quantity,
+            'value': value.quantize(Decimal('0.01')),
+            'unit_cost': unit_cost,
+            'batches': active_batches,
+        }
+
     quantity, total_cost, total_acquired_qty = _get_ledger_quantity_and_cost(product, outlet)
     if total_acquired_qty > 0:
         unit_cost = (total_cost / Decimal(total_acquired_qty)).quantize(Decimal('0.01'))
@@ -94,20 +108,7 @@ def get_stock_valuation(product, outlet):
             'quantity': quantity,
             'value': value,
             'unit_cost': unit_cost,
-            'batches': active_batches,
-        }
-
-    if active_batches:
-        quantity = sum(int(batch.quantity or 0) for batch in active_batches)
-        value = Decimal('0.00')
-        for batch in active_batches:
-            unit_cost = _coerce_decimal(batch.cost_price if batch.cost_price is not None else product.cost)
-            value += unit_cost * Decimal(int(batch.quantity or 0))
-        return {
-            'quantity': quantity,
-            'value': value.quantize(Decimal('0.01')),
-            'unit_cost': _coerce_decimal(product.cost),
-            'batches': active_batches,
+            'batches': [],
         }
 
     unit_cost = _coerce_decimal(product.cost)
@@ -121,20 +122,24 @@ def get_stock_valuation(product, outlet):
 
 def rebuild_stock_state(product, outlet, user=None, reason='Stock state rebuild'):
     """Synchronize the denormalized stock fields from the stock ledger and batches."""
-    valuation = get_stock_valuation(product, outlet)
-    location_stock, _ = LocationStock.objects.get_or_create(
-        product=product,
-        outlet=outlet,
-        tenant=product.tenant,
-        defaults={'quantity': 0},
-    )
-    location_stock.quantity = valuation['quantity']
-    location_stock.save(update_fields=['quantity', 'updated_at'])
+    with transaction.atomic():
+        from apps.products.models import Product as _Product
 
-    from apps.products.models import Product as _Product
-    _Product.objects.filter(id=product.id).update(stock=valuation['quantity'])
-    product.stock = valuation['quantity']
-    return valuation
+        _Product.objects.select_for_update().filter(id=product.id).first()
+        location_stock, _ = LocationStock.objects.select_for_update().get_or_create(
+            product=product,
+            outlet=outlet,
+            tenant=product.tenant,
+            defaults={'quantity': 0},
+        )
+
+        valuation = get_stock_valuation(product, outlet)
+        location_stock.quantity = valuation['quantity']
+        location_stock.save(update_fields=['quantity', 'updated_at'])
+
+        _Product.objects.filter(id=product.id).update(stock=valuation['quantity'])
+        product.stock = valuation['quantity']
+        return valuation
 
 
 def get_sellable_stock(product, outlet):
@@ -263,48 +268,41 @@ def deduct_stock(product=None, outlet=None, quantity=None, user=None, reference_
         quantity__gt=0
     ).order_by('expiry_date', 'created_at')
 
-    # Check total available. If a legacy/non-expiry product has no batches,
-    # fall back to outlet projections so checkout matches the stock value shown in POS.
+    # If a legacy product still has no batches, seed one from the current
+    # outlet projection so the deduction still flows through the ledger.
     batch_total_available = sum(b.quantity for b in batches)
     if batch_total_available < quantity and not batches.exists():
-        total_available = get_sellable_stock(product, outlet)
-        if total_available < quantity:
+        legacy_available = get_sellable_stock(product, outlet)
+        if legacy_available < quantity:
             raise ValueError(
                 f"Insufficient stock for product. "
-                f"Available: {total_available}, Requested: {quantity}"
+                f"Available: {legacy_available}, Requested: {quantity}"
             )
 
-        location_stock, _ = LocationStock.objects.get_or_create(
+        legacy_batch_number = f"LEGACY-{product.id}-{outlet.id}"
+        legacy_batch, created = Batch.objects.get_or_create(
+            tenant=product.tenant,
+            outlet=outlet,
+            product=product,
+            batch_number=legacy_batch_number,
+            defaults={
+                'expiry_date': today + timedelta(days=3650),
+                'quantity': max(0, int(legacy_available)),
+                'cost_price': _coerce_decimal(product.cost),
+            },
+        )
+
+        if not created and int(legacy_batch.quantity or 0) < int(legacy_available):
+            legacy_batch.quantity = int(legacy_available)
+            legacy_batch.save(update_fields=['quantity', 'updated_at'])
+
+        batches = Batch.objects.select_for_update().filter(
             product=product,
             outlet=outlet,
-            tenant=product.tenant,
-            defaults={'quantity': 0}
-        )
-        next_quantity = max(0, int(location_stock.quantity or 0) - quantity)
-        LocationStock.objects.filter(id=location_stock.id).update(quantity=next_quantity)
-        location_stock.quantity = next_quantity
-
-        from apps.products.models import Product as _Product
-        next_product_stock = max(0, int(getattr(product, 'stock', 0) or 0) - quantity)
-        _Product.objects.filter(id=product.id).update(stock=next_product_stock)
-        product.stock = next_product_stock
-
-        StockMovement.objects.create(
-            tenant=product.tenant,
-            batch=None,
-            product=product,
-            outlet=outlet,
-            user=user,
-            movement_type=movement_type,
-            quantity=quantity,
-            reference_id=reference_id,
-            reason=reason or f"{movement_type.title()} {reference_id}"
-        )
-
-        logger.info(
-            f"Deducted {quantity} from legacy stock projection for {product.name} at {outlet.name}"
-        )
-        return [(None, quantity)]
+            expiry_date__gt=today,
+            quantity__gt=0
+        ).order_by('expiry_date', 'created_at')
+        batch_total_available = sum(b.quantity for b in batches)
 
     total_available = batch_total_available
     if total_available < quantity:

@@ -79,6 +79,10 @@ export default function StockValuationReportPage() {
   const [activeTab, setActiveTab] = useState("summary")
   const [report, setReport] = useState<InventoryValuationReport | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
+  const [movementPage, setMovementPage] = useState(1)
+  const [variancePage, setVariancePage] = useState(1)
+  const [ledgerPage, setLedgerPage] = useState(1)
+  const [analyticsPage, setAnalyticsPage] = useState(1)
   const itemsPerPage = 10
 
   const valuationTabs: TabConfig[] = [
@@ -172,6 +176,10 @@ export default function StockValuationReportPage() {
 
   useEffect(() => {
     setCurrentPage(1)
+    setMovementPage(1)
+    setVariancePage(1)
+    setLedgerPage(1)
+    setAnalyticsPage(1)
   }, [dateRange.start, dateRange.end, currentOutlet?.id])
 
   const startDate = format(dateRange.start, "yyyy-MM-dd")
@@ -199,11 +207,6 @@ export default function StockValuationReportPage() {
     const totalCostValue = report?.totals?.stock_value || 0
     const potentialGrossProfit = totalRetailValue - totalCostValue
 
-    const lowStock = items.filter(
-      (item) =>
-        (item.low_stock_threshold || 0) > 0 &&
-        (item.stock_qty || 0) <= (item.low_stock_threshold || 0)
-    ).length
     const outOfStock = items.filter((item) => (item.stock_qty || 0) <= 0).length
     const negativeStock = items.filter((item) => (item.stock_qty || 0) < 0).length
 
@@ -220,12 +223,142 @@ export default function StockValuationReportPage() {
       totalRetailValue,
       totalCostValue,
       potentialGrossProfit,
-      lowStock,
       outOfStock,
       negativeStock,
       inventoryAccuracy,
     }
   }, [report])
+
+  const movementRows = useMemo(() => {
+    return [...(report?.items || [])].sort((left, right) => {
+      const leftMovement = (left.received_qty || 0) + (left.transferred_qty || 0) + (left.adjusted_qty || 0) - (left.sold_qty || 0)
+      const rightMovement = (right.received_qty || 0) + (right.transferred_qty || 0) + (right.adjusted_qty || 0) - (right.sold_qty || 0)
+
+      if (rightMovement === leftMovement) {
+        return String(left.name || "").localeCompare(String(right.name || ""))
+      }
+
+      return Math.abs(rightMovement) - Math.abs(leftMovement)
+    })
+  }, [report])
+
+  const paginatedMovementRows = useMemo(() => {
+    const startIndex = (movementPage - 1) * itemsPerPage
+    return movementRows.slice(startIndex, startIndex + itemsPerPage)
+  }, [movementPage, movementRows])
+
+  const varianceRows = useMemo(() => {
+    return (report?.items || [])
+      .filter((item) => (item.counted_qty || 0) > 0 || (item.discrepancy || 0) !== 0 || (item.counted_value || 0) !== 0)
+      .sort((left, right) => {
+        const leftVariance = Math.abs(left.discrepancy || 0)
+        const rightVariance = Math.abs(right.discrepancy || 0)
+
+        if (rightVariance === leftVariance) {
+          return String(left.name || "").localeCompare(String(right.name || ""))
+        }
+
+        return rightVariance - leftVariance
+      })
+  }, [report])
+
+  const paginatedVarianceRows = useMemo(() => {
+    const startIndex = (variancePage - 1) * itemsPerPage
+    return varianceRows.slice(startIndex, startIndex + itemsPerPage)
+  }, [variancePage, varianceRows])
+
+  const ledgerRows = useMemo(() => {
+    return [...(report?.items || [])].sort((left, right) => {
+      const leftLedgerValue = (left.open_value || 0) + (left.received_value || 0) + (left.transferred_value || 0) + (left.adjusted_value || 0) + (left.sold_value || 0)
+      const rightLedgerValue = (right.open_value || 0) + (right.received_value || 0) + (right.transferred_value || 0) + (right.adjusted_value || 0) + (right.sold_value || 0)
+
+      if (rightLedgerValue === leftLedgerValue) {
+        return String(left.name || "").localeCompare(String(right.name || ""))
+      }
+
+      return rightLedgerValue - leftLedgerValue
+    })
+  }, [report])
+
+  const paginatedLedgerRows = useMemo(() => {
+    const startIndex = (ledgerPage - 1) * itemsPerPage
+    return ledgerRows.slice(startIndex, startIndex + itemsPerPage)
+  }, [ledgerPage, ledgerRows])
+
+  const analyticsRows = useMemo(() => {
+    return [...(report?.items || [])].sort((left, right) => {
+      const leftScore = (left.stock_value || 0) + Math.abs(left.discrepancy_value || 0)
+      const rightScore = (right.stock_value || 0) + Math.abs(right.discrepancy_value || 0)
+
+      if (rightScore === leftScore) {
+        return String(left.name || "").localeCompare(String(right.name || ""))
+      }
+
+      return rightScore - leftScore
+    })
+  }, [report])
+
+  const paginatedAnalyticsRows = useMemo(() => {
+    const startIndex = (analyticsPage - 1) * itemsPerPage
+    return analyticsRows.slice(startIndex, startIndex + itemsPerPage)
+  }, [analyticsPage, analyticsRows])
+
+  const movementTotals = useMemo(() => {
+    const items = report?.items || []
+    return {
+      receivedQty: items.reduce((sum, item) => sum + (item.received_qty || 0), 0),
+      transferredQty: items.reduce((sum, item) => sum + (item.transferred_qty || 0), 0),
+      adjustedQty: items.reduce((sum, item) => sum + (item.adjusted_qty || 0), 0),
+      soldQty: items.reduce((sum, item) => sum + (item.sold_qty || 0), 0),
+      closingQty: items.reduce((sum, item) => sum + (item.stock_qty || 0), 0),
+    }
+  }, [report])
+
+  const formatSignedQuantity = useCallback((value: number) => {
+    const numeric = Number(value || 0)
+    return `${numeric >= 0 ? "+" : ""}${numeric.toLocaleString("en-US")}`
+  }, [])
+
+  const renderPagination = useCallback(
+    (
+      totalItems: number,
+      page: number,
+      setPage: (value: number | ((prev: number) => number)) => void
+    ) => {
+      const totalPageCount = Math.max(1, Math.ceil(totalItems / itemsPerPage))
+      if (totalItems <= itemsPerPage) return null
+
+      const startIndex = (page - 1) * itemsPerPage + 1
+      const endIndex = Math.min(page * itemsPerPage, totalItems)
+
+      return (
+        <div className="mt-4 flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">
+            Showing {startIndex}-{endIndex} of {totalItems}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page === 1}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((prev) => Math.min(totalPageCount, prev + 1))}
+              disabled={page === totalPageCount}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )
+    },
+    [itemsPerPage]
+  )
 
   const handleExportXlsx = async () => {
     try {
@@ -383,10 +516,6 @@ export default function StockValuationReportPage() {
                 <CardContent className="text-xl font-semibold">{summaryMetrics.totalQuantity.toLocaleString()}</CardContent>
               </Card>
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Low Stock</CardTitle></CardHeader>
-                <CardContent className="text-xl font-semibold">{summaryMetrics.lowStock.toLocaleString()}</CardContent>
-              </Card>
-              <Card>
                 <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Out / Negative Stock</CardTitle></CardHeader>
                 <CardContent className="text-xl font-semibold">{summaryMetrics.outOfStock.toLocaleString()} / {summaryMetrics.negativeStock.toLocaleString()}</CardContent>
               </Card>
@@ -458,36 +587,252 @@ export default function StockValuationReportPage() {
 
           <TabsContent value="movement">
             <Card>
-              <CardHeader><CardTitle>Inventory Movement</CardTitle></CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                Opening, purchases, transfer in/out, adjustments, sales, returns, and closing view.
+              <CardHeader className="space-y-2">
+                <CardTitle>Inventory Movement</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Movement breakdown by item for the selected period.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Received Qty</CardTitle></CardHeader>
+                    <CardContent className="text-lg font-semibold">{movementTotals.receivedQty.toLocaleString()}</CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Transferred Qty</CardTitle></CardHeader>
+                    <CardContent className="text-lg font-semibold">{movementTotals.transferredQty.toLocaleString()}</CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Adjusted Qty</CardTitle></CardHeader>
+                    <CardContent className="text-lg font-semibold">{movementTotals.adjustedQty.toLocaleString()}</CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Sold Qty</CardTitle></CardHeader>
+                    <CardContent className="text-lg font-semibold">{movementTotals.soldQty.toLocaleString()}</CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Closing Qty</CardTitle></CardHeader>
+                    <CardContent className="text-lg font-semibold">{movementTotals.closingQty.toLocaleString()}</CardContent>
+                  </Card>
+                </div>
+
+                <div className="overflow-x-auto rounded-md border bg-white">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead>Item</TableHead>
+                        <TableHead>Code</TableHead>
+                        <TableHead className="text-right">Open Qty</TableHead>
+                        <TableHead className="text-right">Received</TableHead>
+                        <TableHead className="text-right">Transferred</TableHead>
+                        <TableHead className="text-right">Adjusted</TableHead>
+                        <TableHead className="text-right">Sold</TableHead>
+                        <TableHead className="text-right">Closing Qty</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedMovementRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                            No movement data found for the selected period.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        paginatedMovementRows.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium">{item.name}</TableCell>
+                            <TableCell>{item.code}</TableCell>
+                            <TableCell className="text-right">{(item.open_qty || 0).toLocaleString()}</TableCell>
+                            <TableCell className="text-right">{formatSignedQuantity(item.received_qty || 0)}</TableCell>
+                            <TableCell className="text-right">{formatSignedQuantity(item.transferred_qty || 0)}</TableCell>
+                            <TableCell className="text-right">{formatSignedQuantity(item.adjusted_qty || 0)}</TableCell>
+                            <TableCell className="text-right">{formatSignedQuantity(-(item.sold_qty || 0))}</TableCell>
+                            <TableCell className="text-right font-semibold">{(item.stock_qty || 0).toLocaleString()}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                {renderPagination(movementRows.length, movementPage, setMovementPage)}
               </CardContent>
             </Card>
           </TabsContent>
 
           <TabsContent value="variance">
             <Card>
-              <CardHeader><CardTitle>Stock Take Variance</CardTitle></CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                System vs counted variance view.
+              <CardHeader className="space-y-2">
+                <CardTitle>Stock Take Variance</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  System quantity versus counted quantity for the stock-take period.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {report?.has_stock_take ? (
+                  <div className="overflow-x-auto rounded-md border bg-white">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-gray-50">
+                          <TableHead>Item</TableHead>
+                          <TableHead>Code</TableHead>
+                          <TableHead className="text-right">System Qty</TableHead>
+                          <TableHead className="text-right">Counted Qty</TableHead>
+                          <TableHead className="text-right">Variance Qty</TableHead>
+                          <TableHead className="text-right">Variance Value</TableHead>
+                          <TableHead className="text-right">Surplus</TableHead>
+                          <TableHead className="text-right">Shortage</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedVarianceRows.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                              No variance rows found for the selected stock take.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          paginatedVarianceRows.map((item) => (
+                            <TableRow key={item.id}>
+                              <TableCell className="font-medium">{item.name}</TableCell>
+                              <TableCell>{item.code}</TableCell>
+                              <TableCell className="text-right">{(item.stock_qty || 0).toLocaleString()}</TableCell>
+                              <TableCell className="text-right">{(item.counted_qty || 0).toLocaleString()}</TableCell>
+                              <TableCell className={`text-right font-semibold ${(item.discrepancy || 0) === 0 ? "text-muted-foreground" : (item.discrepancy || 0) > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                                {(item.discrepancy || 0) >= 0 ? "+" : ""}{(item.discrepancy || 0).toLocaleString()}
+                              </TableCell>
+                              <TableCell className={`text-right ${(item.discrepancy_value || 0) === 0 ? "text-muted-foreground" : (item.discrepancy_value || 0) > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                                {formatCurrency(item.discrepancy_value || 0)}
+                              </TableCell>
+                              <TableCell className="text-right text-emerald-600">{(item.surplus_qty || 0).toLocaleString()}</TableCell>
+                              <TableCell className="text-right text-red-600">{(item.shortage_qty || 0).toLocaleString()}</TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+                    {renderPagination(varianceRows.length, variancePage, setVariancePage)}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-gray-300 bg-gray-50 p-6 text-sm text-muted-foreground">
+                    No stock take data is attached to this period yet, so variance cannot be calculated.
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
 
           <TabsContent value="ledger">
             <Card>
-              <CardHeader><CardTitle>Inventory Ledger</CardTitle></CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                Full transaction ledger view with drill-down will be connected next.
+              <CardHeader className="space-y-2">
+                <CardTitle>Inventory Ledger</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Period ledger showing movement and closing value by item.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="overflow-x-auto rounded-md border bg-white">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead>Item</TableHead>
+                        <TableHead>Code</TableHead>
+                        <TableHead className="text-right">Open Value</TableHead>
+                        <TableHead className="text-right">Received Value</TableHead>
+                        <TableHead className="text-right">Transferred Value</TableHead>
+                        <TableHead className="text-right">Adjusted Value</TableHead>
+                        <TableHead className="text-right">Sold Value</TableHead>
+                        <TableHead className="text-right">Closing Value</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedLedgerRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                            No ledger rows found for the selected period.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        paginatedLedgerRows.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell className="font-medium">{item.name}</TableCell>
+                            <TableCell>{item.code}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(item.open_value || 0)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(item.received_value || 0)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(item.transferred_value || 0)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(item.adjusted_value || 0)}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(item.sold_value || 0)}</TableCell>
+                            <TableCell className="text-right font-semibold">{formatCurrency(item.stock_value || 0)}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                {renderPagination(ledgerRows.length, ledgerPage, setLedgerPage)}
               </CardContent>
             </Card>
           </TabsContent>
 
           <TabsContent value="analytics">
             <Card>
-              <CardHeader><CardTitle>Inventory Analytics</CardTitle></CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                Aging, turnover, dead stock, overstock, and negative stock analytics.
+              <CardHeader className="space-y-2">
+                <CardTitle>Inventory Analytics</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Ranked analytics for stock value and variance impact.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="overflow-x-auto rounded-md border bg-white">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead>Item</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Stock Qty</TableHead>
+                        <TableHead className="text-right">Stock Value</TableHead>
+                        <TableHead className="text-right">Retail Value</TableHead>
+                        <TableHead className="text-right">Gross Profit Potential</TableHead>
+                        <TableHead className="text-right">Variance Value</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedAnalyticsRows.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                            No analytics rows found for the selected period.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        paginatedAnalyticsRows.map((item) => {
+                          const grossProfitPotential = (item.retail_price || 0) * (item.stock_qty || 0) - (item.stock_value || 0)
+                          const status = (item.discrepancy || 0) === 0
+                            ? "Balanced"
+                            : (item.discrepancy || 0) > 0
+                              ? "Surplus"
+                              : "Shortage"
+
+                          return (
+                            <TableRow key={item.id}>
+                              <TableCell className="font-medium">{item.name}</TableCell>
+                              <TableCell>{item.category}</TableCell>
+                              <TableCell className="text-right">{(item.stock_qty || 0).toLocaleString()}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(item.stock_value || 0)}</TableCell>
+                              <TableCell className="text-right">{formatCurrency((item.retail_price || 0) * (item.stock_qty || 0))}</TableCell>
+                              <TableCell className="text-right">{formatCurrency(grossProfitPotential)}</TableCell>
+                              <TableCell className={`text-right ${(item.discrepancy_value || 0) === 0 ? "text-muted-foreground" : (item.discrepancy_value || 0) > 0 ? "text-emerald-600" : "text-red-600"}`}>
+                                {formatCurrency(item.discrepancy_value || 0)}
+                              </TableCell>
+                              <TableCell>{status}</TableCell>
+                            </TableRow>
+                          )
+                        })
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                {renderPagination(analyticsRows.length, analyticsPage, setAnalyticsPage)}
               </CardContent>
             </Card>
           </TabsContent>

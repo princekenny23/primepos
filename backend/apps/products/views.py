@@ -1236,6 +1236,7 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         (k for k in ('stock', 'initial_stock_qty', 'initial_stock') if k in column_mapping),
                         None,
                     )
+                    stock_provided = stock_col_key is not None
                     if stock_col_key:
                         stock_val = first_row[column_mapping[stock_col_key]]
                         if pd.notna(stock_val):
@@ -1505,21 +1506,29 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                         product.save()
                     
                     from apps.inventory.models import LocationStock
-                    if product_created:
-                        LocationStock.objects.update_or_create(
-                            tenant=tenant,
-                            product=product,
-                            outlet=outlet,
-                            defaults={'quantity': max(0, int(stock or 0))}
-                        )
-                    else:
-                        # Ensure a location stock record exists, but do not overwrite existing quantity.
-                        LocationStock.objects.get_or_create(
-                            tenant=tenant,
-                            product=product,
-                            outlet=outlet,
-                            defaults={'quantity': max(0, int(product.stock or 0))}
-                        )
+                    location_stock, _ = LocationStock.objects.get_or_create(
+                        tenant=tenant,
+                        product=product,
+                        outlet=outlet,
+                        defaults={'quantity': 0},
+                    )
+
+                    if stock_provided:
+                        target_stock = max(0, int(stock or 0))
+                        current_stock = int(location_stock.quantity or 0)
+                        if target_stock != current_stock:
+                            from apps.inventory.stock_helpers import adjust_stock
+
+                            adjust_stock(
+                                product=product,
+                                outlet=outlet,
+                                new_quantity=target_stock,
+                                user=request.user,
+                                reason=f'Bulk import row {row_num}',
+                            )
+                    elif product_created and location_stock.quantity != max(0, int(product.stock or 0)):
+                        location_stock.quantity = max(0, int(product.stock or 0))
+                        location_stock.save(update_fields=['quantity', 'updated_at'])
 
                     if collapsed_count > 0:
                         collapsed_rows = [row_idx + 2 for row_idx, _ in rows[1:]]

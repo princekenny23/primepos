@@ -38,13 +38,22 @@ class BaseImportView(APIView):
     SYNC_STRATEGY_STOCK_ONLY = 'stock_only'
     SYNC_STRATEGY_PRICES_ONLY = 'prices_only'
     SYNC_STRATEGY_FULL_SYNC = 'full_sync'
+    SYNC_STRATEGY_CATALOG_ONLY = 'catalog_only'
+    SYNC_STRATEGY_COST_ONLY = 'cost_only'
     SYNC_STRATEGY_CHOICES = {
         SYNC_STRATEGY_UPDATE_EXISTING,
         SYNC_STRATEGY_CREATE_NEW,
         SYNC_STRATEGY_STOCK_ONLY,
         SYNC_STRATEGY_PRICES_ONLY,
         SYNC_STRATEGY_FULL_SYNC,
+        SYNC_STRATEGY_CATALOG_ONLY,
+        SYNC_STRATEGY_COST_ONLY,
     }
+
+    COST_PRICE_METHOD_CHOICES = {'replace', 'average_cost', 'highest_cost', 'lowest_cost', 'ignore'}
+    STOCK_UPDATE_METHOD_CHOICES = {'replace_quantity', 'increase', 'decrease', 'stock_count_adjustment', 'ignore'}
+    DUPLICATE_PRODUCTS_CHOICES = {'update_existing', 'skip', 'merge', 'review'}
+    MISSING_PRODUCTS_CHOICES = {'auto_create', 'skip', 'review_first'}
 
     def _resolve_tenant(self, request):
         return getattr(request, 'tenant', None) or getattr(request.user, 'tenant', None)
@@ -144,6 +153,15 @@ class BaseImportView(APIView):
                 f"Allowed values: {', '.join(sorted(self.SYNC_STRATEGY_CHOICES))}."
             )
         return strategy
+
+    def _resolve_sync_option(self, request, option_name: str, *, default: str, choices: set[str]) -> str:
+        raw_value = request.query_params.get(option_name) or request.data.get(option_name) or default
+        value = str(raw_value).strip().lower().replace('-', '_')
+        if value not in choices:
+            raise ValueError(
+                f"Invalid {option_name} '{raw_value}'. Allowed values: {', '.join(sorted(choices))}."
+            )
+        return value
 
     def _pick_first_column(self, column_mapping: Dict[str, str], *keys: str) -> str:
         for key in keys:
@@ -659,7 +677,7 @@ class BaseImportView(APIView):
             }
         }
 
-    def _apply_inventory_sync_batch(self, request, batch: ImportBatch, sync_strategy: str):
+    def _apply_inventory_sync_batch(self, request, batch: ImportBatch, sync_strategy: str, sync_options: Dict[str, str]):
         valid_rows_qs = batch.rows.filter(status__in=[ImportRowResult.STATUS_VALID, ImportRowResult.STATUS_WARNING]).exclude(action=ImportRowResult.ACTION_SKIP).order_by('row_number')
         valid_rows = list(valid_rows_qs.values('row_number', 'raw_data', 'normalized_data'))
         if not valid_rows:
@@ -695,25 +713,30 @@ class BaseImportView(APIView):
         apply_catalog_fields = sync_strategy in {
             self.SYNC_STRATEGY_FULL_SYNC,
             self.SYNC_STRATEGY_UPDATE_EXISTING,
+            self.SYNC_STRATEGY_CATALOG_ONLY,
         }
         apply_price_updates = sync_strategy in {
             self.SYNC_STRATEGY_FULL_SYNC,
             self.SYNC_STRATEGY_UPDATE_EXISTING,
             self.SYNC_STRATEGY_PRICES_ONLY,
         }
+        apply_cost_updates = sync_strategy in {
+            self.SYNC_STRATEGY_FULL_SYNC,
+            self.SYNC_STRATEGY_UPDATE_EXISTING,
+            self.SYNC_STRATEGY_COST_ONLY,
+        }
         apply_stock_updates = sync_strategy in {
             self.SYNC_STRATEGY_FULL_SYNC,
             self.SYNC_STRATEGY_UPDATE_EXISTING,
             self.SYNC_STRATEGY_STOCK_ONLY,
         }
-        # Safety guard: stock overwrite is explicit and OFF by default unless
-        # strategy is stock_only (where stock changes are the primary intent).
-        explicit_stock_update = self._coerce_bool(
-            request.data.get('update_stock_quantities'),
-            default=(sync_strategy == self.SYNC_STRATEGY_STOCK_ONLY),
-        )
-        apply_stock_updates = apply_stock_updates and explicit_stock_update
-        allow_create = sync_strategy in {
+        cost_price_method = str(sync_options.get('cost_price_method') or 'replace').strip().lower()
+        stock_update_method = str(sync_options.get('stock_update_method') or 'replace_quantity').strip().lower()
+        duplicate_products = str(sync_options.get('duplicate_products') or 'update_existing').strip().lower()
+        missing_products = str(sync_options.get('missing_products') or 'auto_create').strip().lower()
+
+        apply_stock_updates = apply_stock_updates and stock_update_method != 'ignore'
+        allow_create = missing_products == 'auto_create' or sync_strategy in {
             self.SYNC_STRATEGY_FULL_SYNC,
             self.SYNC_STRATEGY_CREATE_NEW,
         }
@@ -722,6 +745,8 @@ class BaseImportView(APIView):
             self.SYNC_STRATEGY_UPDATE_EXISTING,
             self.SYNC_STRATEGY_STOCK_ONLY,
             self.SYNC_STRATEGY_PRICES_ONLY,
+            self.SYNC_STRATEGY_CATALOG_ONLY,
+            self.SYNC_STRATEGY_COST_ONLY,
         }
 
         def _get_decimal(value, default=None):
@@ -847,12 +872,24 @@ class BaseImportView(APIView):
                         product.retail_price = retail_price
                         prices_changed += 1
                         changed = True
-                    if cost_price is not None and cost_price != product.cost:
-                        product.cost = cost_price
-                        changed = True
                     if wholesale_price is not None and wholesale_price != product.wholesale_price:
                         product.wholesale_price = wholesale_price
                         changed = True
+                if apply_cost_updates or product_was_created:
+                    if cost_price is not None:
+                        next_cost = cost_price
+                        if not product_was_created and product.cost is not None:
+                            if cost_price_method == 'average_cost':
+                                next_cost = (Decimal(str(product.cost)) + cost_price) / Decimal('2')
+                            elif cost_price_method == 'highest_cost':
+                                next_cost = max(Decimal(str(product.cost)), cost_price)
+                            elif cost_price_method == 'lowest_cost':
+                                next_cost = min(Decimal(str(product.cost)), cost_price)
+                            elif cost_price_method == 'ignore':
+                                next_cost = Decimal(str(product.cost))
+                        if cost_price_method != 'ignore' and next_cost != product.cost:
+                            product.cost = next_cost
+                            changed = True
                 if batch_expiry_date:
                     # Expiry date is acknowledged from the template, but product-level expiry is optional.
                     # If future batch handling is added here, this value is already available in normalized_data.
@@ -864,6 +901,15 @@ class BaseImportView(APIView):
 
                 should_apply_stock = apply_stock_updates or product_was_created
                 if should_apply_stock and target_stock is not None and target_stock != original_stock:
+                    if stock_update_method == 'increase':
+                        target_stock = max(0, original_stock + abs(target_stock))
+                    elif stock_update_method == 'decrease':
+                        target_stock = max(0, original_stock - abs(target_stock))
+                    elif stock_update_method == 'stock_count_adjustment':
+                        target_stock = max(0, original_stock + target_stock)
+                    elif stock_update_method == 'ignore' and not product_was_created:
+                        target_stock = original_stock
+
                     movement_reason = f'Inventory sync import row {row_number}'
                     adjust_stock(
                         product=product,
@@ -927,6 +973,7 @@ class BaseImportView(APIView):
             'prices_changed': prices_changed,
             'skipped_by_strategy': skipped_by_strategy,
             'sync_strategy': sync_strategy,
+            'sync_options': sync_options,
             'stock_updates_enabled': apply_stock_updates,
             'errors': total_failed,
         }
@@ -1089,6 +1136,38 @@ class ProductImportPreviewView(BaseImportView):
             except ValueError as exc:
                 return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+        sync_options: Dict[str, str] = {}
+        if is_inventory_sync:
+            try:
+                sync_options = {
+                    'cost_price_method': self._resolve_sync_option(
+                        request,
+                        'cost_price_method',
+                        default='replace',
+                        choices=self.COST_PRICE_METHOD_CHOICES,
+                    ),
+                    'stock_update_method': self._resolve_sync_option(
+                        request,
+                        'stock_update_method',
+                        default='replace_quantity',
+                        choices=self.STOCK_UPDATE_METHOD_CHOICES,
+                    ),
+                    'duplicate_products': self._resolve_sync_option(
+                        request,
+                        'duplicate_products',
+                        default='update_existing',
+                        choices=self.DUPLICATE_PRODUCTS_CHOICES,
+                    ),
+                    'missing_products': self._resolve_sync_option(
+                        request,
+                        'missing_products',
+                        default='auto_create',
+                        choices=self.MISSING_PRODUCTS_CHOICES,
+                    ),
+                }
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         idempotency_key = request.headers.get('X-Idempotency-Key') or request.data.get('idempotency_key')
         if idempotency_key:
             existing_batch = ImportBatch.objects.filter(
@@ -1112,6 +1191,7 @@ class ProductImportPreviewView(BaseImportView):
             summary_payload = dict(preview_data['summary'])
             if is_inventory_sync:
                 summary_payload['sync_strategy'] = sync_strategy
+                summary_payload['sync_options'] = sync_options
 
             with transaction.atomic():
                 batch = ImportBatch.objects.create(
@@ -1213,9 +1293,36 @@ class ProductImportApplyView(BaseImportView):
             try:
                 default_strategy = (batch.preview_summary or {}).get('sync_strategy')
                 sync_strategy = self._resolve_sync_strategy(request, default=default_strategy)
+                preview_sync_options = (batch.preview_summary or {}).get('sync_options') if isinstance(batch.preview_summary, dict) else {}
+                sync_options = {
+                    'cost_price_method': self._resolve_sync_option(
+                        request,
+                        'cost_price_method',
+                        default=str((preview_sync_options or {}).get('cost_price_method') or 'replace'),
+                        choices=self.COST_PRICE_METHOD_CHOICES,
+                    ),
+                    'stock_update_method': self._resolve_sync_option(
+                        request,
+                        'stock_update_method',
+                        default=str((preview_sync_options or {}).get('stock_update_method') or 'replace_quantity'),
+                        choices=self.STOCK_UPDATE_METHOD_CHOICES,
+                    ),
+                    'duplicate_products': self._resolve_sync_option(
+                        request,
+                        'duplicate_products',
+                        default=str((preview_sync_options or {}).get('duplicate_products') or 'update_existing'),
+                        choices=self.DUPLICATE_PRODUCTS_CHOICES,
+                    ),
+                    'missing_products': self._resolve_sync_option(
+                        request,
+                        'missing_products',
+                        default=str((preview_sync_options or {}).get('missing_products') or 'auto_create'),
+                        choices=self.MISSING_PRODUCTS_CHOICES,
+                    ),
+                }
             except ValueError as exc:
                 return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-            return self._apply_inventory_sync_batch(request, batch, sync_strategy)
+            return self._apply_inventory_sync_batch(request, batch, sync_strategy, sync_options)
 
         chunk_size_raw = request.data.get('chunk_size', 100)
         try:

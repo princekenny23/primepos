@@ -3,8 +3,9 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { Search, LucideIcon } from "lucide-react"
+import { Search, X, LucideIcon } from "lucide-react"
 import { ReactNode } from "react"
 
 export interface TabConfig {
@@ -24,6 +25,7 @@ interface FilterableTabsProps {
   tabsListClassName?: string
   searchValue?: string
   onSearchChange?: (value: string) => void
+  onSearchClear?: () => void
   searchPlaceholder?: string
   actionButton?: ReactNode
   actionButtonPlacement?: "right" | "below"
@@ -38,6 +40,7 @@ export function FilterableTabs({
   tabsListClassName = "grid w-full",
   searchValue,
   onSearchChange,
+  onSearchClear,
   searchPlaceholder = "Search...",
   actionButton,
   actionButtonPlacement = "right",
@@ -102,10 +105,30 @@ export function FilterableTabs({
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder={searchPlaceholder}
-              className="pl-10"
+              className="pl-10 pr-10"
               value={searchValue}
               onChange={(e) => onSearchChange(e.target.value)}
             />
+            {searchValue.trim().length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  if (onSearchClear) {
+                    onSearchClear()
+                    return
+                  }
+
+                  onSearchChange("")
+                }}
+                className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+                title="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         )}
       </div>

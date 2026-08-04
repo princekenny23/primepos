@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
-import { Plus, Search, Upload, Filter, Folder, Trash2, RefreshCw, AlertTriangle, Package, AlertCircle, Clock, Download, Edit, Menu, ShoppingCart, SlidersHorizontal, Archive, RotateCcw } from "lucide-react"
+import { Plus, Search, Upload, Filter, Folder, Trash2, RefreshCw, AlertTriangle, Package, AlertCircle, Clock, Download, Edit, Menu, ShoppingCart, SlidersHorizontal, Archive, RotateCcw, ArrowUpDown } from "lucide-react"
 import { OrderProductModal } from "@/components/modals/order-product-modal"
 import { StockAdjustmentModal } from "@/components/modals/stock-adjustment-modal"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -96,6 +96,7 @@ export default function ProductsPage() {
 
   const [searchTerm, setSearchTerm] = useState("")
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
+  const [stockSortDirection, setStockSortDirection] = useState<"high-to-low" | "low-to-high">("high-to-low")
   const [activeTab, setActiveTab] = useState("all")
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 10
@@ -342,11 +343,42 @@ export default function ProductsPage() {
     return baseFilteredProducts
   }, [baseFilteredProducts, activeTab])
 
-  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize))
+  const sortedProducts = useMemo(() => {
+    const getStockValue = (product: any) => {
+      const sellableStock = typeof product.sellable_stock === 'string'
+        ? parseFloat(product.sellable_stock)
+        : product.sellable_stock
+
+      if (sellableStock !== null && sellableStock !== undefined && !Number.isNaN(sellableStock)) {
+        return Number(sellableStock)
+      }
+
+      const fallbackStock = typeof product.stock === 'string'
+        ? parseFloat(product.stock)
+        : product.stock
+
+      return Number.isFinite(fallbackStock) ? Number(fallbackStock) : 0
+    }
+
+    return [...filteredProducts].sort((left, right) => {
+      const leftStock = getStockValue(left)
+      const rightStock = getStockValue(right)
+
+      if (leftStock === rightStock) {
+        return String(left.name || "").localeCompare(String(right.name || ""))
+      }
+
+      return stockSortDirection === "high-to-low"
+        ? rightStock - leftStock
+        : leftStock - rightStock
+    })
+  }, [filteredProducts, stockSortDirection])
+
+  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / pageSize))
   const paginatedProducts = useMemo(() => {
     const startIndex = (currentPage - 1) * pageSize
-    return filteredProducts.slice(startIndex, startIndex + pageSize)
-  }, [filteredProducts, currentPage, pageSize])
+    return sortedProducts.slice(startIndex, startIndex + pageSize)
+  }, [sortedProducts, currentPage, pageSize])
 
   useEffect(() => {
     setCurrentPage(1)
@@ -357,15 +389,15 @@ export default function ProductsPage() {
   }, [totalPages])
 
   const renderPagination = () => {
-    if (filteredProducts.length <= pageSize) return null
+    if (sortedProducts.length <= pageSize) return null
 
     const startIndex = (currentPage - 1) * pageSize + 1
-    const endIndex = Math.min(currentPage * pageSize, filteredProducts.length)
+    const endIndex = Math.min(currentPage * pageSize, sortedProducts.length)
 
     return (
       <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
         <p className="text-sm text-gray-600">
-          Showing {startIndex}-{endIndex} of {filteredProducts.length}
+          Showing {startIndex}-{endIndex} of {sortedProducts.length}
         </p>
         <div className="flex gap-2">
           <Button
@@ -600,15 +632,9 @@ export default function ProductsPage() {
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
-                    <Link href="/dashboard/inventory/products/import">
-                      <Upload className="mr-2 h-4 w-4" />
-                      Import Initial Stock
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
                     <Link href="/dashboard/inventory/products/import?mode=sync">
                       <SlidersHorizontal className="mr-2 h-4 w-4" />
-                      Product & Inventory Sync
+                      Inventory Sync
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setShowExport(true)} disabled={products.length === 0}>
@@ -679,6 +705,15 @@ export default function ProductsPage() {
                           ))}
                         </SelectContent>
                       </Select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="border-gray-300 bg-white"
+                        onClick={() => setStockSortDirection((prev) => prev === "high-to-low" ? "low-to-high" : "high-to-low")}
+                      >
+                        <ArrowUpDown className="mr-2 h-4 w-4" />
+                        {stockSortDirection === "high-to-low" ? "Stock: High" : "Stock: Low"}
+                      </Button>
                     </div>
               </div>
             </div>
@@ -689,7 +724,7 @@ export default function ProductsPage() {
                 <div className="mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">All Products</h3>
                   <p className="text-sm text-gray-600">
-                    {filteredProducts.length} product{filteredProducts.length !== 1 ? "s" : ""} found
+                    {sortedProducts.length} product{sortedProducts.length !== 1 ? "s" : ""} found
                   </p>
                 </div>
                 <div>
@@ -697,7 +732,7 @@ export default function ProductsPage() {
                   <div className="flex items-center justify-center h-64">
                     <p className="text-muted-foreground">Loading products...</p>
                   </div>
-                ) : filteredProducts.length === 0 ? (
+                ) : sortedProducts.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-64 text-center">
                     <Package className="h-12 w-12 text-muted-foreground mb-4" />
                     <p className="text-muted-foreground">
@@ -878,7 +913,7 @@ export default function ProductsPage() {
                     Low Stock Products
                   </h3>
                   <p className="text-sm text-gray-600">
-                    {filteredProducts.length} product{filteredProducts.length !== 1 ? "s" : ""} with low or out of stock
+                    {sortedProducts.length} product{sortedProducts.length !== 1 ? "s" : ""} with low or out of stock
                   </p>
                 </div>
                 <div>
@@ -903,7 +938,7 @@ export default function ProductsPage() {
                         </TableRow>
                       </TableHeader>
                   <TableBody>
-                    {filteredProducts.length === 0 ? (
+                    {sortedProducts.length === 0 ? (
                       <TableRow>
                         <TableCell
                           colSpan={
@@ -1051,7 +1086,7 @@ export default function ProductsPage() {
                     Expiring Products
                   </h3>
                   <p className="text-sm text-gray-600">
-                    {filteredProducts.length} product{filteredProducts.length !== 1 ? "s" : ""} expiring soon or expired
+                    {sortedProducts.length} product{sortedProducts.length !== 1 ? "s" : ""} expiring soon or expired
                   </p>
                 </div>
                 <div>
@@ -1077,7 +1112,7 @@ export default function ProductsPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredProducts.length === 0 ? (
+                        {sortedProducts.length === 0 ? (
                           <TableRow>
                             <TableCell
                               colSpan={

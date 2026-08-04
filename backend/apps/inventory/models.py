@@ -211,6 +211,7 @@ class LocationStock(models.Model):
         """
         today = timezone.now().date()
         batches = Batch.objects.filter(
+            product=self.product,
             outlet=self.outlet,
             expiry_date__gt=today,
             quantity__gt=0
@@ -220,6 +221,7 @@ class LocationStock(models.Model):
     def get_total_quantity_including_expired(self):
         """Get total quantity including expired batches"""
         batches = Batch.objects.filter(
+            product=self.product,
             outlet=self.outlet,
             quantity__gt=0
         )
@@ -231,6 +233,7 @@ class LocationStock(models.Model):
         today = timezone.now().date()
         threshold = today + timedelta(days=days)
         return Batch.objects.filter(
+            product=self.product,
             outlet=self.outlet,
             expiry_date__gt=today,
             expiry_date__lte=threshold,

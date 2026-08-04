@@ -99,11 +99,19 @@ type BatchStatus = {
 }
 
 type SyncStrategyValue =
-  | "update_existing"
-  | "create_new"
-  | "stock_only"
-  | "prices_only"
   | "full_sync"
+  | "catalog_only"
+  | "prices_only"
+  | "cost_only"
+  | "stock_only"
+
+type CostPriceMethodValue = "replace" | "average_cost" | "highest_cost" | "lowest_cost" | "ignore"
+
+type StockUpdateMethodValue = "replace_quantity" | "increase" | "decrease" | "stock_count_adjustment" | "ignore"
+
+type DuplicateProductsValue = "update_existing" | "skip" | "merge" | "review"
+
+type MissingProductsValue = "auto_create" | "skip" | "review_first"
 
 type PreviewErrorRow = {
   row_number: number
@@ -239,52 +247,104 @@ type SyncModeOption = {
   recommended?: boolean
 }
 
+type SyncMethodOption<T extends string> = {
+  value: T
+  label: string
+  description: string
+}
+
 const PAGE_SIZE = 10
 
 const INVENTORY_SYNC_MODES: SyncModeOption[] = [
   {
-    value: "update_existing",
-    label: "Update Existing Products",
-    description: "Update matched catalog records without creating new products.",
+    value: "full_sync",
+    label: "Full Sync",
+    description: "Reconcile catalog, cost, prices, and stock in one pass.",
+    recommended: true,
   },
   {
-    value: "create_new",
-    label: "Create New Products",
-    description: "Add products that do not already exist in the catalog.",
-  },
-  {
-    value: "stock_only",
-    label: "Update Stock Only",
-    description: "Write quantity differences as stock adjustments only.",
+    value: "catalog_only",
+    label: "Catalog Only",
+    description: "Update product metadata without touching prices or stock.",
   },
   {
     value: "prices_only",
-    label: "Update Prices Only",
-    description: "Apply retail, wholesale, and cost price changes only.",
+    label: "Prices Only",
+    description: "Update retail and wholesale prices only.",
   },
   {
-    value: "full_sync",
-    label: "Full Inventory Synchronization",
-    description: "Recommended: reconcile catalog, prices, stock, and missing products together.",
-    recommended: true,
+    value: "cost_only",
+    label: "Cost Only",
+    description: "Update cost price only.",
+  },
+  {
+    value: "stock_only",
+    label: "Stock Only",
+    description: "Update stock quantity only.",
   },
 ]
 
 const SYNC_STRATEGY_LABELS: Record<SyncStrategyValue, string> = {
-  update_existing: "Update Existing Products",
-  create_new: "Create New Products",
-  stock_only: "Update Stock Only",
-  prices_only: "Update Prices Only",
-  full_sync: "Full Inventory Synchronization",
+  full_sync: "Full Sync",
+  catalog_only: "Catalog Only",
+  prices_only: "Prices Only",
+  cost_only: "Cost Only",
+  stock_only: "Stock Only",
 }
+
+const COST_PRICE_METHOD_OPTIONS: SyncMethodOption<CostPriceMethodValue>[] = [
+  { value: "replace", label: "Replace", description: "Replace the current cost with the incoming cost." },
+  { value: "average_cost", label: "Average Cost", description: "Blend the current and incoming costs." },
+  { value: "highest_cost", label: "Highest Cost", description: "Keep the higher of the two costs." },
+  { value: "lowest_cost", label: "Lowest Cost", description: "Keep the lower of the two costs." },
+  { value: "ignore", label: "Ignore", description: "Do not update cost price." },
+]
+
+const STOCK_UPDATE_METHOD_OPTIONS: SyncMethodOption<StockUpdateMethodValue>[] = [
+  { value: "replace_quantity", label: "Replace Quantity", description: "Set stock to the imported value." },
+  { value: "increase", label: "Increase", description: "Treat imported stock as an increase amount." },
+  { value: "decrease", label: "Decrease", description: "Treat imported stock as a decrease amount." },
+  { value: "stock_count_adjustment", label: "Stock Count Adjustment", description: "Apply a signed stock adjustment." },
+  { value: "ignore", label: "Ignore", description: "Do not change stock quantities." },
+]
+
+const DUPLICATE_PRODUCTS_OPTIONS: SyncMethodOption<DuplicateProductsValue>[] = [
+  { value: "update_existing", label: "Update Existing", description: "Update the matched product record." },
+  { value: "skip", label: "Skip", description: "Leave duplicate rows untouched." },
+  { value: "merge", label: "Merge", description: "Merge duplicate rows during processing." },
+  { value: "review", label: "Review", description: "Flag duplicates for manual review." },
+]
+
+const MISSING_PRODUCTS_OPTIONS: SyncMethodOption<MissingProductsValue>[] = [
+  { value: "auto_create", label: "Auto Create", description: "Create missing products automatically." },
+  { value: "skip", label: "Skip", description: "Do not create missing products." },
+  { value: "review_first", label: "Review First", description: "Pause missing products for review before creation." },
+]
+
+const DEFAULT_SYNC_HELPER_TEXT = "Configure how the sync should treat catalog updates, costs, stock, duplicates, and missing products before previewing."
+
+const buildSyncTemplateColumns = () => [
+  "Product Name",
+  "SKU",
+  "Barcode",
+  "Category",
+  "Retail Price",
+  "Wholesale Price",
+  "Cost Price",
+  "Stock",
+  "Low Stock Threshold",
+  "Batch Expiry Date",
+  "Description",
+  "Is Active",
+]
 
 const isSyncStrategyValue = (value: unknown): value is SyncStrategyValue => {
   return (
-    value === "update_existing" ||
-    value === "create_new" ||
-    value === "stock_only" ||
+    value === "full_sync" ||
+    value === "catalog_only" ||
     value === "prices_only" ||
-    value === "full_sync"
+    value === "cost_only" ||
+    value === "stock_only"
   )
 }
 
@@ -409,21 +469,22 @@ function ProductsImportPageContent() {
   const searchParams = useSearchParams()
 
   const defaultOutletId = String(tenantOutlet?.id || currentOutlet?.id || "")
-  const modeParam = String(searchParams?.get('mode') || '').trim().toLowerCase()
-  const isSyncMode = modeParam === 'sync' || modeParam === 'inventory_sync'
-  const importMode = isSyncMode ? 'inventory_sync' : 'products'
-  const historyModeParam = isSyncMode ? 'sync' : 'products'
+  const isSyncMode = true
+  const importMode = 'inventory_sync'
+  const historyModeParam = 'sync'
   const requestedBatchId = String(searchParams?.get('batchId') || "")
-  const pageTitle = isSyncMode ? "Product & Inventory Sync" : "Import Products"
-  const pageDescription = isSyncMode
-    ? "Preview, reconcile, and apply product data with inventory adjustments and audit history."
-    : "Preview, approve, and safely apply create-only product imports with full rejection visibility. Existing products are rejected here; use Product & Inventory Sync to update catalog records."
-  const uploadTabLabel = isSyncMode ? "Upload & Preview Sync" : "Upload & Preview"
-  const summaryTabLabel = isSyncMode ? "Sync Summary" : "Import Summary"
-  const historyTabLabel = isSyncMode ? "Processes" : "Import History"
+  const pageTitle = "Product & Inventory Sync"
+  const pageDescription = "Preview, reconcile, and apply product data with inventory adjustments and audit history."
+  const uploadTabLabel = "Upload & Preview Sync"
+  const summaryTabLabel = "Sync Summary"
+  const historyTabLabel = "Processes"
 
   const [selectedOutletId, setSelectedOutletId] = useState<string>(defaultOutletId)
   const [selectedSyncStrategy, setSelectedSyncStrategy] = useState<SyncStrategyValue>("full_sync")
+  const [selectedCostPriceMethod, setSelectedCostPriceMethod] = useState<CostPriceMethodValue>("replace")
+  const [selectedStockUpdateMethod, setSelectedStockUpdateMethod] = useState<StockUpdateMethodValue>("replace_quantity")
+  const [selectedDuplicateProducts, setSelectedDuplicateProducts] = useState<DuplicateProductsValue>("update_existing")
+  const [selectedMissingProducts, setSelectedMissingProducts] = useState<MissingProductsValue>("auto_create")
   const [file, setFile] = useState<File | null>(null)
   const [batchId, setBatchId] = useState<string>("")
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null)
@@ -489,8 +550,14 @@ function ProductsImportPageContent() {
     isActive: true,
   })
   const lastRestoredBatchRef = useRef<string>("")
-  const requestMode = isSyncMode ? importMode : undefined
-  const requestSyncStrategy = isSyncMode ? selectedSyncStrategy : undefined
+  const requestMode = importMode
+  const requestSyncStrategy = selectedSyncStrategy
+  const requestSyncOptions = {
+    costPriceMethod: selectedCostPriceMethod,
+    stockUpdateMethod: selectedStockUpdateMethod,
+    duplicateProducts: selectedDuplicateProducts,
+    missingProducts: selectedMissingProducts,
+  }
 
   const summary = useMemo(() => {
     const preview = batchStatus?.preview_summary || {}
@@ -1097,6 +1164,88 @@ function ProductsImportPageContent() {
     }
   }
 
+  const handleDownloadTemplate = useCallback(async () => {
+    if (!selectedOutletId) {
+      toast({
+        title: "Outlet Required",
+        description: "Select an outlet before downloading the template.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const XLSXStyled = require("xlsx-js-style") as typeof XLSX
+      const headers = buildSyncTemplateColumns()
+      const sampleRow = ["Sample Product", "SKU-001", "1234567890123", "General", 1000, 1200, 800, 25, 5, "2026-12-31", "Example row", "yes"]
+      const worksheet = XLSXStyled.utils.aoa_to_sheet([headers, sampleRow])
+
+      headers.forEach((_, index) => {
+        const cellRef = XLSXStyled.utils.encode_cell({ r: 0, c: index })
+        const cell = worksheet[cellRef]
+        if (cell) {
+          cell.s = {
+            font: { bold: true, color: { rgb: "FFFFFF" } },
+            fill: { patternType: "solid", fgColor: { rgb: "1F4E78" } },
+            alignment: { horizontal: "center", vertical: "center" },
+            border: {
+              top: { style: "thin", color: { rgb: "D1D5DB" } },
+              bottom: { style: "thin", color: { rgb: "D1D5DB" } },
+              left: { style: "thin", color: { rgb: "D1D5DB" } },
+              right: { style: "thin", color: { rgb: "D1D5DB" } },
+            },
+          }
+        }
+      })
+
+      const worksheetRange = XLSXStyled.utils.decode_range(worksheet["!ref"] || "A1:L2")
+      for (let rowIndex = 1; rowIndex <= worksheetRange.e.r; rowIndex += 1) {
+        for (let colIndex = 0; colIndex <= worksheetRange.e.c; colIndex += 1) {
+          const cellRef = XLSXStyled.utils.encode_cell({ r: rowIndex, c: colIndex })
+          const cell = worksheet[cellRef]
+          if (cell) {
+            cell.s = {
+              border: {
+                top: { style: "thin", color: { rgb: "E5E7EB" } },
+                bottom: { style: "thin", color: { rgb: "E5E7EB" } },
+                left: { style: "thin", color: { rgb: "E5E7EB" } },
+                right: { style: "thin", color: { rgb: "E5E7EB" } },
+              },
+            }
+          }
+        }
+      }
+
+      worksheet["!autofilter"] = { ref: `A1:${XLSXStyled.utils.encode_col(headers.length - 1)}${sampleRow.length + 1}` }
+      worksheet["!cols"] = headers.map((header) => ({ wch: Math.max(14, header.length + 4) }))
+
+      const workbook = XLSXStyled.utils.book_new()
+      XLSXStyled.utils.book_append_sheet(workbook, worksheet, "Sync Template")
+      const buffer = XLSXStyled.write(workbook, { bookType: "xlsx", type: "array" }) as ArrayBuffer
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })
+      const url = window.URL.createObjectURL(blob)
+
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `inventory-sync-template-${selectedOutletId}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+
+      toast({
+        title: "Template Downloaded",
+        description: "Styled Excel template is ready for editing.",
+      })
+    } catch (error: any) {
+      toast({
+        title: "Template Download Failed",
+        description: error?.message || "Unable to build template workbook.",
+        variant: "destructive",
+      })
+    }
+  }, [selectedOutletId, toast])
+
   useEffect(() => {
     if (activeTab !== "import-history") return
     loadImportHistory(1)
@@ -1147,7 +1296,14 @@ function ProductsImportPageContent() {
     setLoadingAction("preview")
     try {
       const idempotencyKey = `preview-${importMode}-${selectedOutletId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-      const preview = await productService.previewImport(file, selectedOutletId, idempotencyKey, importMode, selectedSyncStrategy)
+      const preview = await productService.previewImport(
+        file,
+        selectedOutletId,
+        idempotencyKey,
+        importMode,
+        selectedSyncStrategy,
+        requestSyncOptions,
+      )
       setBatchId(preview.batch_id)
 
       await refreshBatch(preview.batch_id)
@@ -1229,6 +1385,7 @@ function ProductsImportPageContent() {
         idempotencyKey: applyKey,
         mode: requestMode,
         syncStrategy: requestSyncStrategy,
+        ...requestSyncOptions,
       })
 
       await refreshBatch(batchId)
@@ -1897,24 +2054,108 @@ function ProductsImportPageContent() {
                 </div>
 
                 {isSyncMode ? (
-                  <div className="space-y-2">
-                    <Label>Sync Strategy</Label>
-                    <Select value={selectedSyncStrategy} onValueChange={(value) => setSelectedSyncStrategy(value as SyncStrategyValue)}>
-                      <SelectTrigger className="border-gray-300">
-                        <SelectValue placeholder="Select sync strategy" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {INVENTORY_SYNC_MODES.map((mode) => (
-                          <SelectItem key={mode.value} value={mode.value}>
-                            {mode.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-gray-500">
-                      {INVENTORY_SYNC_MODES.find((mode) => mode.value === selectedSyncStrategy)?.description}
-                    </p>
-                  </div>
+                  <Card className="border border-gray-300 bg-gray-50/60">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-base">Sync Options</CardTitle>
+                      <CardDescription>{DEFAULT_SYNC_HELPER_TEXT}</CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="space-y-2">
+                        <Label>Sync Strategy</Label>
+                        <Select value={selectedSyncStrategy} onValueChange={(value) => setSelectedSyncStrategy(value as SyncStrategyValue)}>
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select sync strategy" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {INVENTORY_SYNC_MODES.map((mode) => (
+                              <SelectItem key={mode.value} value={mode.value}>
+                                {mode.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">
+                          {INVENTORY_SYNC_MODES.find((mode) => mode.value === selectedSyncStrategy)?.description}
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Cost Price Method</Label>
+                        <Select value={selectedCostPriceMethod} onValueChange={(value) => setSelectedCostPriceMethod(value as CostPriceMethodValue)}>
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select cost price method" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {COST_PRICE_METHOD_OPTIONS.map((mode) => (
+                              <SelectItem key={mode.value} value={mode.value}>
+                                {mode.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">
+                          {COST_PRICE_METHOD_OPTIONS.find((mode) => mode.value === selectedCostPriceMethod)?.description}
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Stock Update Method</Label>
+                        <Select value={selectedStockUpdateMethod} onValueChange={(value) => setSelectedStockUpdateMethod(value as StockUpdateMethodValue)}>
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select stock update method" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {STOCK_UPDATE_METHOD_OPTIONS.map((mode) => (
+                              <SelectItem key={mode.value} value={mode.value}>
+                                {mode.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">
+                          {STOCK_UPDATE_METHOD_OPTIONS.find((mode) => mode.value === selectedStockUpdateMethod)?.description}
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Duplicate Products</Label>
+                        <Select value={selectedDuplicateProducts} onValueChange={(value) => setSelectedDuplicateProducts(value as DuplicateProductsValue)}>
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select duplicate rule" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {DUPLICATE_PRODUCTS_OPTIONS.map((mode) => (
+                              <SelectItem key={mode.value} value={mode.value}>
+                                {mode.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">
+                          {DUPLICATE_PRODUCTS_OPTIONS.find((mode) => mode.value === selectedDuplicateProducts)?.description}
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Missing Products</Label>
+                        <Select value={selectedMissingProducts} onValueChange={(value) => setSelectedMissingProducts(value as MissingProductsValue)}>
+                          <SelectTrigger className="border-gray-300">
+                            <SelectValue placeholder="Select missing product rule" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {MISSING_PRODUCTS_OPTIONS.map((mode) => (
+                              <SelectItem key={mode.value} value={mode.value}>
+                                {mode.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-gray-500">
+                          {MISSING_PRODUCTS_OPTIONS.find((mode) => mode.value === selectedMissingProducts)?.description}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ) : null}
 
                 <div className="space-y-2">
@@ -1931,6 +2172,17 @@ function ProductsImportPageContent() {
                 </div>
 
                 <div className="flex flex-wrap gap-3">
+                  {isSyncMode ? (
+                    <Button
+                      variant="outline"
+                      className="border-gray-300"
+                      onClick={handleDownloadTemplate}
+                      disabled={!selectedOutletId || loadingAction !== ""}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download Template
+                    </Button>
+                  ) : null}
                   <Button onClick={handlePreview} disabled={loadingAction !== "" || !file || !selectedOutletId}>
                     <Upload className="mr-2 h-4 w-4" />
                     {loadingAction === "preview" ? "Previewing..." : (isSyncMode ? "Preview Sync" : "Preview Import")}

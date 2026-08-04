@@ -568,6 +568,12 @@ export const productService = {
         idempotencyKey?: string,
         mode?: string,
         syncStrategy?: string,
+        syncOptions?: {
+          costPriceMethod?: string
+          stockUpdateMethod?: string
+          duplicateProducts?: string
+          missingProducts?: string
+        },
       ): Promise<{
         batch_id: string
         status: string
@@ -601,6 +607,10 @@ export const productService = {
         const previewSearch = new URLSearchParams()
         if (mode) previewSearch.set('mode', mode)
         if (syncStrategy) previewSearch.set('sync_strategy', syncStrategy)
+        if (syncOptions?.costPriceMethod) previewSearch.set('cost_price_method', syncOptions.costPriceMethod)
+        if (syncOptions?.stockUpdateMethod) previewSearch.set('stock_update_method', syncOptions.stockUpdateMethod)
+        if (syncOptions?.duplicateProducts) previewSearch.set('duplicate_products', syncOptions.duplicateProducts)
+        if (syncOptions?.missingProducts) previewSearch.set('missing_products', syncOptions.missingProducts)
         const previewUrl = `${API_BASE_URL}${apiEndpoints.imports.productsPreview}${previewSearch.toString() ? `?${previewSearch.toString()}` : ''}`
         const response = await fetch(previewUrl, {
           method: 'POST',
@@ -779,6 +789,10 @@ export const productService = {
         continueOnError?: boolean
         mode?: string
         syncStrategy?: string
+        costPriceMethod?: string
+        stockUpdateMethod?: string
+        duplicateProducts?: string
+        missingProducts?: string
       }): Promise<{
         batch_id: string
         status: string
@@ -798,6 +812,10 @@ export const productService = {
         const applySearch = new URLSearchParams()
         if (options?.mode) applySearch.set('mode', options.mode)
         if (options?.syncStrategy) applySearch.set('sync_strategy', options.syncStrategy)
+        if (options?.costPriceMethod) applySearch.set('cost_price_method', options.costPriceMethod)
+        if (options?.stockUpdateMethod) applySearch.set('stock_update_method', options.stockUpdateMethod)
+        if (options?.duplicateProducts) applySearch.set('duplicate_products', options.duplicateProducts)
+        if (options?.missingProducts) applySearch.set('missing_products', options.missingProducts)
         const applyUrl = `${API_BASE_URL}${apiEndpoints.imports.productsApply(batchId)}${applySearch.toString() ? `?${applySearch.toString()}` : ''}`
         const response = await fetch(applyUrl, {
           method: 'POST',
