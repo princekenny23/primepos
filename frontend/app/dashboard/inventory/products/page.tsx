@@ -106,6 +106,7 @@ export default function ProductsPage() {
   const [categories, setCategories] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isExportingLowStock, setIsExportingLowStock] = useState(false)
   const [showExport, setShowExport] = useState(false)
   const [showArchivedProducts, setShowArchivedProducts] = useState(false)
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null)
@@ -423,6 +424,89 @@ export default function ProductsPage() {
     )
   }
 
+  const exportLowStockProducts = useCallback(async () => {
+    if (!outlet?.id) {
+      toast({
+        title: "Outlet required",
+        description: "Select an outlet before exporting low-stock inventory.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsExportingLowStock(true)
+    try {
+      const lowStockProducts = await productService.getLowStock(String(outlet.id))
+
+      if (lowStockProducts.length === 0) {
+        toast({
+          title: "No low-stock products",
+          description: "There are no low-stock products to export for the selected outlet.",
+        })
+        return
+      }
+
+      const escapeCsv = (value: any) => {
+        const text = String(value ?? "")
+        return `"${text.replace(/"/g, '""')}"`
+      }
+
+      const headers = [
+        "Product Name",
+        "SKU",
+        "Barcode",
+        "Category",
+        "Stock",
+        "Low Stock Threshold",
+        "Status",
+        "Outlet",
+      ]
+
+      const rows = lowStockProducts.map((product) => {
+        const stock = getDisplayStock(product)
+        const categoryName = product.category?.name || product.category || ""
+        const outletName = product.outlet?.name || product.outlet_name || outlet?.name || ""
+        const status = stock === 0 ? "Out of Stock" : "Low Stock"
+
+        return [
+          product.name || "",
+          product.sku || "",
+          product.barcode || "",
+          categoryName,
+          stock,
+          product.lowStockThreshold ?? 0,
+          status,
+          outletName,
+        ].map(escapeCsv).join(",")
+      })
+
+      const csv = [headers.map(escapeCsv).join(","), ...rows].join("\r\n")
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `low-stock-inventory-${new Date().toISOString().split("T")[0]}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+
+      toast({
+        title: "Export ready",
+        description: `Downloaded ${lowStockProducts.length} low-stock products.`,
+      })
+    } catch (error: any) {
+      console.error("Failed to export low-stock inventory:", error)
+      toast({
+        title: "Export failed",
+        description: error?.message || "Unable to export low-stock products.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsExportingLowStock(false)
+    }
+  }, [outlet, toast])
+
   // Calculate stats for tabs
   const stats = useMemo(() => {
     const allCount = baseFilteredProducts.length
@@ -638,6 +722,10 @@ export default function ProductsPage() {
                       <SlidersHorizontal className="mr-2 h-4 w-4" />
                       Inventory Sync
                     </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportLowStockProducts} disabled={isLoading || isExportingLowStock}>
+                    <Download className="mr-2 h-4 w-4" />
+                    {isExportingLowStock ? "Exporting Low-Stock Inventory..." : "Export Low-Stock Inventory"}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => setShowExport(true)} disabled={products.length === 0}>
                     <Download className="mr-2 h-4 w-4" />
