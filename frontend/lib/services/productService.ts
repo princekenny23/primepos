@@ -476,9 +476,28 @@ export const productService = {
   },
 
   async getLowStock(outletId?: string): Promise<Product[]> {
-    const params = outletId ? `?outlet=${outletId}` : ""
-    const response = await api.get<any>(`${apiEndpoints.products.list}low_stock/${params}`)
-    const products = Array.isArray(response) ? response : (response.results || [])
+    const params = new URLSearchParams()
+    if (outletId) params.set("outlet", String(outletId))
+    // Use a larger page size, then continue following pagination links until done.
+    params.set("page_size", "200")
+
+    let endpoint = `${apiEndpoints.products.list}low_stock/${params.toString() ? `?${params.toString()}` : ""}`
+    const products: any[] = []
+    let guard = 0
+
+    while (endpoint && guard < 100) {
+      const response = await api.get<any>(endpoint)
+
+      if (Array.isArray(response)) {
+        products.push(...response)
+        break
+      }
+
+      products.push(...(response.results || []))
+      endpoint = response.next || ""
+      guard += 1
+    }
+
     return products.map(transformProduct)
   },
 
