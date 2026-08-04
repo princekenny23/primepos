@@ -260,7 +260,7 @@ class ProductSerializer(serializers.ModelSerializer):
         tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') else None)
         outlet = getattr(request, 'outlet', None) or (self.instance.outlet if self.instance else None)
         
-        existing = Product.objects.filter(sku=value, tenant=tenant)
+        existing = Product.objects.filter(sku=value, tenant=tenant, is_archived=False)
         if outlet:
             existing = existing.filter(outlet=outlet)
         
@@ -284,7 +284,7 @@ class ProductSerializer(serializers.ModelSerializer):
         tenant = getattr(request, 'tenant', None) or (request.user.tenant if hasattr(request, 'user') else None)
         outlet = getattr(request, 'outlet', None)
         
-        existing = Product.objects.filter(barcode__iexact=str(value).strip(), tenant=tenant)
+        existing = Product.objects.filter(barcode__iexact=str(value).strip(), tenant=tenant, is_archived=False)
         if outlet:
             existing = existing.filter(outlet=outlet)
         
