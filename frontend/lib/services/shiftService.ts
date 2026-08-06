@@ -41,6 +41,13 @@ export interface StartShiftData {
   notes?: string
 }
 
+export interface ShiftHistoryResponse {
+  results: Shift[]
+  count?: number
+  next?: string | null
+  previous?: string | null
+}
+
 // Transform backend response to frontend format
 function transformShift(backendShift: any): Shift {
   return {
@@ -162,18 +169,57 @@ export const shiftService = {
     }
   },
 
-  async getHistory(filters?: { outlet?: string; status?: string; operating_date?: string; start_date?: string; end_date?: string }): Promise<Shift[]> {
+  async getHistory(filters?: {
+    outlet?: string
+    status?: string
+    operating_date?: string
+    start_date?: string
+    end_date?: string
+    page?: number
+    page_size?: number
+    limit?: number
+  }): Promise<Shift[]> {
+    const response = await this.getHistoryPage(filters)
+    return response.results
+  },
+
+  async getHistoryPage(filters?: {
+    outlet?: string
+    status?: string
+    operating_date?: string
+    start_date?: string
+    end_date?: string
+    page?: number
+    page_size?: number
+    limit?: number
+  }): Promise<ShiftHistoryResponse> {
     const params = new URLSearchParams()
     if (filters?.outlet) params.append("outlet", String(filters.outlet))
     if (filters?.status) params.append("status", filters.status)
     if (filters?.operating_date) params.append("operating_date", filters.operating_date)
     if (filters?.start_date) params.append("start_date", filters.start_date)
     if (filters?.end_date) params.append("end_date", filters.end_date)
-    
+    if (filters?.page) params.append("page", String(filters.page))
+    if (filters?.page_size !== undefined || filters?.limit !== undefined) {
+      params.append("page_size", String(filters?.page_size ?? filters?.limit ?? 10))
+    }
+
     const query = params.toString()
-    const response = await api.get<{ results: any[] } | any[]>(`${apiEndpoints.shifts.history}${query ? `?${query}` : ""}`)
-    const shifts = Array.isArray(response) ? response : (response.results || [])
-    return shifts.map(transformShift)
+    const response = await api.get<ShiftHistoryResponse | any[]>(`${apiEndpoints.shifts.history}${query ? `?${query}` : ""}`)
+
+    if (Array.isArray(response)) {
+      return {
+        results: response.map(transformShift),
+        count: response.length,
+      }
+    }
+
+    return {
+      results: (response.results || []).map(transformShift),
+      count: response.count ?? (response.results?.length ?? 0),
+      next: response.next ?? null,
+      previous: response.previous ?? null,
+    }
   },
 
   async checkExists(outletId: string, tillId: string, date: string): Promise<boolean> {

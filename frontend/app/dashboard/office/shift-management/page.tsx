@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { PageLayout } from "@/components/layouts/page-layout"
@@ -45,6 +45,8 @@ import {
   X,
   Menu,
   Share2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { format } from "date-fns"
 import { useShift, Shift } from "@/contexts/shift-context"
@@ -105,14 +107,16 @@ export default function ShiftManagementPage() {
   const [shiftToClose, setShiftToClose] = useState<Shift | null>(null)
   const [shiftToView, setShiftToView] = useState<Shift | null>(null)
   const [isPrinting, setIsPrinting] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const PAGE_SIZE = 10
 
   const buildHistoryFilters = () => {
     const filters: any = {}
     if (dateRange.from) {
-      filters.operating_date_from = format(dateRange.from, "yyyy-MM-dd")
+      filters.start_date = format(dateRange.from, "yyyy-MM-dd")
     }
     if (dateRange.to) {
-      filters.operating_date_to = format(dateRange.to, "yyyy-MM-dd")
+      filters.end_date = format(dateRange.to, "yyyy-MM-dd")
     }
     return filters
   }
@@ -127,14 +131,16 @@ export default function ShiftManagementPage() {
       const effectiveOutletId = selectedOutlet || (currentOutlet?.id ? String(currentOutlet.id) : "")
 
       if (effectiveOutletId) {
-        history = await shiftService.getHistory({ ...baseFilters, outlet: effectiveOutletId })
+        const historyResponse = await shiftService.getHistoryPage({ ...baseFilters, outlet: effectiveOutletId, page_size: 1000 })
+        history = historyResponse.results
       } else if (outlets.length > 0) {
         const results = await Promise.all(
-          outlets.map((outlet) => shiftService.getHistory({ ...baseFilters, outlet: outlet.id }))
+          outlets.map((outlet) => shiftService.getHistoryPage({ ...baseFilters, outlet: outlet.id, page_size: 1000 }))
         )
-        history = results.flat()
+        history = results.flatMap((result) => result.results)
       } else {
-        history = await shiftService.getHistory(baseFilters)
+        const historyResponse = await shiftService.getHistoryPage({ ...baseFilters, page_size: 1000 })
+        history = historyResponse.results
       }
 
       const uniqueHistory = new Map<string, Shift>()
@@ -217,6 +223,10 @@ export default function ShiftManagementPage() {
   }, [currentBusiness, selectedOutlet, outlets, currentOutlet?.id])
 
   useEffect(() => {
+    setCurrentPage(1)
+  }, [selectedOutlet, dateRange.from, dateRange.to, shifts.length, activeShifts.length])
+
+  useEffect(() => {
     // Only initialize/repair selection. Do not override manual dropdown changes.
     if (selectedOutlet && outlets.some((outlet) => String(outlet.id) === selectedOutlet)) {
       return
@@ -239,17 +249,31 @@ export default function ShiftManagementPage() {
   }
 
   // Filter shifts for history tab - combine active and history shifts
-  const filteredShifts = [...shifts, ...activeShifts].filter(shift => {
-    if (dateRange.from && shift.operatingDate) {
-      const shiftDate = new Date(shift.operatingDate)
-      if (shiftDate < dateRange.from) return false
+  const filteredShifts = useMemo(() => {
+    return [...shifts, ...activeShifts].filter((shift) => {
+      if (dateRange.from && shift.operatingDate) {
+        const shiftDate = new Date(shift.operatingDate)
+        if (shiftDate < dateRange.from) return false
+      }
+      if (dateRange.to && shift.operatingDate) {
+        const shiftDate = new Date(shift.operatingDate)
+        if (shiftDate > dateRange.to) return false
+      }
+      return true
+    })
+  }, [activeShifts, dateRange.from, dateRange.to, shifts])
+
+  const totalPages = Math.max(1, Math.ceil(filteredShifts.length / PAGE_SIZE))
+  const paginatedShifts = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE
+    return filteredShifts.slice(startIndex, startIndex + PAGE_SIZE)
+  }, [currentPage, filteredShifts])
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
     }
-    if (dateRange.to && shift.operatingDate) {
-      const shiftDate = new Date(shift.operatingDate)
-      if (shiftDate > dateRange.to) return false
-    }
-    return true
-  })
+  }, [currentPage, totalPages])
 
   const calculateSales = (shift: Shift): number => {
     if (shift.status !== "CLOSED" || !shift.closingCashBalance) return 0
@@ -529,11 +553,36 @@ export default function ShiftManagementPage() {
 
             {/* Shifts Table */}
             <div>
-              <div className="mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Shift Records</h3>
-                <p className="text-sm text-gray-600">
-                  {filteredShifts.length} shift{filteredShifts.length !== 1 ? "s" : ""} found
-                </p>
+              <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Shift Records</h3>
+                  <p className="text-sm text-gray-600">
+                    {filteredShifts.length} shift{filteredShifts.length !== 1 ? "s" : ""} found
+                  </p>
+                </div>
+                {filteredShifts.length > PAGE_SIZE && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                      disabled={currentPage === 1}
+                    >
+                      <ChevronLeft className="mr-1 h-4 w-4" /> Previous
+                    </Button>
+                    <span className="text-sm font-medium text-gray-700">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                      disabled={currentPage === totalPages}
+                    >
+                      Next <ChevronRight className="ml-1 h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className="rounded-md border border-gray-300 bg-white">
                 <Table>
@@ -565,7 +614,7 @@ export default function ShiftManagementPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredShifts.map((shift) => {
+                      paginatedShifts.map((shift) => {
                         const sales = calculateSales(shift)
                         const difference = calculateDifference(shift)
                         const duration = calculateDuration(shift)
