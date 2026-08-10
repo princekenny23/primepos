@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PrimePOS Print Agent</string>
+    <string name="app_description">Mobile print agent for PrimePOS system</string>
+    
+    <!-- Service notifications -->
+    <string name="notification_service_title">PrimePOS Print Agent</string>
+    <string name="notification_service_message">Listening for print jobs…</string>
+    <string name="notification_job_title">Print Job</string>
+    <string name="notification_job_sent">Print job sent to printer</string>
+    <string name="notification_job_failed">Print job failed</string>
+    
+    <!-- Pairing UI -->
+    <string name="pairing_title">Setup Print Agent</string>
+    <string name="pairing_backend_url">Backend URL</string>
+    <string name="pairing_backend_url_hint">https://api.primepos.com</string>
+    <string name="pairing_outlet_id">Outlet ID</string>
+    <string name="pairing_outlet_id_hint">Enter your outlet ID</string>
+    <string name="pairing_printer_selection">Select Printer</string>
+    <string name="pairing_no_printers">No printers detected</string>
+    <string name="pairing_request_code">Request Pairing Code</string>
+    <string name="pairing_code_label">Pairing Code</string>
+    <string name="pairing_code_instructions">Enter this code in the PrimePOS system to complete pairing</string>
+    <string name="pairing_complete">Pairing Complete</string>
+    <string name="pairing_error">Pairing Error</string>
+    <string name="pairing_invalid_input">Please fill in all required fields</string>
+    
+    <!-- Button labels -->
+    <string name="btn_next">Next</string>
+    <string name="btn_back">Back</string>
+    <string name="btn_done">Done</string>
+    <string name="btn_dismiss">Dismiss</string>
+    <string name="btn_retry">Retry</string>
+    <string name="btn_request_code">Request Code</string>
+    <string name="btn_test_print">Test Print</string>
+    
+    <!-- Error messages -->
+    <string name="error_no_printers">No printers detected on this device</string>
+    <string name="error_network">Network error. Check your connection.</string>
+    <string name="error_pairing_failed">Pairing failed. Please try again.</string>
+    <string name="error_print_failed">Failed to send print job to printer</string>
+    <string name="error_invalid_config">Invalid configuration. Please check settings.</string>
+</resources>

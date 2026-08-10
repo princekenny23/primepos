@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- USB device filter for printer detection -->
+    <usb-device vendor-id="0x04b8" product-id="0x0101" />  <!-- EPSON TM-T20 -->
+    <usb-device vendor-id="0x04b8" product-id="0x0102" />  <!-- EPSON TM-T88 -->
+    <usb-device vendor-id="0x0483" product-id="0x0110" />  <!-- STM thermal printer -->
+    <usb-device vendor-id="0x0a81" product-id="0x0101" />  <!-- Zebra LP2844 -->
+    <usb-device vendor-id="0x0a81" product-id="0x0050" />  <!-- Zebra GK420d -->
+    
+    <!-- Generic printer class: 7 -->
+    <usb-device class="7" subclass="1" protocol="1" />
+    <usb-device class="7" subclass="1" protocol="2" />
+    <usb-device class="7" subclass="1" protocol="3" />
+</resources>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Typography -->
+    <attr name="headlineLarge" format="reference" />
+    <attr name="headlineMedium" format="reference" />
+    <attr name="headlineSmall" format="reference" />
+    <attr name="titleLarge" format="reference" />
+    <attr name="titleMedium" format="reference" />
+    <attr name="titleSmall" format="reference" />
+    <attr name="bodyLarge" format="reference" />
+    <attr name="bodyMedium" format="reference" />
+    <attr name="bodySmall" format="reference" />
+    <attr name="labelLarge" format="reference" />
+    <attr name="labelMedium" format="reference" />
+    <attr name="labelSmall" format="reference" />
+    
+    <!-- Material 3 Light Theme -->
+    <style name="Theme.PrimePOSPrintingAgent" parent="android:Theme.Material">
+        <!-- Primary colors -->
+        <item name="android:colorPrimary">@color/light_primary</item>
+        <item name="android:colorAccent">@color/light_secondary</item>
+        <item name="android:colorBackground">@color/light_background</item>
+        
+        <!-- Status bar -->
+        <item name="android:statusBarColor">@color/light_primary</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+    
+    <!-- Material 3 Dark Theme -->
+    <style name="Theme.PrimePOSPrintingAgent.Dark" parent="android:Theme.Material">
+        <!-- Primary colors -->
+        <item name="android:colorPrimary">@color/dark_primary</item>
+        <item name="android:colorAccent">@color/dark_secondary</item>
+        <item name="android:colorBackground">@color/dark_background</item>
+        
+        <!-- Status bar -->
+        <item name="android:statusBarColor">@color/dark_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

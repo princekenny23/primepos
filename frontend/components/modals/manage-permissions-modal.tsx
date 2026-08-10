@@ -391,9 +391,97 @@ export function ManagePermissionsModal({
     setIsSaving(true)
     try {
       await adminService.updateTenantPermissions(tenant.id, permissions)
+
+      // Keep outlet-level module flags in sync when storefront is enabled at tenant level.
+      // Route guards require both tenant and outlet storefront flags to be true.
+      let syncedOutlets = 0
+      if (permissions.allow_storefront) {
+        const outletsToSync = new Map<string, EditableOutlet>()
+
+        // Always include the selected outlet so the current workspace context reflects immediately.
+        if (selectedOutlet) {
+          outletsToSync.set(selectedOutlet.id, selectedOutlet)
+        }
+
+        outlets
+          .filter((outlet) => outlet.modulePermissions.allow_storefront !== true)
+          .forEach((outlet) => outletsToSync.set(outlet.id, outlet))
+
+        const outletsNeedingSync = Array.from(outletsToSync.values())
+
+        if (outletsNeedingSync.length > 0) {
+          const syncResults = await Promise.allSettled(
+            outletsNeedingSync.map(async (outlet) => {
+              const currentOutletSettings = (outlet.settings || {}) as Record<string, any>
+              const nextModulePermissions = {
+                ...outlet.modulePermissions,
+                allow_storefront: true,
+              }
+
+              const updated = await outletService.update(outlet.id, {
+                name: outlet.name,
+                settings: {
+                  ...currentOutletSettings,
+                  module_permissions: nextModulePermissions,
+                },
+                distributionActive: outlet.distributionActive,
+              })
+
+              return {
+                outletId: outlet.id,
+                settings: (updated as any)?.settings || outlet.settings,
+                distributionActive:
+                  (updated as any)?.distributionActive !== undefined
+                    ? Boolean((updated as any).distributionActive)
+                    : outlet.distributionActive,
+                modulePermissions: nextModulePermissions,
+              }
+            })
+          )
+
+          const successfulSyncs = syncResults
+            .filter((result): result is PromiseFulfilledResult<{ outletId: string; settings: Record<string, any>; distributionActive: boolean; modulePermissions: OutletPermissions }> => result.status === "fulfilled")
+            .map((result) => result.value)
+
+          syncedOutlets = successfulSyncs.length
+
+          if (successfulSyncs.length > 0) {
+            setOutlets((prev) =>
+              prev.map((item) => {
+                const synced = successfulSyncs.find((entry) => entry.outletId === item.id)
+                if (!synced) return item
+
+                return {
+                  ...item,
+                  settings: synced.settings,
+                  distributionActive: synced.distributionActive,
+                  modulePermissions: synced.modulePermissions,
+                }
+              })
+            )
+
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("outlets-updated"))
+            }
+          }
+
+          const failedSyncs = syncResults.length - successfulSyncs.length
+          if (failedSyncs > 0) {
+            toast({
+              title: "Partial Sync",
+              description: `${failedSyncs} outlet(s) failed to sync storefront access. Open Outlets tab and save affected outlets manually.`,
+              variant: "destructive",
+            })
+          }
+        }
+      }
+
       toast({
         title: "Success",
-        description: "Permissions updated successfully",
+        description:
+          syncedOutlets > 0
+            ? `Permissions updated successfully. Storefront enabled for ${syncedOutlets} outlet(s).`
+            : "Permissions updated successfully",
       })
       onOpenChange(false)
     } catch (error: any) {
