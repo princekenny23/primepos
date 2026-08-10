@@ -58,3 +58,6 @@ yarn-error.log*
 primeposconnector/bin/
 primeposconnector/obj/
 
+# Template media assets (keep local, do not version)
+nextjs-ecommerce-template-main/nextjs-ecommerce-template-main/public/images/
+
