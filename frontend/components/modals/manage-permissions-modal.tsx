@@ -392,87 +392,118 @@ export function ManagePermissionsModal({
     try {
       await adminService.updateTenantPermissions(tenant.id, permissions)
 
-      // Keep outlet-level module flags in sync when storefront is enabled at tenant level.
-      // Route guards require both tenant and outlet storefront flags to be true.
+      // Keep outlet-level module flags in sync with tenant storefront state.
+      // Route guards require both tenant and outlet storefront flags to match expected access.
       let syncedOutlets = 0
-      if (permissions.allow_storefront) {
-        const outletsToSync = new Map<string, EditableOutlet>()
+      const nextStorefrontState = permissions.allow_storefront === true
+      const outletsToSync = new Map<string, EditableOutlet>()
 
-        // Always include the selected outlet so the current workspace context reflects immediately.
-        if (selectedOutlet) {
-          outletsToSync.set(selectedOutlet.id, selectedOutlet)
-        }
+      // Always include the selected outlet so the current workspace context reflects immediately.
+      if (selectedOutlet) {
+        outletsToSync.set(selectedOutlet.id, selectedOutlet)
+      }
 
-        outlets
-          .filter((outlet) => outlet.modulePermissions.allow_storefront !== true)
-          .forEach((outlet) => outletsToSync.set(outlet.id, outlet))
+      outlets
+        .filter((outlet) => outlet.modulePermissions.allow_storefront !== nextStorefrontState)
+        .forEach((outlet) => outletsToSync.set(outlet.id, outlet))
 
-        const outletsNeedingSync = Array.from(outletsToSync.values())
+      const outletsNeedingSync = Array.from(outletsToSync.values())
 
-        if (outletsNeedingSync.length > 0) {
-          const syncResults = await Promise.allSettled(
-            outletsNeedingSync.map(async (outlet) => {
-              const currentOutletSettings = (outlet.settings || {}) as Record<string, any>
-              const nextModulePermissions = {
-                ...outlet.modulePermissions,
-                allow_storefront: true,
-              }
+      if (outletsNeedingSync.length > 0) {
+        const syncResults = await Promise.allSettled(
+          outletsNeedingSync.map(async (outlet) => {
+            const currentOutletSettings = (outlet.settings || {}) as Record<string, any>
+            const nextModulePermissions = {
+              ...outlet.modulePermissions,
+              allow_storefront: nextStorefrontState,
+            }
 
-              const updated = await outletService.update(outlet.id, {
-                name: outlet.name,
-                settings: {
-                  ...currentOutletSettings,
-                  module_permissions: nextModulePermissions,
-                },
-                distributionActive: outlet.distributionActive,
-              })
+            const updated = await outletService.update(outlet.id, {
+              name: outlet.name,
+              settings: {
+                ...currentOutletSettings,
+                module_permissions: nextModulePermissions,
+              },
+              distributionActive: outlet.distributionActive,
+            })
+
+            return {
+              outletId: outlet.id,
+              outletName: outlet.name,
+              settings: (updated as any)?.settings || outlet.settings,
+              distributionActive:
+                (updated as any)?.distributionActive !== undefined
+                  ? Boolean((updated as any).distributionActive)
+                  : outlet.distributionActive,
+              modulePermissions: nextModulePermissions,
+            }
+          })
+        )
+
+        const successfulSyncs = syncResults
+          .filter((result): result is PromiseFulfilledResult<{ outletId: string; outletName: string; settings: Record<string, any>; distributionActive: boolean; modulePermissions: OutletPermissions }> => result.status === "fulfilled")
+          .map((result) => result.value)
+
+        syncedOutlets = successfulSyncs.length
+
+        if (successfulSyncs.length > 0) {
+          setOutlets((prev) =>
+            prev.map((item) => {
+              const synced = successfulSyncs.find((entry) => entry.outletId === item.id)
+              if (!synced) return item
 
               return {
-                outletId: outlet.id,
-                settings: (updated as any)?.settings || outlet.settings,
-                distributionActive:
-                  (updated as any)?.distributionActive !== undefined
-                    ? Boolean((updated as any).distributionActive)
-                    : outlet.distributionActive,
-                modulePermissions: nextModulePermissions,
+                ...item,
+                settings: synced.settings,
+                distributionActive: synced.distributionActive,
+                modulePermissions: synced.modulePermissions,
               }
             })
           )
 
-          const successfulSyncs = syncResults
-            .filter((result): result is PromiseFulfilledResult<{ outletId: string; settings: Record<string, any>; distributionActive: boolean; modulePermissions: OutletPermissions }> => result.status === "fulfilled")
-            .map((result) => result.value)
+          if (typeof window !== "undefined") {
+            const currentOutletId = window.localStorage.getItem("currentOutletId")
+            const currentSyncedOutlet = currentOutletId
+              ? successfulSyncs.find((entry) => String(entry.outletId) === String(currentOutletId))
+              : null
 
-          syncedOutlets = successfulSyncs.length
+            if (currentSyncedOutlet) {
+              try {
+                const rawBusinessState = window.localStorage.getItem("primepos-business")
+                if (rawBusinessState) {
+                  const parsed = JSON.parse(rawBusinessState)
+                  if (parsed?.state?.currentOutlet && String(parsed.state.currentOutlet.id) === String(currentSyncedOutlet.outletId)) {
+                    parsed.state.currentOutlet.settings = currentSyncedOutlet.settings || parsed.state.currentOutlet.settings || {}
+                    parsed.state.currentOutlet.distributionActive = currentSyncedOutlet.distributionActive
+                    window.localStorage.setItem("primepos-business", JSON.stringify(parsed))
 
-          if (successfulSyncs.length > 0) {
-            setOutlets((prev) =>
-              prev.map((item) => {
-                const synced = successfulSyncs.find((entry) => entry.outletId === item.id)
-                if (!synced) return item
-
-                return {
-                  ...item,
-                  settings: synced.settings,
-                  distributionActive: synced.distributionActive,
-                  modulePermissions: synced.modulePermissions,
+                    window.dispatchEvent(
+                      new CustomEvent("outlet-changed", {
+                        detail: {
+                          outletId: String(currentSyncedOutlet.outletId),
+                          outletName: currentSyncedOutlet.outletName,
+                          outlet: parsed.state.currentOutlet,
+                        },
+                      })
+                    )
+                  }
                 }
-              })
-            )
-
-            if (typeof window !== "undefined") {
-              window.dispatchEvent(new CustomEvent("outlets-updated"))
+              } catch {
+                // Non-fatal: outlets-updated event below still triggers context refresh.
+              }
             }
-          }
 
-          const failedSyncs = syncResults.length - successfulSyncs.length
-          if (failedSyncs > 0) {
-            toast({
-              title: "Partial Sync",
-              description: `${failedSyncs} outlet(s) failed to sync storefront access. Open Outlets tab and save affected outlets manually.`,
-              variant: "destructive",
-            })
+            window.dispatchEvent(new CustomEvent("outlets-updated"))
           }
+        }
+
+        const failedSyncs = syncResults.length - successfulSyncs.length
+        if (failedSyncs > 0) {
+          toast({
+            title: "Partial Sync",
+            description: `${failedSyncs} outlet(s) failed to sync storefront access. Open Outlets tab and save affected outlets manually.`,
+            variant: "destructive",
+          })
         }
       }
 
@@ -480,7 +511,7 @@ export function ManagePermissionsModal({
         title: "Success",
         description:
           syncedOutlets > 0
-            ? `Permissions updated successfully. Storefront enabled for ${syncedOutlets} outlet(s).`
+            ? `Permissions updated successfully. Storefront ${nextStorefrontState ? "enabled" : "disabled"} for ${syncedOutlets} outlet(s).`
             : "Permissions updated successfully",
       })
       onOpenChange(false)
