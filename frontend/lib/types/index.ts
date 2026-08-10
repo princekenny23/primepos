@@ -20,11 +20,13 @@ export interface Business {
 }
 
 export interface BusinessSettings {
-  posMode: "standard" | "restaurant" | "bar"
-  receiptTemplate: string
-  taxEnabled: boolean
-  taxRate: number
+  posMode?: "standard" | "restaurant" | "bar"
+  receiptTemplate?: string
+  taxEnabled?: boolean
+  taxRate?: number
   printerSettings?: any
+  module_permissions?: Record<string, boolean>
+  modulePermissions?: Record<string, boolean>
   timezone?: string
   taxId?: string
   language?: string
