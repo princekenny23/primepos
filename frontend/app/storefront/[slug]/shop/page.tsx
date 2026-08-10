@@ -1,13 +1,18 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
-import { Trash2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { ShoppingCart, Trash2 } from "lucide-react"
 import { storefrontService, type StorefrontProduct } from "@/lib/services/storefrontService"
 import {
   buildWhatsAppUrl,
   DEFAULT_THEME,
+  getStorefrontContactHref,
+  getStorefrontHeroSurfaceStyle,
   hexToRgba,
+  normalizeStorefrontPageVisibility,
+  normalizeStorefrontHeroStyle,
   SectionHeading,
   StorefrontHeader,
   StorefrontImage,
@@ -20,6 +25,7 @@ type StorefrontConfig = {
   currency: string
   whatsapp_number?: string
   theme_settings?: Record<string, string>
+  checkout_settings?: Record<string, any>
   seo_settings?: {
     shop_header_title?: string
     shop_header_subtitle?: string
@@ -27,21 +33,45 @@ type StorefrontConfig = {
     hero_subtitle?: string
     contact_phone?: string
     whatsapp_cta?: string
+    shop_hero_style?: string
+    footer_about?: string
+    facebook_url?: string
+    instagram_url?: string
+    x_url?: string
+    linkedin_url?: string
+    youtube_url?: string
+    template_key?: string
   }
 }
 
 export default function StorefrontShopPage({ params }: { params: { slug: string } }) {
   const slug = params.slug
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const cartStorageKey = `storefront_cart_${slug}`
   const [isLoading, setIsLoading] = useState(true)
   const [config, setConfig] = useState<StorefrontConfig | null>(null)
   const [products, setProducts] = useState<StorefrontProduct[]>([])
+
+  const normalizeProductsPayload = (value: unknown): StorefrontProduct[] => {
+    if (Array.isArray(value)) return value as StorefrontProduct[]
+    if (value && typeof value === "object") {
+      const maybeResults = (value as { results?: unknown }).results
+      if (Array.isArray(maybeResults)) {
+        return maybeResults as StorefrontProduct[]
+      }
+    }
+    return []
+  }
   const [categories, setCategories] = useState<Array<{ id: number; name: string }>>([])
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [search, setSearch] = useState("")
+  const [currentPage, setCurrentPage] = useState(1)
   const [error, setError] = useState<string>("")
   const [cartQtyByProductId, setCartQtyByProductId] = useState<Record<number, number>>({})
   const [showCheckoutModal, setShowCheckoutModal] = useState(false)
+  const [showCartModal, setShowCartModal] = useState(false)
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false)
   const [checkoutError, setCheckoutError] = useState("")
   const [customerName, setCustomerName] = useState("")
@@ -58,7 +88,12 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
     [config]
   )
 
-  const loadData = async () => {
+  const pageVisibility = useMemo(
+    () => normalizeStorefrontPageVisibility(config?.seo_settings as Record<string, any> | undefined),
+    [config]
+  )
+
+  const loadData = useCallback(async () => {
     setIsLoading(true)
     setError("")
     try {
@@ -69,17 +104,37 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
       ])
       setConfig(cfg)
       setCategories(cats)
-      setProducts(prods)
+      setProducts(normalizeProductsPayload(prods))
     } catch (err: any) {
       setError(err?.message || "Failed to load storefront")
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [slug])
 
   useEffect(() => {
-    loadData()
-  }, [slug])
+    void loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    const handleCatalogRefresh = () => {
+      void loadData()
+    }
+
+    const handleStorageRefresh = (event: StorageEvent) => {
+      if (event.key === "primepos-storefront-refresh") {
+        handleCatalogRefresh()
+      }
+    }
+
+    window.addEventListener("storefront:catalog-refresh", handleCatalogRefresh as EventListener)
+    window.addEventListener("storage", handleStorageRefresh)
+
+    return () => {
+      window.removeEventListener("storefront:catalog-refresh", handleCatalogRefresh as EventListener)
+      window.removeEventListener("storage", handleStorageRefresh)
+    }
+  }, [loadData])
 
   useEffect(() => {
     if (typeof window === "undefined") return
@@ -106,6 +161,33 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
     window.localStorage.setItem(cartStorageKey, JSON.stringify(cartQtyByProductId))
   }, [cartQtyByProductId, cartStorageKey])
 
+  useEffect(() => {
+    const queryCategory = searchParams.get("category_id") || "all"
+    const querySearch = searchParams.get("search") || ""
+    setSelectedCategory(queryCategory !== "all" ? queryCategory : "all")
+    setSearch(querySearch)
+    setCurrentPage(1)
+  }, [searchParams])
+
+  const syncFiltersToUrl = useCallback((nextCategory: string, nextSearch: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+
+    if (nextCategory !== "all") {
+      params.set("category_id", nextCategory)
+    } else {
+      params.delete("category_id")
+    }
+
+    if (nextSearch.trim()) {
+      params.set("search", nextSearch.trim())
+    } else {
+      params.delete("search")
+    }
+
+    const queryString = params.toString()
+    router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false })
+  }, [pathname, router, searchParams])
+
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
       const matchCategory =
@@ -118,6 +200,23 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
       return matchCategory && matchSearch
     })
   }, [products, selectedCategory, search])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [selectedCategory, search])
+
+  const pageSize = 12
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize))
+  const visibleProducts = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredProducts.slice(start, start + pageSize)
+  }, [filteredProducts, currentPage])
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
 
   const cartItems = useMemo(() => {
     return products
@@ -135,6 +234,14 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
 
   const cartTotal = useMemo(() => cartItems.reduce((sum, item) => sum + item.lineTotal, 0), [cartItems])
   const cartCount = useMemo(() => cartItems.reduce((sum, item) => sum + item.quantity, 0), [cartItems])
+  const deliveryFeeEnabled = config?.checkout_settings?.delivery_fee_enabled !== false
+  const deliveryFeeAmount = useMemo(() => {
+    if (!deliveryFeeEnabled) return 0
+    const parsed = Number(config?.checkout_settings?.delivery_fee || 0)
+    return Number.isFinite(parsed) ? parsed : 0
+  }, [config?.checkout_settings?.delivery_fee, deliveryFeeEnabled])
+  const orderTotal = useMemo(() => cartTotal + deliveryFeeAmount, [cartTotal, deliveryFeeAmount])
+  const deliveryFeeLabel = config?.checkout_settings?.delivery_fee_label || "Delivery"
 
   const addToCart = (productId: number) => {
     setCartQtyByProductId((prev) => ({
@@ -171,10 +278,6 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
     }
 
     const storeWhatsApp = config?.whatsapp_number || ""
-    if (!storeWhatsApp) {
-      setCheckoutError("This store has not configured a WhatsApp number yet.")
-      return
-    }
 
     setCheckoutError("")
 
@@ -202,18 +305,22 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
         (item) =>
           `• ${item.product.name} x${item.quantity} = ${config?.currency || ""} ${item.lineTotal.toFixed(2)}`
       ),
+      deliveryFeeEnabled && deliveryFeeAmount > 0
+        ? `• ${deliveryFeeLabel}: ${config?.currency || ""} ${deliveryFeeAmount.toFixed(2)}`
+        : "",
       "",
-      `*Total: ${config?.currency || ""} ${cartTotal.toFixed(2)}*`,
+      `*Total: ${config?.currency || ""} ${orderTotal.toFixed(2)}*`,
     ]
       .filter(Boolean)
       .join("\n")
 
-    const fallbackWaUrl = buildWhatsAppUrl(storeWhatsApp, messageLines)
+    const fallbackWaUrl = storeWhatsApp ? buildWhatsAppUrl(storeWhatsApp, messageLines) : ""
 
     setIsSubmittingOrder(true)
     try {
       const response = await storefrontService.createOrder(slug, checkoutPayload)
       const waUrl = response?.whatsapp_url || fallbackWaUrl
+      const orderRef = response?.public_order_ref ? String(response.public_order_ref) : ""
 
       setCartQtyByProductId({})
       setShowCheckoutModal(false)
@@ -222,12 +329,32 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
       setCustomerAddress("")
       setDeliveryInstructions("")
 
-      window.open(waUrl, "_blank", "noopener,noreferrer")
+      if (waUrl) {
+        window.open(waUrl, "_blank", "noopener,noreferrer")
+      } else if (orderRef && typeof window !== "undefined") {
+        window.location.assign(`/storefront/${slug}/orders/${encodeURIComponent(orderRef)}`)
+      } else if (typeof window !== "undefined") {
+        window.location.assign(getStorefrontContactHref(slug))
+      }
     } catch (err: any) {
       setCheckoutError(err?.message || "Failed to create order. Please try again.")
     } finally {
       setIsSubmittingOrder(false)
     }
+  }
+
+  if (!pageVisibility.shop) {
+    return (
+      <StorefrontShell theme={theme}>
+        <StorefrontHeader slug={slug} storeName={config?.name || slug} theme={theme} active="shop" pageVisibility={pageVisibility} />
+        <div className="mx-auto max-w-3xl px-4 py-20">
+          <div className="rounded-[2rem] border border-slate-200/80 bg-white/90 p-8 shadow-sm backdrop-blur">
+            <h1 className="mb-2 text-2xl font-bold">Shop page is currently disabled</h1>
+            <p className="text-sm leading-7 opacity-80">This storefront has disabled the shopping page. Please use the available pages from the navigation.</p>
+          </div>
+        </div>
+      </StorefrontShell>
+    )
   }
 
   const heroTitle =
@@ -239,7 +366,6 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
     config?.seo_settings?.shop_header_subtitle?.trim() ||
     config?.seo_settings?.hero_subtitle?.trim() ||
     "Browse products and place your WhatsApp order directly for fast processing."
-  const contactPhone = config?.seo_settings?.contact_phone?.trim() || ""
   const whatsappCtaText = config?.seo_settings?.whatsapp_cta?.trim() || "WhatsApp Checkout"
 
   if (isLoading) {
@@ -269,147 +395,168 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
 
   const inputCardStyle = {
     borderColor: theme.border,
-    backgroundColor: hexToRgba(theme.card, 0.94),
-    color: theme.foreground,
+    backgroundColor: "#ffffff",
+    color: "#1C274C",
   }
 
   const surfaceStyle = {
-    borderColor: theme.border,
-    backgroundColor: hexToRgba(theme.card, 0.94),
+    borderColor: "#E5E7EB",
+    backgroundColor: "#ffffff",
   }
 
+  const templateKey = config?.seo_settings?.template_key || "nextcommerce_v1"
+  const footerAbout = config?.seo_settings?.footer_about?.trim() || config?.seo_settings?.shop_header_subtitle?.trim() || ""
+  const socialLinks = {
+    facebook: config?.seo_settings?.facebook_url,
+    instagram: config?.seo_settings?.instagram_url,
+    x: config?.seo_settings?.x_url,
+    linkedin: config?.seo_settings?.linkedin_url,
+    youtube: config?.seo_settings?.youtube_url,
+  }
+  const shopHeroStyle = normalizeStorefrontHeroStyle(config?.seo_settings?.shop_hero_style)
+  const isShopHeroLight = shopHeroStyle === "glass"
+
   return (
-    <StorefrontShell theme={theme}>
-      <StorefrontHeader slug={slug} storeName={config.name} theme={theme} active="shop" />
+    <StorefrontShell theme={theme} templateKey={templateKey} storeName={config.name} footerSlug={slug} footerAbout={footerAbout} socialLinks={socialLinks}>
+      <StorefrontHeader slug={slug} storeName={config.name} theme={theme} active="shop" pageVisibility={pageVisibility} />
 
-      <section className="mx-auto max-w-6xl px-4 py-10 sm:py-14 lg:py-16">
+      <section className="mx-auto w-full max-w-[1170px] px-4 pb-8 pt-8 sm:px-8 xl:px-0">
         <div
-          className="overflow-hidden rounded-[2rem] border p-6 shadow-sm sm:p-8 lg:p-10"
-          style={{
-            borderColor: theme.border,
-            background: `linear-gradient(135deg, ${hexToRgba(theme.primary, 0.98)} 0%, ${hexToRgba(theme.ring, 0.9)} 100%)`,
-            color: theme.primary_foreground,
-            boxShadow: `0 24px 64px ${hexToRgba(theme.primary, 0.22)}`,
-          }}
+          className="overflow-hidden rounded-[10px] border border-gray-3 p-7.5 shadow-1 sm:p-10"
+          style={getStorefrontHeroSurfaceStyle(theme, shopHeroStyle)}
         >
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,1.1fr)_minmax(260px,0.9fr)] lg:items-end">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.28em] opacity-80">Curated catalog</p>
-              <h1 className="mt-4 text-4xl font-black leading-tight tracking-tight sm:text-5xl">{heroTitle}</h1>
-              <p className="mt-5 max-w-2xl text-sm leading-7 opacity-90 sm:text-base">{heroSubtitle}</p>
-              {contactPhone ? <p className="mt-6 text-sm font-medium opacity-85">Contact: {contactPhone}</p> : null}
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-              <div className="rounded-[1.5rem] border p-5 backdrop-blur" style={{ borderColor: hexToRgba(theme.primary_foreground, 0.18), backgroundColor: hexToRgba(theme.primary_foreground, 0.12) }}>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] opacity-75">Products</p>
-                <p className="mt-3 text-3xl font-bold">{products.length}</p>
-                <p className="mt-2 text-sm opacity-80">Items available in the public catalog.</p>
-              </div>
-              <div className="rounded-[1.5rem] border p-5 backdrop-blur" style={{ borderColor: hexToRgba(theme.primary_foreground, 0.18), backgroundColor: hexToRgba(theme.primary_foreground, 0.1) }}>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] opacity-75">Categories</p>
-                <p className="mt-3 text-3xl font-bold">{categories.length}</p>
-                <p className="mt-2 text-sm opacity-80">Refine the catalog with faster browsing tools.</p>
-              </div>
-              <div className="rounded-[1.5rem] border p-5 backdrop-blur" style={{ borderColor: hexToRgba(theme.primary_foreground, 0.18), backgroundColor: hexToRgba(theme.primary_foreground, 0.08) }}>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] opacity-75">Cart total</p>
-                <p className="mt-3 text-2xl font-bold">{config.currency} {cartTotal.toFixed(2)}</p>
-                <p className="mt-2 text-sm opacity-80">{cartCount} item{cartCount === 1 ? "" : "s"} ready for WhatsApp checkout.</p>
-              </div>
+          <div className="max-w-3xl">
+            <p className={`text-custom-sm font-medium uppercase tracking-[0.2em] ${isShopHeroLight ? "text-dark/70" : "text-white/80"}`}>Curated catalog</p>
+            <h1 className={`mt-3 text-custom-4xl font-bold leading-tight sm:text-[44px] ${isShopHeroLight ? "text-dark" : "text-white"}`}>{heroTitle}</h1>
+            <p className={`mt-4 max-w-2xl text-custom-sm ${isShopHeroLight ? "text-body" : "text-white/90"}`}>{heroSubtitle}</p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              {config.whatsapp_number ? (
+                <a
+                  href={buildWhatsAppUrl(config.whatsapp_number, `Hi ${config.name}, I want to place an order.`)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`rounded-[6px] px-5 py-3 text-custom-sm font-semibold transition ${isShopHeroLight ? "border border-gray-3 text-dark hover:border-blue hover:text-blue" : "border border-white/40 text-white hover:bg-white/10"}`}
+                >
+                  {whatsappCtaText}
+                </a>
+              ) : null}
             </div>
           </div>
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4 pb-16">
-        <div className="rounded-[2rem] border p-4 shadow-sm sm:p-5" style={surfaceStyle}>
-          <div className="grid gap-3 lg:grid-cols-[1fr_220px_auto] lg:items-end">
-            <div>
-              <label htmlFor="storefront-search" className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] opacity-55">
-                Search products
-              </label>
-              <input
-                id="storefront-search"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by product name or description"
-                aria-label="Search products"
-                className="h-12 w-full rounded-xl border px-4 text-sm outline-none transition-all duration-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
-                style={inputCardStyle}
-              />
+      <section className="mx-auto w-full max-w-[1170px] px-4 pb-16 sm:px-8 xl:px-0">
+        <div className="rounded-[10px] border p-4 shadow-1 sm:p-5" style={surfaceStyle}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div className="grid flex-1 gap-3 md:grid-cols-[1fr_220px] lg:grid-cols-[1fr_220px]">
+              <div>
+                <label htmlFor="storefront-search" className="mb-2 block text-custom-xs font-semibold uppercase tracking-[0.16em] text-body">
+                  Search products
+                </label>
+                <input
+                  id="storefront-search"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value)
+                    syncFiltersToUrl(selectedCategory, e.target.value)
+                  }}
+                  placeholder="Search by product name or description"
+                  aria-label="Search products"
+                  className="h-12 w-full rounded-[8px] border px-4 text-custom-sm outline-none transition-all duration-200 focus:border-blue"
+                  style={inputCardStyle}
+                />
+              </div>
+              <div>
+                <label htmlFor="storefront-category" className="mb-2 block text-custom-xs font-semibold uppercase tracking-[0.16em] text-body">
+                  Category
+                </label>
+                <select
+                  id="storefront-category"
+                  value={selectedCategory}
+                  onChange={(e) => {
+                    setSelectedCategory(e.target.value)
+                    syncFiltersToUrl(e.target.value, search)
+                  }}
+                  aria-label="Filter by category"
+                  className="h-12 w-full rounded-[8px] border px-4 text-custom-sm outline-none transition-all duration-200 focus:border-blue"
+                  style={inputCardStyle}
+                >
+                  <option value="all">All categories</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={String(category.id)}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div>
-              <label htmlFor="storefront-category" className="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] opacity-55">
-                Category
-              </label>
-              <select
-                id="storefront-category"
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                aria-label="Filter by category"
-                className="h-12 w-full rounded-xl border px-4 text-sm outline-none transition-all duration-200 focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
-                style={inputCardStyle}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCartModal(true)}
+                className="h-12 rounded-[8px] border border-gray-3 bg-white px-4 py-3 text-custom-sm font-semibold text-dark transition hover:border-blue hover:text-blue"
               >
-                <option value="all">All categories</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={String(category.id)}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
+                Cart ({cartCount})
+              </button>
+              <Link href={getStorefrontContactHref(slug)} className="h-12 rounded-[8px] border border-gray-3 px-5 py-3 text-custom-sm font-semibold text-dark transition hover:border-blue hover:text-blue">
+                Need help?
+              </Link>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowCheckoutModal(true)}
-              disabled={cartItems.length === 0}
-              className="h-12 rounded-xl px-5 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-              style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}
-            >
-              {whatsappCtaText}
-            </button>
           </div>
         </div>
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px] xl:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="mt-8">
           <div>
             <SectionHeading
               eyebrow="Catalog"
-              title="Shop with clearer cards and faster scanning"
+                  title="Shop curated products"
               description={`Showing ${filteredProducts.length} product${filteredProducts.length === 1 ? "" : "s"} with a stronger price hierarchy, consistent image framing, and quicker add-to-cart actions.`}
             />
 
             {filteredProducts.length === 0 ? (
-              <div className="rounded-[2rem] border p-10 text-center shadow-sm" style={surfaceStyle}>
-                <p className="text-lg font-semibold">No products found.</p>
-                <p className="mt-2 text-sm opacity-70">Adjust your search or switch the category filter to see more items.</p>
+              <div className="rounded-[10px] border p-10 text-center shadow-1" style={surfaceStyle}>
+                <p className="text-custom-lg font-semibold text-dark">No products found.</p>
+                <p className="mt-2 text-custom-sm text-body">Adjust your search or switch the category filter to see more items.</p>
+                <button
+                  type="button"
+                  className="mt-5 rounded-[6px] bg-blue px-4 py-2 text-custom-sm font-semibold text-white transition hover:bg-blue-dark"
+                  onClick={() => {
+                    setSearch("")
+                    setSelectedCategory("all")
+                    setCurrentPage(1)
+                    syncFiltersToUrl("all", "")
+                  }}
+                >
+                  Clear filters
+                </button>
               </div>
             ) : (
-              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {filteredProducts.map((product) => (
+              <>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 3xl:grid-cols-5">
+                  {visibleProducts.map((product) => (
                   <article
                     key={product.id}
-                    className="group flex h-full flex-col rounded-[1.75rem] border p-4 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-xl"
+                    className="group flex h-full flex-col rounded-[10px] border p-3 shadow-1 transition duration-200 hover:-translate-y-1 hover:shadow-2"
                     style={surfaceStyle}
                   >
-                    <StorefrontImage src={product.image_url} alt={product.name} theme={theme} className="aspect-[4/3] w-full" />
+                    <StorefrontImage src={product.image_url} alt={product.name} theme={theme} className="aspect-square w-full" />
 
-                    <div className="mt-4 flex flex-1 flex-col">
+                    <div className="mt-3 flex flex-1 flex-col">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] opacity-50">{product.category_name || "Product"}</p>
-                          <h2 className="mt-2 text-lg font-semibold leading-tight">{product.name}</h2>
+                          <p className="text-custom-xs font-semibold uppercase tracking-[0.14em] text-body">{product.category_name || "Product"}</p>
+                          <h2 className="mt-1.5 text-base font-semibold leading-tight text-dark">{product.name}</h2>
                         </div>
                         <div className="flex flex-col items-end gap-2">
                           {product.is_new_stock ? (
-                            <span className="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em]" style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}>
+                            <span className="rounded-full bg-blue px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white">
                               New
                             </span>
                           ) : null}
                           <span
-                            className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                            className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-dark"
                             style={{
-                              backgroundColor: product.stock > 0 ? hexToRgba(theme.secondary, 0.95) : hexToRgba(theme.foreground, 0.08),
-                              color: theme.foreground,
+                              backgroundColor: product.stock > 0 ? "#F3F5F6" : "#EEF0F3",
                             }}
                           >
                             {product.stock > 0 ? `${product.stock} ${product.unit}` : "Out of stock"}
@@ -417,26 +564,24 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
                         </div>
                       </div>
 
-                      <p className="mt-3 line-clamp-3 text-sm leading-6 opacity-75">{product.description || "No description"}</p>
+                      <p className="mt-3 line-clamp-3 text-custom-xs leading-6 text-body">{product.description || "No description"}</p>
 
-                      <div className="mt-5 flex items-end justify-between gap-3">
+                      <div className="mt-4 flex items-end justify-between gap-3">
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] opacity-45">Price</p>
-                          <p className="mt-1 text-2xl font-bold tracking-tight">{config.currency} {product.display_price}</p>
+                          <p className="text-custom-xs font-semibold uppercase tracking-[0.14em] text-body">Price</p>
+                          <p className="mt-1 text-base font-semibold text-dark">{config.currency} {product.display_price}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
                             onClick={() => setViewProduct(product)}
-                            className="rounded-xl border px-4 py-2 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
-                            style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.74), color: theme.foreground }}
+                            className="rounded-[6px] border border-gray-3 px-3 py-2 text-custom-xs font-semibold text-dark transition hover:border-blue hover:text-blue"
                           >
                             View
                           </button>
                           <button
                             type="button"
-                            className="rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-                            style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}
+                            className="rounded-[6px] bg-blue px-3 py-2 text-custom-xs font-semibold text-white transition hover:bg-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
                             disabled={product.stock <= 0}
                             onClick={() => addToCart(product.id)}
                           >
@@ -446,64 +591,157 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
                       </div>
                     </div>
                   </article>
-                ))}
-              </div>
+                  ))}
+                </div>
+
+                {totalPages > 1 ? (
+                  <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-gray-3 bg-white p-4 shadow-1">
+                    <p className="text-custom-sm text-body">
+                      Showing {Math.min((currentPage - 1) * pageSize + 1, filteredProducts.length)}-{Math.min(currentPage * pageSize, filteredProducts.length)} of {filteredProducts.length} products
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-[6px] border border-gray-3 px-3 py-2 text-custom-sm font-semibold text-dark transition hover:border-blue hover:text-blue disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        Previous
+                      </button>
+                      <span className="text-custom-sm font-semibold text-dark">Page {currentPage} of {totalPages}</span>
+                      <button
+                        type="button"
+                        className="rounded-[6px] border border-gray-3 px-3 py-2 text-custom-sm font-semibold text-dark transition hover:border-blue hover:text-blue disabled:cursor-not-allowed disabled:opacity-50"
+                        onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                        disabled={currentPage === totalPages}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </>
             )}
           </div>
 
-          <aside className="hidden lg:block">
-            <div className="sticky top-24 rounded-[2rem] border p-5 shadow-sm" style={surfaceStyle}>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] opacity-55">Cart summary</p>
-              <div className="mt-4 flex items-end justify-between gap-3">
+        </div>
+      </section>
+
+      {showCartModal ? (
+        <div className="fixed inset-0 z-40 overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-sm">
+          <div className="flex min-h-full items-center justify-center py-6">
+            <div className="w-full max-w-3xl rounded-[2rem] border shadow-2xl" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.card, 0.98) }}>
+              <div className="flex items-center justify-between border-b p-6" style={{ borderColor: theme.border }}>
                 <div>
-                  <p className="text-3xl font-bold tracking-tight">{config.currency} {cartTotal.toFixed(2)}</p>
-                  <p className="mt-1 text-sm opacity-70">{cartCount} item{cartCount === 1 ? "" : "s"} selected</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] opacity-55">Cart summary</p>
+                  <h3 className="mt-2 text-2xl font-bold tracking-tight">Your selected items</h3>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowCheckoutModal(true)}
-                  disabled={cartItems.length === 0}
-                  className="rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}
+                  className="rounded-xl border px-4 py-2 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
+                  style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.72), color: theme.foreground }}
+                  onClick={() => setShowCartModal(false)}
                 >
-                  Checkout
+                  Close
                 </button>
               </div>
 
-              <div className="mt-5 space-y-3">
+              <div className="p-6">
                 {cartItems.length === 0 ? (
-                  <div className="rounded-[1.5rem] border p-4 text-sm opacity-70" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.7) }}>
-                    Add products to your cart to preview the WhatsApp order summary here.
+                  <div className="rounded-[1.5rem] border p-8 text-center text-sm opacity-70" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.7) }}>
+                    Your cart is empty. Add a few products to start your WhatsApp order.
                   </div>
                 ) : (
-                  cartItems.map((item) => (
-                    <div key={item.product.id} className="rounded-[1.25rem] border p-4" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.7) }}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold leading-6">{item.product.name}</p>
-                          <p className="text-xs opacity-60">Qty {item.quantity}</p>
+                  <div className="space-y-3">
+                    {cartItems.map((item) => (
+                      <div key={item.product.id} className="rounded-[1.25rem] border p-4" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.card, 0.92) }}>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="flex-1">
+                            <p className="text-sm font-semibold leading-6">{item.product.name}</p>
+                            <p className="text-xs opacity-60">{config.currency} {item.product.display_price} each</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="flex h-9 w-9 items-center justify-center rounded-xl border text-base font-semibold"
+                              style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.75) }}
+                              onClick={() => updateCartQty(item.product.id, item.quantity - 1)}
+                            >
+                              -
+                            </button>
+                            <span className="min-w-6 text-center text-sm font-semibold">{item.quantity}</span>
+                            <button
+                              type="button"
+                              className="flex h-9 w-9 items-center justify-center rounded-xl border text-base font-semibold"
+                              style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.75) }}
+                              onClick={() => updateCartQty(item.product.id, item.quantity + 1)}
+                            >
+                              +
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${item.product.name} from cart`}
+                              onClick={() => updateCartQty(item.product.id, 0)}
+                              className="flex h-9 w-9 items-center justify-center rounded-xl border transition-all duration-200 hover:-translate-y-0.5"
+                              style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.75), color: theme.foreground }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-semibold">{config.currency} {item.lineTotal.toFixed(2)}</p>
-                          <button
-                            type="button"
-                            aria-label={`Remove ${item.product.name} from cart`}
-                            onClick={() => updateCartQty(item.product.id, 0)}
-                            className="flex h-8 w-8 items-center justify-center rounded-lg border transition-all duration-200 hover:-translate-y-0.5"
-                            style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.75), color: theme.foreground }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
+                        <div className="mt-3 flex items-center justify-between text-sm">
+                          <span className="opacity-70">Line total</span>
+                          <span className="font-semibold">{config.currency} {item.lineTotal.toFixed(2)}</span>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                  </div>
                 )}
+
+                <div className="mt-5 rounded-[1.25rem] border p-4 text-sm" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.7) }}>
+                  <div className="flex items-center justify-between">
+                    <span>Subtotal</span>
+                    <span className="font-semibold">{config.currency} {cartTotal.toFixed(2)}</span>
+                  </div>
+                  {deliveryFeeEnabled && deliveryFeeAmount > 0 ? (
+                    <div className="mt-2 flex items-center justify-between">
+                      <span>{deliveryFeeLabel}</span>
+                      <span className="font-semibold">{config.currency} {deliveryFeeAmount.toFixed(2)}</span>
+                    </div>
+                  ) : null}
+                  <div className="mt-3 flex items-center justify-between border-t pt-3 text-base font-bold" style={{ borderColor: theme.border }}>
+                    <span>Total</span>
+                    <span>{config.currency} {orderTotal.toFixed(2)}</span>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCartModal(false)
+                      setShowCheckoutModal(true)
+                    }}
+                    disabled={cartItems.length === 0 || isSubmittingOrder}
+                    className="rounded-xl px-5 py-3 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                    style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}
+                  >
+                    Continue to checkout
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCartModal(false)}
+                    className="rounded-xl border px-5 py-3 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
+                    style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.72), color: theme.foreground }}
+                  >
+                    Keep browsing
+                  </button>
+                </div>
               </div>
             </div>
-          </aside>
+          </div>
         </div>
-      </section>
+      ) : null}
 
       {showCheckoutModal ? (
         <div className="fixed inset-0 z-40 overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-sm">
@@ -570,21 +808,6 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
                     </div>
                   </div>
 
-                  <div className="rounded-[1.75rem] border p-5" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.65) }}>
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] opacity-55">Why this is better</p>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      {[
-                        "Clear customer detail capture",
-                        "Visible order review before sending",
-                        "Single CTA into WhatsApp checkout",
-                      ].map((item) => (
-                        <div key={item} className="rounded-[1.25rem] border p-4 text-sm font-medium" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.card, 0.92) }}>
-                          {item}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
                   {checkoutError ? <p className="text-sm font-medium text-red-600">{checkoutError}</p> : null}
                 </div>
 
@@ -639,6 +862,23 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
                         </div>
                       </div>
                     ))}
+                  </div>
+
+                  <div className="mt-4 rounded-[1.25rem] border p-4 text-sm" style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.7) }}>
+                    <div className="flex items-center justify-between">
+                      <span>Subtotal</span>
+                      <span className="font-semibold">{config.currency} {cartTotal.toFixed(2)}</span>
+                    </div>
+                    {deliveryFeeEnabled && deliveryFeeAmount > 0 ? (
+                      <div className="mt-2 flex items-center justify-between">
+                        <span>{deliveryFeeLabel}</span>
+                        <span className="font-semibold">{config.currency} {deliveryFeeAmount.toFixed(2)}</span>
+                      </div>
+                    ) : null}
+                    <div className="mt-3 flex items-center justify-between border-t pt-3 text-base font-bold" style={{ borderColor: theme.border }}>
+                      <span>Total</span>
+                      <span>{config.currency} {orderTotal.toFixed(2)}</span>
+                    </div>
                   </div>
 
                   <button
@@ -716,10 +956,13 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
                     </Link>
                     <button
                       type="button"
-                      className="rounded-xl border px-5 py-3 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-xl border px-5 py-3 text-sm font-semibold transition-all duration-200 hover:-translate-y-0.5"
                       style={{ borderColor: theme.border, backgroundColor: hexToRgba(theme.background, 0.72), color: theme.foreground }}
                       onClick={() => {
-                        if (!config?.whatsapp_number) return
+                        if (!config?.whatsapp_number) {
+                          window.location.assign(getStorefrontContactHref(slug))
+                          return
+                        }
                         const message = [
                           `Hi, I want to ask about this product from ${config?.name || slug}:`,
                           `Product: ${viewProduct.name}`,
@@ -730,9 +973,8 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
                           .join("\n")
                         window.open(buildWhatsAppUrl(config.whatsapp_number, message), "_blank", "noopener,noreferrer")
                       }}
-                      disabled={!config?.whatsapp_number}
                     >
-                      Chat on WhatsApp
+                      {config?.whatsapp_number ? "Chat on WhatsApp" : "Contact store"}
                     </button>
                   </div>
                 </div>
@@ -742,24 +984,16 @@ export default function StorefrontShopPage({ params }: { params: { slug: string 
         </div>
       ) : null}
 
-      {cartItems.length > 0 && !showCheckoutModal ? (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t p-3 lg:hidden" style={{ backgroundColor: hexToRgba(theme.card, 0.97), borderColor: theme.border, boxShadow: `0 -16px 40px ${hexToRgba(theme.foreground, 0.08)}` }}>
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] opacity-50">Cart</p>
-              <p className="mt-1 text-sm font-semibold">{cartCount} item{cartCount === 1 ? "" : "s"} • {config.currency} {cartTotal.toFixed(2)}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowCheckoutModal(true)}
-              className="rounded-xl px-5 py-3 text-sm font-semibold transition-all duration-200"
-              style={{ backgroundColor: theme.primary, color: theme.primary_foreground }}
-            >
-              {whatsappCtaText}
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <button
+        type="button"
+        onClick={() => setShowCartModal(true)}
+        className="fixed bottom-4 right-4 z-30 inline-flex items-center gap-2 rounded-full bg-blue px-4 py-3 text-custom-sm font-semibold text-white shadow-2 transition hover:bg-blue-dark sm:bottom-6 sm:right-6"
+        aria-label="Open cart"
+      >
+        <ShoppingCart className="h-4 w-4" />
+        Cart ({cartCount})
+      </button>
+
     </StorefrontShell>
   )
 }

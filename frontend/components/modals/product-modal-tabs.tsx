@@ -51,6 +51,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
   const { outlets } = useTenant()
   const { t } = useI18n()
   const [isLoading, setIsLoading] = useState(false)
+  const [isProductLoading, setIsProductLoading] = useState(false)
   const [categories, setCategories] = useState<Category[]>([])
   const [activeTab, setActiveTab] = useState<string>(initialTab)
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null)
@@ -147,102 +148,156 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
   useEffect(() => {
     if (!open) return
 
-    if (product) {
-      // Edit mode - populate from existing product
-      setBasicForm({
-        name: product.name || "",
-        sku: product.sku || "",
-        categoryId: product.categoryId || "",
-        categoryName: product.category?.name || product.categoryName || "",
-        barcode: product.barcode || "",
-        description: product.description || "",
-        isActive: product.isActive !== undefined ? product.isActive : true,
-        image: product.image || "",
-      })
-      setSelectedImageFile(null)
+    const loadProductDetails = async () => {
+      if (product?.id) {
+        setIsProductLoading(true)
+        try {
+          const latestProduct = await productService.get(String(product.id))
+          setBasicForm({
+            name: latestProduct.name || "",
+            sku: latestProduct.sku || "",
+            categoryId: latestProduct.categoryId || "",
+            categoryName: latestProduct.category?.name || "",
+            barcode: latestProduct.barcode || "",
+            description: latestProduct.description || "",
+            isActive: latestProduct.isActive !== undefined ? latestProduct.isActive : true,
+            image: latestProduct.image || "",
+          })
+          setSelectedImageFile(null)
 
-      setUnits(product.units || product.selling_units || [])
+          setUnits((latestProduct as any).units || latestProduct.selling_units || [])
 
-      setPricingForm({
-        cost: product.cost || product.cost_price || "",
-        retail_price: product.retail_price || product.price || "",
-        wholesale_price: product.wholesale_price || "",
-        wholesale_enabled: product.wholesale_enabled || false,
-        minimum_wholesale_quantity: String(product.minimum_wholesale_quantity || 1),
-        apply_to: "all",
-      })
+          setPricingForm({
+            cost: latestProduct.cost != null ? String(latestProduct.cost) : (latestProduct.cost_price != null ? String(latestProduct.cost_price) : ""),
+            retail_price: latestProduct.retail_price != null ? String(latestProduct.retail_price) : (latestProduct.price != null ? String(latestProduct.price) : ""),
+            wholesale_price: latestProduct.wholesale_price != null ? String(latestProduct.wholesale_price) : "",
+            wholesale_enabled: latestProduct.wholesale_enabled || false,
+            minimum_wholesale_quantity: String(latestProduct.minimum_wholesale_quantity || 1),
+            apply_to: "all",
+          })
 
-      setStockForm({
-        track_inventory: true,
-        low_stock_threshold: String(product.lowStockThreshold || 0),
-        outletId: product.outlet?.id || product.outlet_id || "",
-        opening_stock: String(Number(product.sellable_stock ?? product.stock ?? 0)),
-      })
-      setStockTouched(false)
+          setStockForm({
+            track_inventory: true,
+            low_stock_threshold: String(latestProduct.lowStockThreshold || 0),
+            outletId: latestProduct.outlet?.id || latestProduct.outlet_id || "",
+            opening_stock: String(Number(latestProduct.sellable_stock ?? latestProduct.stock ?? 0)),
+          })
+          setStockTouched(false)
 
-      setExpiryForm({
-        track_expiration: product.track_expiration || false,
-        manufacturing_date: product.manufacturing_date || "",
-        expiry_date: product.expiry_date || "",
-      })
+          setExpiryForm({
+            track_expiration: latestProduct.track_expiration || false,
+            manufacturing_date: latestProduct.manufacturing_date || "",
+            expiry_date: latestProduct.expiry_date || "",
+          })
 
-      setRestaurantForm({
-        preparation_time: String(product.preparation_time || ""),
-      })
+          setRestaurantForm({
+            preparation_time: String(latestProduct.preparation_time || ""),
+          })
 
-      setBarForm({
-        volume_ml: String(product.volume_ml || ""),
-        alcohol_percentage: String(product.alcohol_percentage || ""),
-      })
+          setBarForm({
+            volume_ml: String(latestProduct.volume_ml || ""),
+            alcohol_percentage: String(latestProduct.alcohol_percentage || ""),
+          })
+        } catch (error) {
+          console.error("Failed to load product details for editing", error)
+          toast({
+            title: "Warning",
+            description: "Loaded the product locally, but some details may be missing.",
+            variant: "destructive",
+          })
 
-      setActiveTab("basic")
-    } else {
-      // Create mode - reset all forms
-      setBasicForm({
-        name: initialBarcode ? "" : "",
-        sku: "",
-        categoryId: "",
-        categoryName: "",
-        barcode: initialBarcode || "",
-        description: "",
-        isActive: true,
-        image: "",
-      })
-      setSelectedImageFile(null)
-      setUnits([])
-      setPricingForm({
-        cost: "",
-        retail_price: "",
-        wholesale_price: "",
-        wholesale_enabled: false,
-        minimum_wholesale_quantity: "1",
-        apply_to: "all",
-      })
-      setStockForm({
-        track_inventory: true,
-        low_stock_threshold: "0",
-        outletId: "",
-        opening_stock: "0",
-      })
-      setStockTouched(false)
-      setExpiryForm({
-        track_expiration: false,
-        manufacturing_date: "",
-        expiry_date: "",
-      })
-      setRestaurantForm({
-        preparation_time: "",
-      })
-      setBarForm({
-        volume_ml: "",
-        alcohol_percentage: "",
-      })
-      setActiveTab("basic")
+          setBasicForm({
+            name: product.name || "",
+            sku: product.sku || "",
+            categoryId: product.categoryId || "",
+            categoryName: product.category?.name || "",
+            barcode: product.barcode || "",
+            description: product.description || "",
+            isActive: product.isActive !== undefined ? product.isActive : true,
+            image: product.image || "",
+          })
+          setSelectedImageFile(null)
+          setUnits((product as any).units || product.selling_units || [])
+          setPricingForm({
+            cost: product.cost != null ? String(product.cost) : (product.cost_price != null ? String(product.cost_price) : ""),
+            retail_price: product.retail_price != null ? String(product.retail_price) : (product.price != null ? String(product.price) : ""),
+            wholesale_price: product.wholesale_price != null ? String(product.wholesale_price) : "",
+            wholesale_enabled: product.wholesale_enabled || false,
+            minimum_wholesale_quantity: String(product.minimum_wholesale_quantity || 1),
+            apply_to: "all",
+          })
+          setStockForm({
+            track_inventory: true,
+            low_stock_threshold: String(product.lowStockThreshold || 0),
+            outletId: product.outlet?.id || product.outlet_id || "",
+            opening_stock: String(Number(product.sellable_stock ?? product.stock ?? 0)),
+          })
+          setStockTouched(false)
+          setExpiryForm({
+            track_expiration: product.track_expiration || false,
+            manufacturing_date: product.manufacturing_date || "",
+            expiry_date: product.expiry_date || "",
+          })
+          setRestaurantForm({
+            preparation_time: String(product.preparation_time || ""),
+          })
+          setBarForm({
+            volume_ml: String(product.volume_ml || ""),
+            alcohol_percentage: String(product.alcohol_percentage || ""),
+          })
+        } finally {
+          setIsProductLoading(false)
+        }
+      } else {
+        // Create mode - reset all forms
+        setBasicForm({
+          name: initialBarcode ? "" : "",
+          sku: "",
+          categoryId: "",
+          categoryName: "",
+          barcode: initialBarcode || "",
+          description: "",
+          isActive: true,
+          image: "",
+        })
+        setSelectedImageFile(null)
+        setUnits([])
+        setPricingForm({
+          cost: "",
+          retail_price: "",
+          wholesale_price: "",
+          wholesale_enabled: false,
+          minimum_wholesale_quantity: "1",
+          apply_to: "all",
+        })
+        setStockForm({
+          track_inventory: true,
+          low_stock_threshold: "0",
+          outletId: "",
+          opening_stock: "0",
+        })
+        setStockTouched(false)
+        setExpiryForm({
+          track_expiration: false,
+          manufacturing_date: "",
+          expiry_date: "",
+        })
+        setRestaurantForm({
+          preparation_time: "",
+        })
+        setBarForm({
+          volume_ml: "",
+          alcohol_percentage: "",
+        })
+      }
+
+      setActiveTab(initialTab)
+      setUnitForm({ name: "", conversion_factor: "1", retail_price: "", wholesale_price: "" })
+      setEditingUnitIdx(null)
     }
 
-    setUnitForm({ name: "", conversion_factor: "1", retail_price: "", wholesale_price: "" })
-    setEditingUnitIdx(null)
-  }, [open, product, initialBarcode])
+    void loadProductDetails()
+  }, [open, product?.id, initialBarcode, initialTab, toast])
 
   useEffect(() => {
     if (!selectedImageFile) {
@@ -471,6 +526,11 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         description: product ? "Product updated successfully" : "Product created successfully",
       })
 
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("primepos-storefront-refresh", `${Date.now()}`)
+        window.dispatchEvent(new Event("storefront:catalog-refresh"))
+      }
+
       onOpenChange(false)
       onProductSaved?.()
     } catch (error: any) {
@@ -496,6 +556,11 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {isProductLoading ? (
+            <div className="flex items-center justify-center rounded border border-dashed border-gray-300 bg-gray-50 py-6 text-sm text-gray-600">
+              Loading product details...
+            </div>
+          ) : null}
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value)} className="w-full">
             <TabsList className={`grid w-full ${isRestaurant || isBar ? 'grid-cols-6' : 'grid-cols-5'}`}>
               <TabsTrigger value="basic">Basic</TabsTrigger>

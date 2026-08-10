@@ -10,6 +10,9 @@ const config = {
 	],
   prefix: "",
   theme: {
+    fontFamily: {
+      "euclid-circular-a": ["Euclid Circular A", "sans-serif"],
+    },
     container: {
       center: true,
       padding: "2rem",
@@ -18,7 +21,25 @@ const config = {
       },
     },
     extend: {
+      screens: {
+        "3xl": "1440px",
+      },
       colors: {
+        body: "#6C6F93",
+        dark: {
+          DEFAULT: "#1C274C",
+          2: "#495270",
+          3: "#606882",
+          4: "#8D93A5",
+          5: "#BBBEC9",
+        },
+        blue: {
+          DEFAULT: "#3C50E0",
+          dark: "#1C3FB7",
+          light: "#5475E5",
+          "light-4": "#C3CEF6",
+          "light-5": "#E1E8FF",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -71,6 +92,25 @@ const config = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      fontSize: {
+        "custom-xs": ["12px", "20px"],
+        "custom-lg": ["18px", "24px"],
+        "custom-xl": ["20px", "24px"],
+        "custom-2xl": ["24px", "34px"],
+        "custom-4xl": ["36px", "48px"],
+        "custom-sm": ["14px", "22px"],
+      },
+      spacing: {
+        7.5: "1.875rem",
+      },
+      zIndex: {
+        1: "1",
+        9999: "9999",
+      },
+      boxShadow: {
+        1: "0px 1px 2px 0px rgba(166, 175, 195, 0.25)",
+        2: "0px 6px 24px 0px rgba(235, 238, 251, 0.4), 0px 2px 4px 0px rgba(148, 163, 184, 0.05)",
       },
       keyframes: {
         "accordion-down": {

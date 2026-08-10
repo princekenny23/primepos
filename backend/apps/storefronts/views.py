@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.core.paginator import Paginator
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
@@ -166,19 +167,24 @@ class StorefrontProductsView(APIView, StorefrontResolverMixin):
             new_stock_days = 30
         new_stock_days = max(1, min(new_stock_days, 365))
 
-        limit_raw = request.query_params.get('limit')
-        limit = None
-        if limit_raw:
-            try:
-                limit = max(1, min(int(limit_raw), 100))
-            except (TypeError, ValueError):
-                limit = None
-
         qs = apply_catalog_rules(storefront, qs)
-        if limit is not None:
-            qs = qs[:limit]
 
-        product_ids = list(qs.values_list('id', flat=True))
+        page_size = request.query_params.get('page_size')
+        page_number = request.query_params.get('page') or request.query_params.get('page_number') or 1
+        try:
+            page_size_value = int(page_size) if page_size else 50
+        except (TypeError, ValueError):
+            page_size_value = 50
+        page_size_value = max(1, min(page_size_value, 100))
+        try:
+            page_number_value = int(page_number)
+        except (TypeError, ValueError):
+            page_number_value = 1
+        page_number_value = max(1, page_number_value)
+
+        paginator = Paginator(qs, page_size_value)
+        page_obj = paginator.get_page(page_number_value)
+        product_ids = list(page_obj.object_list.values_list('id', flat=True))
         cutoff = timezone.now() - timedelta(days=new_stock_days)
         recent_restock_product_ids = set(
             StockMovement.objects.filter(
@@ -193,7 +199,7 @@ class StorefrontProductsView(APIView, StorefrontResolverMixin):
         )
 
         serializer = PublicProductSerializer(
-            qs,
+            page_obj.object_list,
             many=True,
             context={
                 'request': request,
@@ -201,7 +207,12 @@ class StorefrontProductsView(APIView, StorefrontResolverMixin):
                 'recent_restock_product_ids': recent_restock_product_ids,
             }
         )
-        return Response(serializer.data)
+        return Response({
+            'count': paginator.count,
+            'next': page_obj.next_page_number() if page_obj.has_next() else None,
+            'previous': page_obj.previous_page_number() if page_obj.has_previous() else None,
+            'results': serializer.data,
+        })
 
 
 class StorefrontProductDetailView(APIView, StorefrontResolverMixin):

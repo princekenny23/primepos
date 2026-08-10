@@ -149,7 +149,7 @@ export const storefrontService = {
     )
   },
 
-  getProducts(slug: string, params?: {
+  async getProducts(slug: string, params?: {
     search?: string
     category_id?: number | string
     sort?: "newest" | "name"
@@ -162,10 +162,35 @@ export const storefrontService = {
     if (params?.category_id !== undefined) query.set("category_id", String(params.category_id))
     if (params?.sort) query.set("sort", params.sort)
     if (params?.in_stock !== undefined) query.set("in_stock", params.in_stock ? "true" : "false")
-    if (params?.limit !== undefined) query.set("limit", String(params.limit))
     if (params?.new_stock_days !== undefined) query.set("new_stock_days", String(params.new_stock_days))
+
+    const requestedLimit = params?.limit ?? 200
+    query.set("page_size", String(Math.max(1, Math.min(requestedLimit, 100))))
+
     const suffix = query.toString() ? `?${query.toString()}` : ""
-    return request<StorefrontProduct[]>(`/storefronts/${encodeURIComponent(slug)}/products/${suffix}`)
+    const firstPage = await request<{ count: number; next: number | null; previous: number | null; results: StorefrontProduct[] }>(
+      `/storefronts/${encodeURIComponent(slug)}/products/${suffix}`
+    )
+
+    const results = [...(firstPage.results || [])]
+    let nextPage = firstPage.next
+    let page = 2
+
+    while (typeof nextPage === "number" && page <= 10) {
+      const pageSuffix = `${suffix}${suffix ? "&" : "?"}page=${page}`
+      const pageResponse = await request<{ results: StorefrontProduct[]; next: number | null }>(
+        `/storefronts/${encodeURIComponent(slug)}/products/${pageSuffix}`
+      )
+      results.push(...(pageResponse.results || []))
+      nextPage = pageResponse.next
+      page += 1
+    }
+
+    if (params?.limit !== undefined) {
+      return results.slice(0, params.limit)
+    }
+
+    return results
   },
 
   getProduct(slug: string, productId: number) {

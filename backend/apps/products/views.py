@@ -291,23 +291,17 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 # Return empty queryset for security
                 return queryset.none()
         
-        # Apply outlet filter - Products are outlet-specific
-        # SaaS admins can see all products, regular users need outlet filter
-        if not is_saas_admin:
-            outlet = self.get_outlet_for_request(self.request)
-            if outlet:
-                queryset = queryset.filter(outlet=outlet)
-                logger.info(f"Applied outlet filter: {outlet.id} ({outlet.name})")
-            else:
-                # If no outlet specified, return empty queryset (products require outlet)
-                logger.warning(f"No outlet specified in request - returning empty queryset")
-                return queryset.none()
+        # Apply outlet filter when present. If the request does not include an
+        # outlet context, fall back to the tenant-scoped queryset so product
+        # detail lookups still work for the authenticated tenant.
+        outlet = self.get_outlet_for_request(self.request)
+        if outlet:
+            queryset = queryset.filter(outlet=outlet)
+            logger.info(f"Applied outlet filter: {outlet.id} ({outlet.name})")
+        elif not is_saas_admin:
+            logger.info("No outlet specified in request - using tenant-scoped queryset fallback")
         else:
-            # SaaS admin can optionally filter by outlet if provided
-            outlet = self.get_outlet_for_request(self.request)
-            if outlet:
-                queryset = queryset.filter(outlet=outlet)
-                logger.info(f"SaaS admin - Applied outlet filter: {outlet.id} ({outlet.name})")
+            logger.info("SaaS admin - no outlet specified, returning tenant-scoped queryset")
 
         include_archived = str(self.request.query_params.get('include_archived', 'false')).lower() in ('1', 'true', 'yes', 'y')
         if not include_archived:
@@ -333,6 +327,32 @@ class ProductViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         product.save(update_fields=['is_archived', 'archived_at', 'archived_reason', 'archived_by', 'is_active', 'updated_at'])
         return product
     
+    def retrieve(self, request, *args, **kwargs):
+        """Allow retrieval for the current tenant/outlet even when the request lacks explicit outlet context."""
+        try:
+            return super().retrieve(request, *args, **kwargs)
+        except Exception as exc:
+            if getattr(exc, 'status_code', None) != status.HTTP_404_NOT_FOUND:
+                raise
+
+            tenant = self.get_tenant_for_request(request)
+            outlet = self.get_outlet_for_request(request)
+            if not tenant:
+                raise
+
+            queryset = Product.objects.select_related('category', 'tenant', 'outlet').filter(tenant=tenant)
+            if outlet:
+                queryset = queryset.filter(outlet=outlet)
+            else:
+                queryset = queryset.filter(outlet__tenant=tenant)
+
+            instance = queryset.filter(pk=kwargs.get('pk')).first()
+            if not instance:
+                raise
+
+            serializer = self.get_serializer(instance)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
     def update(self, request, *args, **kwargs):
         """Override update to ensure tenant and outlet match"""
         instance = self.get_object()

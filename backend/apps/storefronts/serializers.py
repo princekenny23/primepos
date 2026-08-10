@@ -200,14 +200,13 @@ def apply_catalog_rules(storefront: Storefront, products_qs):
     exclude_product_ids = list(excludes.exclude(product_id=None).values_list('product_id', flat=True))
     exclude_category_ids = list(excludes.exclude(category_id=None).values_list('category_id', flat=True))
 
-    # Only explicitly included products/categories are visible in storefront catalog.
-    if not include_product_ids and not include_category_ids:
-        return products_qs.none()
-
-    products_qs = products_qs.filter(
-        Q(id__in=include_product_ids) |
-        Q(category_id__in=include_category_ids)
-    )
+    # If no include rules are configured, the storefront should expose the outlet's
+    # active catalog by default and only apply exclusions.
+    if include_product_ids or include_category_ids:
+        products_qs = products_qs.filter(
+            Q(id__in=include_product_ids) |
+            Q(category_id__in=include_category_ids)
+        )
 
     if exclude_product_ids:
         products_qs = products_qs.exclude(id__in=exclude_product_ids)
