@@ -1,7 +1,7 @@
 "use client"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRight, CreditCard } from "lucide-react"
+import { TrendingUp, TrendingDown, DollarSign, Users, ArrowUpRight, ArrowDownRight, CreditCard, ShoppingCart } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Business } from "@/lib/types"
@@ -33,7 +33,7 @@ function KPICard({ title, value, change, changeLabel, icon, trend, business, col
   const colors = colorMap[colorVariant]
   
   return (
-    <Card className={cn("h-full min-h-[82px] border", colors.bg, colors.border)}>
+    <Card className={cn("h-full min-h-[120px] max-h-[145px] border", colors.bg, colors.border)}>
       <CardHeader className={cn("flex flex-row items-center justify-between space-y-0 px-2.5 py-1.5 rounded-t-lg", colors.header)}>
         <CardTitle className="text-[10px] font-medium leading-tight tracking-wide">{title}</CardTitle>
         <div className={cn("h-3 w-3", colors.icon)}>
@@ -64,17 +64,19 @@ function KPICard({ title, value, change, changeLabel, icon, trend, business, col
 interface KPICardsProps {
   data: {
     sales: { value: number; change: number }
+    profit: { value: number; change: number }
     expenses: { value: number; change: number }
     lowStockItems: { value: number; change: number }
     outstandingCredit: { value: number; change: number }
     returns: { value: number; change: number }
+    purchases: { value: number; change: number }
   }
   business?: Business | null
 }
 
 export function KPICards({ data, business }: KPICardsProps) {
   return (
-    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
       <KPICard
         title="Sales"
         value={
@@ -92,7 +94,7 @@ export function KPICards({ data, business }: KPICardsProps) {
       />
       <KPICard
         title="Expenses"
-        value={formatCurrency(data.expenses.value, business)}
+        value={formatCurrency(data.expenses.value, business, { symbolOverride: "MWK" })}
         change={data.expenses.change}
         changeLabel="vs previous period"
         icon={<ArrowDownRight className="h-3.5 w-3.5" />}
@@ -103,12 +105,22 @@ export function KPICards({ data, business }: KPICardsProps) {
    
       <KPICard
         title="Outstanding Credit"
-        value={formatCurrency(data.outstandingCredit.value, business)}
+        value={formatCurrency(data.outstandingCredit.value, business, { symbolOverride: "MWK" })}
         change={data.outstandingCredit.change}
         changeLabel="receivables"
         icon={<CreditCard className="h-3.5 w-3.5" />}
         business={business}
         colorVariant="orange"
+      />
+      <KPICard
+        title="Purchases"
+        value={formatCurrency(data.purchases.value, business, { symbolOverride: "MWK" })}
+        change={data.purchases.change}
+        changeLabel="approved vs previous period"
+        icon={<ShoppingCart className="h-3.5 w-3.5" />}
+        trend={data.purchases.change >= 0 ? "up" : "down"}
+        business={business}
+        colorVariant="green"
       />
     
     </div>

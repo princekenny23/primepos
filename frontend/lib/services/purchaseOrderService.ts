@@ -95,6 +95,10 @@ export const purchaseOrderService = {
     return api.post(apiEndpoints.purchaseOrders.approve(id))
   },
 
+  async reject(id: string, reason?: string): Promise<PurchaseOrder> {
+    return api.post(apiEndpoints.purchaseOrders.reject(id), { reason: reason || "" })
+  },
+
   async receive(id: string, items: Array<{ item_id: number; received_quantity: number }>): Promise<PurchaseOrder> {
     return api.post(apiEndpoints.purchaseOrders.receive(id), { items })
   },

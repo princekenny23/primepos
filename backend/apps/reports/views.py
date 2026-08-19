@@ -18,6 +18,7 @@ from apps.inventory.stock_helpers import get_sellable_stock
 from apps.outlets.models import Outlet
 from apps.shifts.models import Shift
 from apps.expenses.models import Expense
+from apps.suppliers.models import PurchaseOrder
 import pandas as pd
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
@@ -40,6 +41,72 @@ def get_outlet_id_from_request(request):
             return None
 
     return outlet_id
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def purchases_summary(request):
+    """Return committed purchase-line totals for the dashboard period.
+
+    Approved orders are included immediately; drafts, pending orders, and
+    cancelled orders are excluded from the KPI.
+    """
+    tenant = getattr(request, 'tenant', None) or request.user.tenant
+    if not tenant:
+        return Response({'total_purchases': 0, 'purchase_count': 0, 'items_purchased': 0, 'previous_period_total': 0})
+    outlet_id = get_outlet_id_from_request(request)
+    start_date = request.query_params.get('start_date')
+    end_date = request.query_params.get('end_date')
+    queryset = PurchaseOrder.objects.filter(
+        tenant=tenant,
+        status__in=['approved', 'ordered', 'partial', 'received'],
+    )
+    if outlet_id:
+        queryset = queryset.filter(outlet_id=outlet_id)
+
+    # Approved orders retain their approved_at timestamp through later
+    # lifecycle states. Older records may not have that timestamp, so use
+    # order_date only as a compatibility fallback.
+    current_queryset = queryset
+    if start_date:
+        current_queryset = current_queryset.filter(
+            Q(approved_at__date__gte=start_date) |
+            Q(approved_at__isnull=True, order_date__gte=start_date)
+        )
+    if end_date:
+        current_queryset = current_queryset.filter(
+            Q(approved_at__date__lte=end_date) |
+            Q(approved_at__isnull=True, order_date__lte=end_date)
+        )
+    totals = current_queryset.aggregate(
+        total=Coalesce(Sum('items__total'), Decimal('0')),
+        count=Count('id', distinct=True),
+        items_purchased=Coalesce(Sum('items__received_quantity'), 0),
+    )
+
+    previous_total = Decimal('0')
+    if start_date and end_date:
+        try:
+            current_start = datetime.strptime(start_date, '%Y-%m-%d').date()
+            current_end = datetime.strptime(end_date, '%Y-%m-%d').date()
+            period_days = (current_end - current_start).days + 1
+            previous_start = current_start - timedelta(days=period_days)
+            previous_end = current_start - timedelta(days=1)
+            previous_total = queryset.filter(
+                Q(approved_at__date__gte=previous_start) |
+                Q(approved_at__isnull=True, order_date__gte=previous_start),
+                Q(approved_at__date__lte=previous_end) |
+                Q(approved_at__isnull=True, order_date__lte=previous_end),
+            ).aggregate(total=Coalesce(Sum('items__total'), Decimal('0')))['total'] or Decimal('0')
+        except ValueError:
+            previous_total = Decimal('0')
+
+    return Response({
+        'total_purchases': float(totals['total'] or 0),
+        'purchase_count': totals['count'],
+        'items_purchased': int(totals['items_purchased'] or 0),
+        'previous_period_total': float(previous_total),
+    })
 
 
 def _report_metadata(request, tenant, outlet_id=None, filters=None):

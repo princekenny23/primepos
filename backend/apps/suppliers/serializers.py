@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from decimal import Decimal
 from .models import (
-    Supplier, PurchaseOrder, SupplierInvoice,
+    Supplier, PurchaseOrder, PurchaseOrderItem, SupplierInvoice,
     PurchaseReturn, PurchaseReturnItem, ProductSupplier
 )
 from apps.outlets.serializers import OutletSerializer
@@ -85,6 +85,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         required=False,
         help_text="List of items to create for this purchase order"
     )
+    items = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = PurchaseOrder
@@ -92,7 +93,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             'id', 'tenant', 'supplier', 'supplier_id', 'outlet', 'outlet_id',
             'po_number', 'order_date', 'expected_delivery_date', 'status',
             'subtotal', 'tax', 'discount', 'total', 'notes', 'terms',
-            'created_by', 'created_at', 'updated_at',
+            'created_by', 'created_at', 'updated_at', 'items',
             'approved_at', 'received_at', 'items_data'
         )
         read_only_fields = ('id', 'tenant', 'po_number', 'created_by', 'created_at', 'updated_at', 'approved_at', 'received_at')
@@ -139,42 +140,55 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         if items_data:
             from apps.products.models import Product
             from decimal import Decimal
-            from django.apps import apps
-            
-            # Try to get PurchaseOrderItem model
-            try:
-                PurchaseOrderItem = apps.get_model('suppliers', 'PurchaseOrderItem')
-            except LookupError:
-                # If model doesn't exist, skip item creation
-                PurchaseOrderItem = None
-            
-            if PurchaseOrderItem:
-                for item_data in items_data:
-                    product_id = item_data.get('product_id')
-                    quantity = item_data.get('quantity', 1)
-                    unit_price = Decimal(str(item_data.get('unit_price', '0')))
-                    notes = item_data.get('notes', '')
-                    
-                    if product_id:
-                        try:
-                            product = Product.objects.get(id=product_id)
-                            total = unit_price * Decimal(str(quantity))
-                            
-                            # Create PurchaseOrderItem
-                            PurchaseOrderItem.objects.create(
-                                purchase_order=purchase_order,
-                                product=product,
-                                quantity=quantity,
-                                unit_price=unit_price,
-                                total=total,
-                                notes=notes,
-                                received_quantity=0
-                            )
-                        except Product.DoesNotExist:
-                            # Skip if product doesn't exist
-                            pass
+            for item_data in items_data:
+                product_id = item_data.get('product_id')
+                if not product_id:
+                    raise serializers.ValidationError({'items_data': 'Each item requires a product_id.'})
+                try:
+                    product = Product.objects.get(id=product_id, tenant=tenant, outlet=outlet)
+                except Product.DoesNotExist:
+                    raise serializers.ValidationError({'items_data': f'Product {product_id} does not belong to this outlet.'})
+                quantity = int(item_data.get('quantity', 1))
+                unit_price = Decimal(str(item_data.get('unit_price', '0')))
+                PurchaseOrderItem.objects.create(
+                    purchase_order=purchase_order,
+                    product=product,
+                    supplier=supplier,
+                    supplier_status='supplier_assigned' if supplier else 'no_supplier',
+                    quantity=quantity,
+                    unit_price=unit_price,
+                    notes=item_data.get('notes', ''),
+                )
+
+        # Never trust totals calculated by the client. Rebuild the order total
+        # from the persisted purchase lines so reports and dashboards agree.
+        line_subtotal = sum(
+            (item.total for item in purchase_order.items.all()),
+            Decimal('0.00'),
+        )
+        purchase_order.subtotal = line_subtotal
+        purchase_order.total = line_subtotal + purchase_order.tax - purchase_order.discount
+        purchase_order.save(update_fields=['subtotal', 'total', 'updated_at'])
         
         return purchase_order
+
+    def get_items(self, obj):
+        return [
+            {
+                'id': item.id,
+                'product': ProductSerializer(item.product).data,
+                'product_id': item.product_id,
+                'supplier': SupplierSerializer(item.supplier).data if item.supplier else None,
+                'supplier_id': item.supplier_id,
+                'supplier_status': item.supplier_status,
+                'quantity': item.quantity,
+                'unit_price': str(item.unit_price),
+                'total': str(item.total),
+                'received_quantity': item.received_quantity,
+                'notes': item.notes,
+            }
+            for item in obj.items.select_related('product').all()
+        ]
 
 
 class SupplierInvoiceSerializer(serializers.ModelSerializer):

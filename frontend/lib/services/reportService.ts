@@ -102,6 +102,13 @@ export interface InventoryValuationReport {
 }
 
 export const reportService = {
+  async getPurchasesSummary(filters?: ReportFilters): Promise<{ total_purchases: number; purchase_count: number; items_purchased: number; previous_period_total: number }> {
+    const params = new URLSearchParams()
+    if (filters?.outlet) params.append("outlet", filters.outlet)
+    if (filters?.start_date) params.append("start_date", filters.start_date)
+    if (filters?.end_date) params.append("end_date", filters.end_date)
+    return api.get(`${apiEndpoints.reports.purchasesSummary}?${params.toString()}`)
+  },
   async getSalesReport(filters?: ReportFilters): Promise<SalesReportSummary | null> {
     const params = new URLSearchParams()
     if (filters?.tenant) params.append("tenant", filters.tenant)
@@ -138,7 +145,7 @@ export const reportService = {
     }
   },
 
-  async getCustomerReport(filters?: ReportFilters): Promise<any[]> {
+  async getCustomerReport(filters?: ReportFilters): Promise<any> {
     const params = new URLSearchParams()
     if (filters?.tenant) params.append("tenant", filters.tenant)
     if (filters?.outlet) params.append("outlet", filters.outlet)
@@ -148,9 +155,7 @@ export const reportService = {
     const query = params.toString()
     try {
       const response = await api.get<any>(`${apiEndpoints.reports.customers}${query ? `?${query}` : ""}`)
-      if (Array.isArray(response)) return response
-      if (response.customers) return response.customers
-      return response.results || []
+      return response
     } catch (error) {
       console.error("Failed to fetch customer report:", error)
       return []

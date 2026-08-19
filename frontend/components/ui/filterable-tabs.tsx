@@ -29,6 +29,7 @@ interface FilterableTabsProps {
   searchPlaceholder?: string
   actionButton?: ReactNode
   actionButtonPlacement?: "right" | "below"
+  afterTabs?: ReactNode
 }
 
 export function FilterableTabs({
@@ -44,6 +45,7 @@ export function FilterableTabs({
   searchPlaceholder = "Search...",
   actionButton,
   actionButtonPlacement = "right",
+  afterTabs,
 }: FilterableTabsProps) {
   // Map number of tabs to Tailwind grid classes
   const gridColsMap: Record<number, string> = {
@@ -132,6 +134,7 @@ export function FilterableTabs({
           </div>
         )}
       </div>
+      {afterTabs}
       {children}
     </Tabs>
   )

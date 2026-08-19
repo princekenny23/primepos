@@ -2,14 +2,14 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ShoppingCart, Package, UserPlus, DollarSign, AlertCircle } from "lucide-react"
+import { ShoppingCart, Package, UserPlus, DollarSign, AlertCircle, Truck, Wallet, ClipboardCheck, Users, LogIn } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
 import { formatCurrency } from "@/lib/utils/currency"
 import type { Business } from "@/lib/types"
 
 interface Activity {
   id: string
-  type: "sale" | "inventory" | "customer" | "payment" | "alert"
+  type: "sale" | "inventory" | "customer" | "payment" | "purchase" | "expense" | "product" | "stock_take" | "shift" | "login" | "alert"
   title: string
   description: string
   timestamp: Date
@@ -26,6 +26,12 @@ const activityIcons = {
   inventory: Package,
   customer: UserPlus,
   payment: DollarSign,
+  purchase: Truck,
+  expense: Wallet,
+  product: Package,
+  stock_take: ClipboardCheck,
+  shift: Users,
+  login: LogIn,
   alert: AlertCircle,
 }
 
@@ -34,6 +40,12 @@ const activityColors = {
   inventory: "text-purple-500",
   customer: "text-green-500",
   payment: "text-yellow-500",
+  purchase: "text-indigo-500",
+  expense: "text-amber-600",
+  product: "text-cyan-600",
+  stock_take: "text-violet-600",
+  shift: "text-teal-600",
+  login: "text-slate-600",
   alert: "text-red-500",
 }
 

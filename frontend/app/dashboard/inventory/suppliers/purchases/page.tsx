@@ -14,16 +14,24 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Search, ShoppingCart, CheckCircle, XCircle, Clock, RotateCcw, Package } from "lucide-react"
+import { Plus, Search, ShoppingCart, CheckCircle, XCircle, Clock, RotateCcw, Package, MoreHorizontal, Eye, ThumbsUp, Ban } from "lucide-react"
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import Link from "next/link"
 import { purchaseOrderService } from "@/lib/services/purchaseOrderService"
 import { purchaseReturnService } from "@/lib/services/purchaseReturnService"
+import { reportService } from "@/lib/services/reportService"
+import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useRealAPI } from "@/lib/utils/api-config"
 import { format } from "date-fns"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 export default function PurchasesPage() {
   const { toast } = useToast()
@@ -35,6 +43,24 @@ export default function PurchasesPage() {
   const [purchaseReturns, setPurchaseReturns] = useState<any[]>([])
   const [loadingOrders, setLoadingOrders] = useState(true)
   const [loadingReturns, setLoadingReturns] = useState(true)
+  const [summary, setSummary] = useState({ total_purchases: 0, purchase_count: 0, items_purchased: 0 })
+  const [selectedRange, setSelectedRange] = useState<{ start?: Date; end?: Date }>(() => {
+    const end = new Date()
+    const start = new Date(end)
+    start.setDate(start.getDate() - 29)
+    return { start, end }
+  })
+
+  const formatDate = (date?: Date) => date ? date.toISOString().slice(0, 10) : undefined
+
+  useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search)
+    if (searchParams.get("created") === "1") {
+      const purchaseNumber = searchParams.get("purchase") || "Purchase"
+      toast({ title: "Purchase created", description: `${purchaseNumber} was created successfully.` })
+      window.history.replaceState({}, "", "/dashboard/inventory/suppliers/purchases")
+    }
+  }, [toast])
 
   const loadPurchaseOrders = useCallback(async () => {
     if (!currentBusiness || !currentOutlet) {
@@ -93,6 +119,16 @@ export default function PurchasesPage() {
       setLoadingReturns(false)
     }
   }, [currentBusiness, currentOutlet, useReal, toast])
+
+  useEffect(() => {
+    reportService.getPurchasesSummary({
+      outlet: currentOutlet?.id ? String(currentOutlet.id) : undefined,
+      start_date: formatDate(selectedRange.start),
+      end_date: formatDate(selectedRange.end),
+    })
+      .then(setSummary)
+      .catch(() => setSummary({ total_purchases: 0, purchase_count: 0, items_purchased: 0 }))
+  }, [currentOutlet?.id, selectedRange])
 
   useEffect(() => {
     if (currentBusiness && currentOutlet) {
@@ -156,6 +192,28 @@ export default function PurchasesPage() {
     )
   }, [purchaseReturns, searchTerm])
 
+  const canReview = (status: string) => ["draft", "pending", "pending_supplier"].includes(status)
+
+  const handleApproval = async (poId: string) => {
+    try {
+      await purchaseOrderService.approve(poId)
+      await loadPurchaseOrders()
+      toast({ title: "Purchase approved" })
+    } catch (error: any) {
+      toast({ title: "Approval failed", description: error.message || "Could not approve purchase", variant: "destructive" })
+    }
+  }
+
+  const handleRejection = async (poId: string) => {
+    try {
+      await purchaseOrderService.reject(poId)
+      await loadPurchaseOrders()
+      toast({ title: "Purchase rejected" })
+    } catch (error: any) {
+      toast({ title: "Rejection failed", description: error.message || "Could not reject purchase", variant: "destructive" })
+    }
+  }
+
   const tabsConfig: TabConfig[] = [
     {
       value: "orders",
@@ -193,6 +251,27 @@ export default function PurchasesPage() {
             tabs={tabsConfig}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            afterTabs={
+              <div className="px-0 pt-2">
+                <div className="mb-4 flex justify-end">
+                  <DateRangeFilter defaultPreset="last30" onRangeChange={setSelectedRange} />
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Card>
+                    <CardHeader className="pb-2"><CardDescription>Total Purchases</CardDescription></CardHeader>
+                    <CardContent><div className="text-2xl font-bold">MWK {Number(summary.total_purchases || 0).toFixed(2)}</div><p className="text-xs text-muted-foreground">Total value in selected period</p></CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2"><CardDescription>Purchase Orders</CardDescription></CardHeader>
+                    <CardContent><div className="text-2xl font-bold">{summary.purchase_count}</div><p className="text-xs text-muted-foreground">Committed purchases in selected period</p></CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader className="pb-2"><CardDescription>Items Purchased</CardDescription></CardHeader>
+                    <CardContent><div className="text-2xl font-bold">{summary.items_purchased}</div><p className="text-xs text-muted-foreground">Total quantity received</p></CardContent>
+                  </Card>
+                </div>
+              </div>
+            }
           >
             <TabsContent value="orders" className="mt-0">
               <div className="px-6 py-4">
@@ -233,7 +312,6 @@ export default function PurchasesPage() {
                           <TableHead className="text-gray-900 font-semibold">PO Number</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Supplier</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Order Date</TableHead>
-                          <TableHead className="text-gray-900 font-semibold">Expected Delivery</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Total</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Status</TableHead>
                           <TableHead className="text-gray-900 font-semibold">Actions</TableHead>
@@ -261,18 +339,37 @@ export default function PurchasesPage() {
                               {po.order_date ? format(new Date(po.order_date), "MMM dd, yyyy") : "N/A"}
                             </TableCell>
                             <TableCell>
-                              {po.expected_delivery_date
-                                ? format(new Date(po.expected_delivery_date), "MMM dd, yyyy")
-                                : "N/A"}
-                            </TableCell>
-                            <TableCell>
                               {currentBusiness?.currencySymbol || "MWK"}{parseFloat(po.total || 0).toFixed(2)}
                             </TableCell>
                             <TableCell>{getStatusBadge(po.status)}</TableCell>
                             <TableCell>
-                              <Link href={`/dashboard/inventory/suppliers/purchases/${po.id}`}>
-                                <Button variant="ghost" size="sm" className="border-gray-300">View</Button>
-                              </Link>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" aria-label={`Actions for ${po.po_number}`}>
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/dashboard/inventory/suppliers/purchases/${po.id}`}>
+                                      <Eye className="mr-2 h-4 w-4" />
+                                      View
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  {canReview(po.status) && (
+                                    <>
+                                      <DropdownMenuItem onClick={() => handleApproval(String(po.id))}>
+                                        <ThumbsUp className="mr-2 h-4 w-4" />
+                                        Approve
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleRejection(String(po.id))} className="text-destructive focus:text-destructive">
+                                        <Ban className="mr-2 h-4 w-4" />
+                                        Reject
+                                      </DropdownMenuItem>
+                                    </>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </TableCell>
                           </TableRow>
                         ))}

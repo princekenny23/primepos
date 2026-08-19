@@ -155,14 +155,6 @@ export default function PurchaseOrderDetailPage() {
                   {new Date(purchaseOrder.order_date).toLocaleDateString()}
                 </span>
               </div>
-              {purchaseOrder.expected_delivery_date && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Expected Delivery:</span>
-                  <span className="font-medium">
-                    {new Date(purchaseOrder.expected_delivery_date).toLocaleDateString()}
-                  </span>
-                </div>
-              )}
             </CardContent>
           </Card>
 
@@ -173,19 +165,19 @@ export default function PurchaseOrderDetailPage() {
             <CardContent className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Subtotal:</span>
-                <span className="font-medium">${parseFloat(purchaseOrder.subtotal || "0").toFixed(2)}</span>
+                <span className="font-medium">MWK {parseFloat(purchaseOrder.subtotal || "0").toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Tax:</span>
-                <span className="font-medium">${parseFloat(purchaseOrder.tax || "0").toFixed(2)}</span>
+                <span className="font-medium">MWK {parseFloat(purchaseOrder.tax || "0").toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Discount:</span>
-                <span className="font-medium">${parseFloat(purchaseOrder.discount || "0").toFixed(2)}</span>
+                <span className="font-medium">MWK {parseFloat(purchaseOrder.discount || "0").toFixed(2)}</span>
               </div>
               <div className="flex justify-between text-lg font-bold pt-2 border-t">
                 <span>Total:</span>
-                <span>${parseFloat(purchaseOrder.total || "0").toFixed(2)}</span>
+                <span>MWK {parseFloat(purchaseOrder.total || "0").toFixed(2)}</span>
               </div>
             </CardContent>
           </Card>
@@ -220,6 +212,7 @@ export default function PurchaseOrderDetailPage() {
                 <TableRow>
                   <TableHead>Product</TableHead>
                   <TableHead>Quantity</TableHead>
+                  <TableHead>Received</TableHead>
                   <TableHead>Unit Price</TableHead>
                   <TableHead>Total</TableHead>
                   <TableHead>Supplier</TableHead>
@@ -229,7 +222,7 @@ export default function PurchaseOrderDetailPage() {
               <TableBody>
                 {purchaseOrder.items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                       No items in this purchase order
                     </TableCell>
                   </TableRow>
@@ -250,8 +243,11 @@ export default function PurchaseOrderDetailPage() {
                           </div>
                         </TableCell>
                         <TableCell>{item.quantity}</TableCell>
-                        <TableCell>${parseFloat(item.unit_price || "0").toFixed(2)}</TableCell>
-                        <TableCell>${parseFloat(item.total || "0").toFixed(2)}</TableCell>
+                        <TableCell>
+                          {item.received_quantity}
+                        </TableCell>
+                        <TableCell>MWK {parseFloat(item.unit_price || "0").toFixed(2)}</TableCell>
+                        <TableCell>MWK {parseFloat(item.total || "0").toFixed(2)}</TableCell>
                         <TableCell>
                           {hasSupplier ? (
                             <Badge variant="default" className="bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200">

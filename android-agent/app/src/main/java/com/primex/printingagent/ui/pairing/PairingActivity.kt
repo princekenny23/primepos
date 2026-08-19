@@ -1,7 +1,6 @@
 package com.primex.printingagent.ui.pairing
 
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -42,7 +41,7 @@ class PairingActivity : ComponentActivity() {
     }
 
     private fun startMainActivity() {
-        // TODO: Navigate to MainActivity once created
+        startService(Intent(this, PrintJobService::class.java))
         Timber.d("Pairing complete, navigating to main activity")
         finish()
     }
@@ -142,8 +141,13 @@ fun PairingScreen(
 
                 PairingStep.ENTER_CODE -> {
                     EnterCodeStep(
+                        baseUrl = baseUrl,
                         pairingCode = pairingCode ?: "",
-                        onPairingComplete = onPairingComplete
+                        deviceManager = deviceManager,
+                        outletId = outletId,
+                        printerIdentifier = printerManager.getPrinterIdentifier(selectedPrinter!!),
+                        onPairingComplete = onPairingComplete,
+                        onError = { errorMessage = it }
                     )
                 }
             }
@@ -255,6 +259,7 @@ fun RequestCodeStep(
     onError: (String) -> Unit,
     onLoadingChange: (Boolean) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -272,7 +277,7 @@ fun RequestCodeStep(
                 scope.launch {
                     onLoadingChange(true)
                     try {
-                        val apiService = ApiClient.getApiService(baseUrl, androidx.compose.ui.platform.LocalContext.current)
+                        val apiService = ApiClient.getApiService(baseUrl, context)
                         val repository = PairingRepository(apiService, deviceManager)
                         val result = repository.requestPairingCode(
                             baseUrl,
@@ -303,9 +308,37 @@ fun RequestCodeStep(
 
 @Composable
 fun EnterCodeStep(
+    baseUrl: String,
     pairingCode: String,
-    onPairingComplete: () -> Unit
+    deviceManager: DeviceManager,
+    outletId: String,
+    printerIdentifier: String,
+    onPairingComplete: () -> Unit,
+    onError: (String) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isWaiting by remember { mutableStateOf(true) }
+
+    LaunchedEffect(pairingCode) {
+        if (pairingCode.isBlank()) return@LaunchedEffect
+        scope.launch {
+            val apiService = ApiClient.getApiService(baseUrl, context)
+            val result = PairingRepository(apiService, deviceManager).waitForPairing(pairingCode)
+            result.onSuccess { apiKey ->
+                deviceManager.saveApiKey(apiKey)
+                deviceManager.saveBaseUrl(baseUrl)
+                deviceManager.saveOutletId(outletId)
+                deviceManager.savePrinterIdentifier(printerIdentifier)
+                isWaiting = false
+                onPairingComplete()
+            }.onFailure { error ->
+                isWaiting = false
+                onError(error.message ?: "Pairing failed")
+            }
+        }
+    }
+
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             text = "Pairing Code",
@@ -326,8 +359,13 @@ fun EnterCodeStep(
         )
         Spacer(modifier = Modifier.height(24.dp))
 
-        Button(onClick = onPairingComplete, modifier = Modifier.fillMaxWidth()) {
-            Text("Done")
+        if (isWaiting) {
+            CircularProgressIndicator()
+            Text("Waiting for PrimePOS to approve this device")
+        } else {
+            Button(onClick = onPairingComplete, modifier = Modifier.fillMaxWidth()) {
+                Text("Continue")
+            }
         }
     }
 }

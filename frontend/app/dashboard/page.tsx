@@ -4,8 +4,8 @@ import { useState, useEffect, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { generateKPIData, generateChartData } from "@/lib/utils/dashboard-stats"
-import { saleService } from "@/lib/services/saleService"
 import { productService } from "@/lib/services/productService"
+import { activityLogService } from "@/lib/services/activityLogService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { KPICards } from "@/components/dashboard/kpi-cards"
@@ -20,6 +20,7 @@ import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-se
 import { useAuthStore } from "@/stores/authStore"
 import { mapExpiryAlerts, mapLowStockAlerts } from "@/lib/utils/inventory-alerts"
 import { useRole } from "@/contexts/role-context"
+import { format } from "date-fns"
 
 function formatDate(date?: Date) {
   if (!date) return undefined
@@ -139,36 +140,37 @@ export default function DashboardPage() {
           today.setHours(0, 0, 0, 0)
           const startDate = selectedRange.start || today
           const endDate = selectedRange.end || today
-          const startDateStr = formatDate(startDate)
-          const endDateStr = formatDate(endDate)
-
-          const [kpi, chart, recentSales, lowStockData, productsData] = await Promise.all([
+          const [kpi, chart, lowStockData, productsData, activityLogs] = await Promise.all([
             generateKPIData(currentBusiness.id, currentBusiness, outletId, selectedRange),
             generateChartData(currentBusiness.id, outletId, selectedRange),
-            saleService.list({ outlet: outletId, start_date: startDateStr, end_date: endDateStr, limit: 20 }).catch(() => ({ results: [] })),
             productService.getLowStock(outletId).catch(() => []),
             productService.list({ outlet: outletId, limit: 1000 }).catch(() => ({ results: [] })),
+            activityLogService.list({ page_size: 20 }).catch(() => ({ results: [], count: 0 })),
           ])
 
           setKpiData(kpi)
           setChartData(chart)
-
-          const sales = (Array.isArray(recentSales) ? recentSales : (recentSales.results || []))
-            .filter((sale: any) => {
-              const status = String(sale.status || "").toLowerCase()
-              const paymentMethod = String(sale.payment_method || sale.paymentMethod || "").toLowerCase()
-              return status === "completed" || paymentMethod === "tab"
-            })
-            .slice(0, 10)
-
-          const activities = sales.map((sale: any) => ({
-            id: sale.id || `sale-${Math.random()}`,
-            type: "sale" as const,
-            title: `Sale #${sale.id?.toString().slice(-6)}`,
-            description: `${sale.items?.length || 1} item(s) - Amount: ${sale.total || sale.amount || 0}`,
-            timestamp: new Date(sale.created_at || sale.createdAt || new Date()),
-            amount: sale.total || sale.amount || 0,
-          }))
+          const activities = (activityLogs.results || []).slice(0, 10).map((activity: any) => {
+            const activityModule = String(activity.module || "").toLowerCase()
+            const action = String(activity.action || "").toLowerCase()
+            const type = activityModule === "sales" ? "sale" :
+              activityModule === "suppliers" ? "purchase" :
+              activityModule === "expenses" || activityModule === "payments" ? "expense" :
+              activityModule === "products" ? "product" :
+              activityModule === "shifts" ? "shift" :
+              activityModule === "auth" || action === "login" ? "login" :
+              activityModule === "inventory" && activity.resource_type?.toLowerCase().includes("stocktake") ? "stock_take" :
+              activityModule === "customers" ? "customer" :
+              activityModule === "inventory" ? "inventory" : "alert"
+            return {
+            id: `activity-${activity.id}`,
+            type,
+            title: activity.user_details?.name ? `${activity.user_details.name}: ${activity.action}` : activity.action,
+            description: activity.description || `${activity.module} activity`,
+            timestamp: new Date(activity.created_at),
+            amount: Number(activity.metadata?.amount || activity.metadata?.total || 0) || undefined,
+          }
+          })
           setRecentActivities(activities)
 
           const lowStock = Array.isArray(lowStockData) ? lowStockData : ((lowStockData as any)?.results || [])
@@ -222,6 +224,7 @@ export default function DashboardPage() {
     lowStockItems: { value: 0, change: 0 },
     outstandingCredit: { value: 0, change: 0 },
     returns: { value: 0, change: 0 },
+    purchases: { value: 0, change: 0 },
   }), [])
   
   // Initialize with default KPI data if not loaded
@@ -263,18 +266,12 @@ export default function DashboardPage() {
         )}
 
         {/* Header */}
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="flex flex-col gap-4 border-b pb-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-3xl font-bold">Dashboard</h1>
-              {!tenantLoading && currentOutlet && (
-                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-sm">
-                  <Store className="h-4 w-4" />
-                  <span>{currentOutlet.name}</span>
-                </div>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">Daily performance overview across sales, customers, and financial activity.</p>
+            <h1 className="text-2xl font-bold">Dashboard</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {!tenantLoading && currentOutlet ? `${currentOutlet.name} • ` : ""}{format(new Date(), "EEEE, dd MMMM yyyy")}
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <PageRefreshButton />
@@ -287,13 +284,13 @@ export default function DashboardPage() {
 
         {/* Charts */}
         <div className="grid gap-4">
-          <Card className="h-full">
+          <Card className="h-full min-h-[300px]">
             <CardHeader>
-              <CardTitle>Sales Overview</CardTitle>
+              <CardTitle>Sales Performance</CardTitle>
               <CardDescription>Sales and profit trends for the selected period.</CardDescription>
             </CardHeader>
             <CardContent>
-              <SalesChart data={chartData} type="area" />
+              <SalesChart data={chartData} type="line" />
             </CardContent>
           </Card>
         </div>

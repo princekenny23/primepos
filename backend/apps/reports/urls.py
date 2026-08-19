@@ -2,7 +2,7 @@ from django.urls import path
 from .views import (
     sales_report, products_report, customers_report, profit_loss_report, stock_movement_report,
     daily_sales_report, top_products_report, cash_summary_report, shift_summary_report,
-    inventory_valuation_report, expenses_report,
+    inventory_valuation_report, expenses_report, purchases_summary,
     export_sales_report_xlsx, export_sales_report_pdf,
     export_products_report_xlsx, export_products_report_pdf,
     export_customers_report_xlsx, export_customers_report_pdf,
@@ -19,6 +19,7 @@ urlpatterns = [
     path('reports/profit-loss/', profit_loss_report, name='profit-loss-report'),
     path('reports/stock-movement/', stock_movement_report, name='stock-movement-report'),
     path('reports/expenses/', expenses_report, name='expenses-report'),
+    path('reports/purchases-summary/', purchases_summary, name='purchases-summary'),
     # New reporting endpoints
     path('reports/daily-sales/', daily_sales_report, name='daily-sales-report'),
     path('reports/top-products/', top_products_report, name='top-products-report'),

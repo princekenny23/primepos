@@ -126,6 +126,28 @@ data class PairingResponse(
     val message: String
 )
 
+data class PairingStatusResponse(
+    @SerializedName("paired")
+    val paired: Boolean,
+    @SerializedName("status")
+    val status: String,
+    @SerializedName("api_key")
+    val apiKey: String?,
+    @SerializedName("device")
+    val device: PairingDeviceInfo?
+)
+
+data class PairingDeviceInfo(
+    @SerializedName("device_id")
+    val deviceId: String,
+    @SerializedName("tenant_id")
+    val tenantId: Int?,
+    @SerializedName("outlet_id")
+    val outletId: Int?,
+    @SerializedName("paired_at")
+    val pairedAt: String?
+)
+
 data class ClaimPrintJobRequest(
     @SerializedName("channel")
     val channel: String = "mobile",
@@ -133,4 +155,11 @@ data class ClaimPrintJobRequest(
     val deviceId: String,
     @SerializedName("printer_type")
     val printerType: String = ""
+)
+
+data class PairingStatusRequest(
+    @SerializedName("device_id")
+    val deviceId: String,
+    @SerializedName("pairing_code")
+    val pairingCode: String
 )

@@ -112,6 +112,37 @@ class PurchaseOrder(models.Model):
                 )
 
 
+class PurchaseOrderItem(models.Model):
+    """A product line belonging to a purchase order."""
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='purchase_order_items')
+    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_order_items')
+    supplier_status = models.CharField(
+        max_length=20,
+        choices=[('no_supplier', 'No Supplier'), ('supplier_assigned', 'Supplier Assigned')],
+        default='no_supplier',
+    )
+    quantity = models.PositiveIntegerField(default=0, validators=[MinValueValidator(0)])
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
+    total = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
+    received_quantity = models.PositiveIntegerField(default=0)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'suppliers_purchaseorderitem'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['purchase_order']),
+            models.Index(fields=['product']),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.total = Decimal(str(self.quantity)) * self.unit_price
+        super().save(*args, **kwargs)
+
+
 class SupplierInvoice(models.Model):
     """Supplier Invoice model"""
     STATUS_CHOICES = [

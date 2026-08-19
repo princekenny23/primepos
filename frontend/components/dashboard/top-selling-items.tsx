@@ -49,7 +49,7 @@ const TopSellingTooltip = ({
       <p className="font-medium">{data.name}</p>
       {hasRevenue ? (
         <p className="text-muted-foreground">
-          {formatCurrency(data.revenue, business, { showSymbol: true, decimals: 2 })}
+          {formatCurrency(data.revenue, business, { showSymbol: true, decimals: 2, symbolOverride: "MWK" })}
         </p>
       ) : (
         <p className="text-muted-foreground">{data.quantity.toLocaleString()} sold</p>
@@ -104,7 +104,7 @@ export function TopSellingItems({ items, business }: TopSellingItemsProps) {
             </div>
 
             <div className="mt-3 text-center text-sm text-muted-foreground">
-              Total: {formatCurrency(totalValue, business, { showSymbol: true, decimals: 2 })}
+              Total: {formatCurrency(totalValue, business, { showSymbol: true, decimals: 2, symbolOverride: "MWK" })}
             </div>
 
             <ul className="mt-3 space-y-1.5 max-h-[8.5rem] overflow-y-auto pr-1">
@@ -118,7 +118,7 @@ export function TopSellingItems({ items, business }: TopSellingItemsProps) {
                     <span className="truncate">{item.name}</span>
                   </div>
                   <span className="font-medium">
-                    {formatCurrency(item.value, business, { showSymbol: true, decimals: 2 })}
+                    {formatCurrency(item.value, business, { showSymbol: true, decimals: 2, symbolOverride: "MWK" })}
                   </span>
                 </li>
               ))}

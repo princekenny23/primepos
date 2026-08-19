@@ -117,7 +117,7 @@ class SupplierViewSet(viewsets.ModelViewSet, TenantFilterMixin):
 
 class PurchaseOrderViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     """Purchase Order ViewSet - outlet-specific"""
-    queryset = PurchaseOrder.objects.select_related('tenant', 'supplier', 'outlet', 'created_by')
+    queryset = PurchaseOrder.objects.select_related('tenant', 'supplier', 'outlet', 'created_by').prefetch_related('items__product')
     serializer_class = PurchaseOrderSerializer
     permission_classes = [IsAuthenticated, HasTenantModuleAccess]
     required_tenant_permissions = ['allow_inventory']
@@ -184,9 +184,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     def approve(self, request, pk=None):
         """Approve purchase order"""
         po = self.get_object()
-        if po.status != 'pending':
+        if po.status not in ['draft', 'pending', 'pending_supplier']:
             return Response(
                 {"detail": f"Cannot approve PO with status '{po.status}'"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not po.supplier or not po.items.exists():
+            return Response(
+                {"detail": "A supplier and at least one purchase item are required before approval."},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -196,20 +201,69 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         
         serializer = self.get_serializer(po)
         return Response(serializer.data)
-    
+
     @action(detail=True, methods=['post'])
-    def receive(self, request, pk=None):
-        """Mark purchase order as received"""
+    def reject(self, request, pk=None):
+        """Reject a draft or pending purchase order."""
         po = self.get_object()
-        if po.status not in ['approved', 'ordered', 'partial']:
+        if po.status not in ['draft', 'pending', 'pending_supplier']:
             return Response(
-                {"detail": f"Cannot receive PO with status '{po.status}'"},
+                {"detail": f"Cannot reject PO with status '{po.status}'"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        po.status = 'received'
-        po.received_at = timezone.now()
-        po.save()
+        po.status = 'cancelled'
+        po.notes = f"Rejected: {request.data.get('reason', '').strip()}".strip()
+        po.save(update_fields=['status', 'notes', 'updated_at'])
+        return Response(self.get_serializer(po).data)
+
+    @action(detail=True, methods=['post'])
+    def receive(self, request, pk=None):
+        """Receive quantities and add them to the outlet stock ledger."""
+        po = self.get_object()
+        if po.status in ['cancelled', 'received']:
+            return Response({"detail": f"Cannot receive PO with status '{po.status}'"}, status=status.HTTP_400_BAD_REQUEST)
+
+        received_items = request.data.get('items', [])
+        if not received_items:
+            return Response({"detail": "At least one received item is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from apps.inventory.stock_helpers import add_stock
+        from datetime import timedelta
+        from decimal import Decimal
+
+        with transaction.atomic():
+            item_map = {str(item.id): item for item in po.items.select_for_update().select_related('product')}
+            for payload in received_items:
+                item = item_map.get(str(payload.get('item_id')))
+                quantity = int(payload.get('received_quantity', 0))
+                if not item or quantity < 0:
+                    return Response({"detail": "Each received item and quantity must be valid."}, status=status.HTTP_400_BAD_REQUEST)
+                remaining = item.quantity - item.received_quantity
+                if quantity > remaining:
+                    return Response({"detail": f"Received quantity for {item.product.name} exceeds the remaining quantity."}, status=status.HTTP_400_BAD_REQUEST)
+                if quantity:
+                    add_stock(
+                        product=item.product,
+                        outlet=po.outlet,
+                        quantity=quantity,
+                        batch_number=f"PO-{po.id}-{item.id}-{item.received_quantity + quantity}",
+                        expiry_date=timezone.now().date() + timedelta(days=3650),
+                        cost_price=Decimal(str(item.unit_price)),
+                        user=request.user,
+                        reason=f"Received against {po.po_number}",
+                        reference_id=str(po.id),
+                        movement_type='purchase',
+                    )
+                    item.received_quantity += quantity
+                    item.save(update_fields=['received_quantity', 'updated_at'])
+
+            items = list(po.items.all())
+            all_received = all(item.received_quantity >= item.quantity for item in items)
+            any_received = any(item.received_quantity > 0 for item in items)
+            po.status = 'received' if all_received else ('partial' if any_received else po.status)
+            if all_received:
+                po.received_at = timezone.now()
+            po.save(update_fields=['status', 'received_at', 'updated_at'])
         
         serializer = self.get_serializer(po)
         return Response(serializer.data)

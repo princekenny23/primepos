@@ -12,8 +12,14 @@ import java.util.concurrent.TimeUnit
 object ApiClient {
     private var instance: Retrofit? = null
     private var apiService: PrinterApiService? = null
+    private var configuredBaseUrl: String? = null
 
     fun getInstance(baseUrl: String, context: Context): Retrofit {
+        val normalizedBaseUrl = baseUrl.trim().let { if (it.endsWith("/")) it else "$it/" }
+        if (configuredBaseUrl != normalizedBaseUrl) {
+            reset()
+        }
+
         return instance ?: run {
             val logging = HttpLoggingInterceptor { message ->
                 Timber.tag("OkHttp").d(message)
@@ -34,11 +40,14 @@ object ApiClient {
                 .build()
 
             Retrofit.Builder()
-                .baseUrl(baseUrl)
+                .baseUrl(normalizedBaseUrl)
                 .client(httpClient)
                 .addConverterFactory(GsonConverterFactory.create())
                 .build()
-                .also { instance = it }
+                .also {
+                    instance = it
+                    configuredBaseUrl = normalizedBaseUrl
+                }
         }
     }
 
@@ -50,5 +59,6 @@ object ApiClient {
     fun reset() {
         instance = null
         apiService = null
+        configuredBaseUrl = null
     }
 }

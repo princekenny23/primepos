@@ -11,6 +11,11 @@ interface PrinterApiService {
         @Body request: PairingRequest
     ): Response<PairingResponse>
 
+    @POST("api/devices/pairing/status/")
+    suspend fun getPairingStatus(
+        @Body request: PairingStatusRequest
+    ): Response<PairingStatusResponse>
+
     @POST("api/devices/register-device/")
     suspend fun registerDevice(
         @Body request: DeviceRegistrationRequest,

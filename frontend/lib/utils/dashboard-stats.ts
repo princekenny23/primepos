@@ -15,6 +15,7 @@ export interface DashboardKPI {
   lowStockItems: { value: number; change: number }
   outstandingCredit: { value: number; change: number }
   returns: { value: number; change: number }
+  purchases: { value: number; change: number }
 }
 
 export interface ChartDataPoint {
@@ -85,12 +86,14 @@ interface DashboardCustomerMetrics {
 interface ProfitLossSnapshot {
   revenue: number
   expenses: number
+  grossProfit: number
   netProfit: number
 }
 
 function normalizeProfitLossResponse(response: any): ProfitLossSnapshot {
   const revenue = Number(response?.total_revenue || 0)
   const expenses = Number(response?.expenses || response?.total_expenses || 0)
+  const grossProfit = Number(response?.gross_profit ?? (revenue - expenses))
 
   // Prefer explicit net_profit if backend provides it; otherwise derive it from available fields.
   const netProfit = Number(
@@ -102,6 +105,7 @@ function normalizeProfitLossResponse(response: any): ProfitLossSnapshot {
   return {
     revenue,
     expenses,
+    grossProfit,
     netProfit,
   }
 }
@@ -161,6 +165,7 @@ export async function generateKPIData(
       previousPnl,
       productsSummary,
       customerMetrics,
+      purchasesSummary,
     ] = await Promise.all([
       requestCache.getOrSet(`pnl-${businessId}-${outletId || 'all'}-${startStr}-${endStr}`, () => 
         reportService.getProfitLoss({ outlet: outletId, start_date: startStr, end_date: endStr }).catch((err) => {
@@ -180,6 +185,7 @@ export async function generateKPIData(
           .catch(() => ({ results: [], count: 0 }))
       ),
       fetchCustomerMetrics(businessId, outletId, startStr, endStr, prevStartStr, prevEndStr),
+      reportService.getPurchasesSummary({ outlet: outletId, start_date: startStr, end_date: endStr }).catch(() => ({ total_purchases: 0, purchase_count: 0, items_purchased: 0, previous_period_total: 0 })),
     ])
 
     const currentProfitLoss = normalizeProfitLossResponse(currentPnl)
@@ -202,8 +208,8 @@ export async function generateKPIData(
     const expensesChange = percentChange(currentExpenses, previousExpenses)
     
     // Profit KPI is aligned with Profit & Loss report logic.
-    const currentProfit = currentProfitLoss.netProfit
-    const previousProfit = previousProfitLoss.netProfit
+    const currentProfit = currentProfitLoss.grossProfit
+    const previousProfit = previousProfitLoss.grossProfit
     const profitChange = percentChange(currentProfit, previousProfit)
     
     // Calculate outstanding credit
@@ -217,6 +223,8 @@ export async function generateKPIData(
     
     const productsCount = Number(productsSummary?.count || 0)
     const productsChange = 0
+    const purchasesTotal = Number(purchasesSummary?.total_purchases || 0)
+    const purchasesChange = percentChange(purchasesTotal, Number(purchasesSummary?.previous_period_total || 0))
     
     return {
       sales: { value: currentRevenue, change: salesChange },
@@ -227,6 +235,7 @@ export async function generateKPIData(
       lowStockItems: { value: 0, change: 0 },
       outstandingCredit: { value: totalOutstandingCredit, change: outstandingCreditChange },
       returns: { value: 0, change: 0 },
+      purchases: { value: purchasesTotal, change: purchasesChange },
     }
   } catch (error) {
     console.error("Failed to load KPI data from API:", error)
@@ -240,6 +249,7 @@ export async function generateKPIData(
       lowStockItems: { value: 0, change: 0 },
       outstandingCredit: { value: 0, change: 0 },
       returns: { value: 0, change: 0 },
+      purchases: { value: 0, change: 0 },
     }
   }
 }

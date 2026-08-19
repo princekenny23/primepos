@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ArrowLeft, Plus, X, Trash2, Search } from "lucide-react"
+import { ArrowLeft, Plus, X, Trash2, Search, CheckCircle } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
@@ -29,7 +29,6 @@ import Link from "next/link"
 import { purchaseOrderService, type PurchaseOrder } from "@/lib/services/purchaseOrderService"
 import { supplierService } from "@/lib/services/supplierService"
 import { productService } from "@/lib/services/productService"
-import { productSupplierService } from "@/lib/services/productSupplierService"
 import { useTenant } from "@/contexts/tenant-context"
 import { useBusinessStore } from "@/stores/businessStore"
 
@@ -39,6 +38,7 @@ interface PurchaseOrderItem {
   quantity: number
   unit_price: string
   notes?: string
+  received_quantity: number
 }
 
 export default function NewPurchaseOrderPage() {
@@ -49,7 +49,6 @@ export default function NewPurchaseOrderPage() {
   
   const [suppliers, setSuppliers] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
-  const [supplierProducts, setSupplierProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   
@@ -62,6 +61,10 @@ export default function NewPurchaseOrderPage() {
   const [items, setItems] = useState<PurchaseOrderItem[]>([])
   const [productSearch, setProductSearch] = useState<string>("")
   const [selectedProductId, setSelectedProductId] = useState<string>("")
+  const [showNewProduct, setShowNewProduct] = useState(false)
+  const [newProductName, setNewProductName] = useState("")
+  const [newProductPrice, setNewProductPrice] = useState("")
+  const [newProductCost, setNewProductCost] = useState("")
 
   // Load suppliers and outlets on mount
   useEffect(() => {
@@ -84,27 +87,20 @@ export default function NewPurchaseOrderPage() {
     loadData()
   }, [toast])
 
-  // Load products when supplier is selected
+  // Products belong to the selected outlet inventory, not to the selected supplier.
   useEffect(() => {
-    if (!supplierId) {
-      setSupplierProducts([])
+    const resolvedOutletId = outletId || currentOutlet?.id
+    if (!resolvedOutletId) {
+      setProducts([])
       return
     }
 
-    const loadSupplierProducts = async () => {
+    const loadInventoryProducts = async () => {
       try {
-        const outletFilter = outletId || currentOutlet?.id
-        // Get products available from this supplier
-        const response = await productSupplierService.list({
-          supplier: supplierId,
-          is_active: true,
-        })
-        setSupplierProducts(response.results || [])
-        
-        // Also load all products for search
         const productsResponse = await productService.list({
           is_active: true,
-          outlet: outletFilter ? String(outletFilter) : undefined,
+          outlet: String(resolvedOutletId),
+          limit: 1000,
         })
         setProducts(productsResponse.results || [])
       } catch (error) {
@@ -112,8 +108,8 @@ export default function NewPurchaseOrderPage() {
       }
     }
 
-    loadSupplierProducts()
-  }, [supplierId, outletId, currentOutlet?.id])
+    loadInventoryProducts()
+  }, [outletId, currentOutlet?.id])
 
   // Filter products based on search
   const filteredProducts = products.filter((product) =>
@@ -148,14 +144,40 @@ export default function NewPurchaseOrderPage() {
     const newItem: PurchaseOrderItem = {
       product_id: Number(product.id),
       product_name: product.name,
-      quantity: 1,
+      quantity: 0,
       unit_price: product.cost?.toString() || product.cost_price?.toString() || "0.00",
+      received_quantity: 0,
       notes: "",
     }
 
     setItems([...items, newItem])
     setSelectedProductId("")
     setProductSearch("")
+  }
+
+  const createProduct = async () => {
+    if (!newProductName.trim() || !outletId) {
+      toast({ title: "Product name and outlet are required", variant: "destructive" })
+      return
+    }
+    try {
+      const product = await productService.create({
+        name: newProductName.trim(),
+        retail_price: Number(newProductPrice) || 0.01,
+        cost: Number(newProductCost) || 0,
+        outlet_id: outletId,
+        stock: 0,
+      } as any)
+      setProducts((current) => [...current, product])
+      setSelectedProductId(String(product.id))
+      setNewProductName("")
+      setNewProductPrice("")
+      setNewProductCost("")
+      setShowNewProduct(false)
+      toast({ title: "Product created", description: "It is ready to add to this purchase." })
+    } catch (error: any) {
+      toast({ title: "Could not create product", description: error.message, variant: "destructive" })
+    }
   }
 
   const removeItem = (index: number) => {
@@ -239,7 +261,7 @@ export default function NewPurchaseOrderPage() {
       const createdPO = await purchaseOrderService.create(purchaseOrderData)
       
       // Redirect to view the created purchase order
-      router.push(`/dashboard/inventory/suppliers/purchases/${createdPO.id}`)
+      router.push(`/dashboard/inventory/suppliers/purchases?created=1&purchase=${encodeURIComponent(createdPO.po_number || "Purchase")}`)
     } catch (error: any) {
       console.error("Failed to create purchase order:", error)
       toast({
@@ -329,6 +351,7 @@ export default function NewPurchaseOrderPage() {
                       onChange={(e) => setExpectedDeliveryDate(e.target.value)}
                     />
                   </div>
+
                 </div>
               </CardContent>
             </Card>
@@ -344,36 +367,62 @@ export default function NewPurchaseOrderPage() {
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search products..."
+                      placeholder="Search product name, SKU or barcode..."
                       className="pl-10"
                       value={productSearch}
-                      onChange={(e) => setProductSearch(e.target.value)}
+                      onChange={(e) => {
+                        setProductSearch(e.target.value)
+                        setSelectedProductId("")
+                      }}
                     />
+                    {productSearch && filteredProducts.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-60 overflow-y-auto rounded-md border bg-white shadow-lg">
+                        {filteredProducts.slice(0, 50).map((product) => (
+                          <button
+                            type="button"
+                            key={product.id}
+                            className="block w-full px-4 py-2 text-left text-sm hover:bg-gray-100"
+                            onClick={() => {
+                              setSelectedProductId(String(product.id))
+                              setProductSearch(product.name)
+                            }}
+                          >
+                            <div className="font-medium">{product.name}</div>
+                            <div className="text-xs text-gray-500">
+                              {product.sku || "No SKU"} {product.barcode ? `| ${product.barcode}` : ""}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <Select value={selectedProductId} onValueChange={setSelectedProductId}>
-                    <SelectTrigger className="w-[200px]">
-                      <SelectValue placeholder="Select product" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredProducts.slice(0, 50).map((product) => (
-                        <SelectItem key={product.id} value={String(product.id)}>
-                          {product.name} {product.sku ? `(${product.sku})` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                   <Button onClick={addItem} disabled={!selectedProductId}>
                     <Plus className="mr-2 h-4 w-4" />
                     Add
                   </Button>
                 </div>
 
+                <Button type="button" variant="outline" onClick={() => setShowNewProduct((value) => !value)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Product not in system
+                </Button>
+
+                {showNewProduct && (
+                  <div className="grid gap-3 rounded-md border p-4 md:grid-cols-4">
+                    <Input placeholder="Product name *" value={newProductName} onChange={(e) => setNewProductName(e.target.value)} />
+                    <Input type="number" min="0.01" step="0.01" placeholder="Retail price" value={newProductPrice} onChange={(e) => setNewProductPrice(e.target.value)} />
+                    <Input type="number" min="0" step="0.01" placeholder="Cost price" value={newProductCost} onChange={(e) => setNewProductCost(e.target.value)} />
+                    <Button type="button" onClick={createProduct}><CheckCircle className="mr-2 h-4 w-4" />Create product</Button>
+                  </div>
+                )}
+
                 {items.length > 0 && (
                   <Table>
                     <TableHeader>
                       <TableRow>
                         <TableHead>Product</TableHead>
-                        <TableHead>Quantity</TableHead>
+                        <TableHead>Quantity Ordered</TableHead>
+                        <TableHead>Quantity Received</TableHead>
                         <TableHead>Unit Price</TableHead>
                         <TableHead>Total</TableHead>
                         <TableHead className="w-[50px]"></TableHead>
@@ -388,12 +437,22 @@ export default function NewPurchaseOrderPage() {
                             <TableCell>
                               <Input
                                 type="number"
-                                min="1"
+                                min="0"
                                 value={item.quantity}
                                 onChange={(e) =>
-                                  updateItem(index, "quantity", parseInt(e.target.value) || 1)
+                                  updateItem(index, "quantity", parseInt(e.target.value) || 0)
                                 }
                                 className="w-20"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min="0"
+                                max={item.quantity}
+                                value={item.received_quantity}
+                                onChange={(e) => updateItem(index, "received_quantity", parseInt(e.target.value) || 0)}
+                                className="w-24"
                               />
                             </TableCell>
                             <TableCell>
@@ -408,7 +467,7 @@ export default function NewPurchaseOrderPage() {
                                 className="w-24"
                               />
                             </TableCell>
-                            <TableCell>${itemTotal.toFixed(2)}</TableCell>
+                            <TableCell>MWK {itemTotal.toFixed(2)}</TableCell>
                             <TableCell>
                               <Button
                                 variant="ghost"

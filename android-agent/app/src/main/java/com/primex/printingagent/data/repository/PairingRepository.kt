@@ -4,6 +4,7 @@ import com.primex.printingagent.data.api.PrinterApiService
 import com.primex.printingagent.data.models.PairingRequest
 import com.primex.printingagent.domain.DeviceManager
 import timber.log.Timber
+import kotlinx.coroutines.delay
 
 class PairingRepository(
     private val apiService: PrinterApiService,
@@ -32,6 +33,41 @@ class PairingRepository(
                     Result.success(body.pairingCode)
                 } else {
                     Result.failure(Exception("Empty response body"))
+                }
+
+                suspend fun waitForPairing(
+                    pairingCode: String,
+                    timeoutSeconds: Int = 600,
+                    pollIntervalSeconds: Long = 3
+                ): Result<String> {
+                    return try {
+                        val deviceId = deviceManager.getOrCreateDeviceId()
+                        val attempts = (timeoutSeconds / pollIntervalSeconds).toInt().coerceAtLeast(1)
+
+                        repeat(attempts) {
+                            val response = apiService.getPairingStatus(
+                                PairingStatusRequest(deviceId = deviceId, pairingCode = pairingCode)
+                            )
+
+                            if (!response.isSuccessful) {
+                                return Result.failure(Exception("Pairing status failed: ${response.code()}"))
+                            }
+
+                            val body = response.body()
+                            if (body?.apiKey != null) {
+                                return Result.success(body.apiKey)
+                            }
+                            if (body?.status == "expired") {
+                                return Result.failure(Exception("Pairing code expired"))
+                            }
+                            delay(pollIntervalSeconds * 1000)
+                        }
+
+                        Result.failure(Exception("Pairing timed out. Claim the code in PrimePOS and try again."))
+                    } catch (e: Exception) {
+                        Timber.e(e, "Error waiting for pairing")
+                        Result.failure(e)
+                    }
                 }
             } else {
                 val errorMsg = "Failed to request pairing code: ${response.code()} ${response.message()}"

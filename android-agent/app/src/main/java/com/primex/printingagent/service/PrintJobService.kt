@@ -53,7 +53,10 @@ class PrintJobService : Service() {
                 // Detect and select printer
                 val printers = printerManager.detectAvailablePrinters()
                 if (printers.isNotEmpty()) {
-                    selectedPrinter = printers.first()
+                    val savedIdentifier = deviceManager.getPrinterIdentifier()
+                    selectedPrinter = printers.firstOrNull { printer ->
+                        printerManager.getPrinterIdentifier(printer) == savedIdentifier
+                    } ?: printers.first()
                     Timber.d("Selected printer: ${printerManager.getPrinterDisplayName(selectedPrinter!!)}")
                 } else {
                     Timber.w("No printers detected")
