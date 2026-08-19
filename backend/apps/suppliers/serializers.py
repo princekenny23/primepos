@@ -100,6 +100,8 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
     
     def create(self, validated_data):
         """Create purchase order"""
+        from django.db import transaction
+
         supplier_id = validated_data.pop('supplier_id', None)
         outlet_id = validated_data.pop('outlet_id')
         items_data = validated_data.pop('items_data', [])
@@ -126,20 +128,21 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
         # Determine initial status based on supplier (pop to avoid duplicate keyword arg)
         initial_status = validated_data.pop('status', 'pending_supplier' if supplier is None else 'draft')
         
-        purchase_order = PurchaseOrder.objects.create(
-            tenant=tenant,
-            supplier=supplier,
-            outlet=outlet,
-            po_number=po_number,
-            status=initial_status,
-            created_by=self.context['request'].user,
-            **validated_data
-        )
-        
-        # Create purchase order items if provided
-        if items_data:
-            from apps.products.models import Product
-            from decimal import Decimal
+        from apps.products.models import Product
+        from decimal import Decimal, InvalidOperation
+
+        with transaction.atomic():
+            purchase_order = PurchaseOrder.objects.create(
+                tenant=tenant,
+                supplier=supplier,
+                outlet=outlet,
+                po_number=po_number,
+                status=initial_status,
+                created_by=self.context['request'].user,
+                **validated_data
+            )
+
+            # Create purchase order items if provided.
             for item_data in items_data:
                 product_id = item_data.get('product_id')
                 if not product_id:
@@ -148,13 +151,23 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
                     product = Product.objects.get(id=product_id, tenant=tenant, outlet=outlet)
                 except Product.DoesNotExist:
                     raise serializers.ValidationError({'items_data': f'Product {product_id} does not belong to this outlet.'})
-                quantity = int(item_data.get('quantity', 1))
-                received_quantity = int(item_data.get('received_quantity', 0))
+
+                try:
+                    quantity = int(item_data.get('quantity', 1))
+                    received_quantity = int(item_data.get('received_quantity', 0))
+                    unit_price = Decimal(str(item_data.get('unit_price', '0')))
+                except (TypeError, ValueError, InvalidOperation):
+                    raise serializers.ValidationError({
+                        'items_data': 'Each item must have valid numeric quantity, received quantity, and unit price.'
+                    })
+
                 if quantity < 0 or received_quantity < 0 or received_quantity > quantity:
                     raise serializers.ValidationError({
                         'items_data': 'Received quantity must be between zero and the ordered quantity.'
                     })
-                unit_price = Decimal(str(item_data.get('unit_price', '0')))
+                if unit_price < 0:
+                    raise serializers.ValidationError({'items_data': 'Unit price cannot be negative.'})
+
                 PurchaseOrderItem.objects.create(
                     purchase_order=purchase_order,
                     product=product,
@@ -166,15 +179,15 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
                     notes=item_data.get('notes', ''),
                 )
 
-        # Never trust totals calculated by the client. Rebuild the order total
-        # from the persisted purchase lines so reports and dashboards agree.
-        line_subtotal = sum(
-            (item.total for item in purchase_order.items.all()),
-            Decimal('0.00'),
-        )
-        purchase_order.subtotal = line_subtotal
-        purchase_order.total = line_subtotal + purchase_order.tax - purchase_order.discount
-        purchase_order.save(update_fields=['subtotal', 'total', 'updated_at'])
+            # Never trust totals calculated by the client. Rebuild the order total
+            # from the persisted purchase lines so reports and dashboards agree.
+            line_subtotal = sum(
+                (item.total for item in purchase_order.items.all()),
+                Decimal('0.00'),
+            )
+            purchase_order.subtotal = line_subtotal
+            purchase_order.total = line_subtotal + purchase_order.tax - purchase_order.discount
+            purchase_order.save(update_fields=['subtotal', 'total', 'updated_at'])
         
         return purchase_order
 

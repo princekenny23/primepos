@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ArrowLeft, Plus, Trash2, Search } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, Search, ChevronLeft, ChevronRight } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
@@ -63,6 +63,22 @@ export default function NewPurchaseOrderPage() {
   const [productSearch, setProductSearch] = useState<string>("")
   const [selectedProductId, setSelectedProductId] = useState<string>("")
   const [showProductModal, setShowProductModal] = useState(false)
+  const [itemsPage, setItemsPage] = useState(1)
+
+  const itemsPerPage = 10
+  const itemsTotalPages = Math.max(1, Math.ceil(items.length / itemsPerPage))
+  const paginatedItems = items
+    .slice((itemsPage - 1) * itemsPerPage, itemsPage * itemsPerPage)
+    .map((item, pageIndex) => ({
+      item,
+      index: (itemsPage - 1) * itemsPerPage + pageIndex,
+    }))
+
+  useEffect(() => {
+    if (itemsPage > itemsTotalPages) {
+      setItemsPage(itemsTotalPages)
+    }
+  }, [itemsPage, itemsTotalPages])
 
   // Load suppliers and outlets on mount
   useEffect(() => {
@@ -149,6 +165,7 @@ export default function NewPurchaseOrderPage() {
     }
 
     setItems([...items, newItem])
+    setItemsPage(Math.ceil((items.length + 1) / itemsPerPage))
     setSelectedProductId("")
     setProductSearch("")
   }
@@ -205,6 +222,22 @@ export default function NewPurchaseOrderPage() {
       toast({
         title: "Error",
         description: "Please add at least one item to the order",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const invalidItem = items.find((item) =>
+      item.quantity < 0 ||
+      item.received_quantity < 0 ||
+      item.received_quantity > item.quantity ||
+      !Number.isFinite(Number(item.unit_price)) ||
+      Number(item.unit_price) < 0
+    )
+    if (invalidItem) {
+      toast({
+        title: "Invalid purchase item",
+        description: "Check ordered quantity, received quantity, and unit price before saving.",
         variant: "destructive",
       })
       return
@@ -382,19 +415,21 @@ export default function NewPurchaseOrderPage() {
                 </Button>
 
                 {items.length > 0 && (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Quantity Ordered</TableHead>
-                        <TableHead>Quantity Received</TableHead>
-                        <TableHead>Unit Price</TableHead>
-                        <TableHead>Total</TableHead>
-                        <TableHead className="w-[50px]"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((item, index) => {
+                  <>
+                    <div className="max-h-[480px] overflow-auto rounded-md border">
+                      <Table className="min-w-[760px]">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Product</TableHead>
+                            <TableHead>Quantity Ordered</TableHead>
+                            <TableHead>Quantity Received</TableHead>
+                            <TableHead>Unit Price</TableHead>
+                            <TableHead>Total</TableHead>
+                            <TableHead className="w-[50px]"></TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {paginatedItems.map(({ item, index }) => {
                         const itemTotal = (item.quantity || 0) * (parseFloat(item.unit_price) || 0)
                         return (
                           <TableRow key={index}>
@@ -444,9 +479,43 @@ export default function NewPurchaseOrderPage() {
                             </TableCell>
                           </TableRow>
                         )
-                      })}
-                    </TableBody>
-                  </Table>
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    {itemsTotalPages > 1 && (
+                      <div className="flex items-center justify-between gap-3 pt-2">
+                        <p className="text-sm text-muted-foreground">
+                          Showing {(itemsPage - 1) * itemsPerPage + 1}-{Math.min(itemsPage * itemsPerPage, items.length)} of {items.length} items
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setItemsPage((page) => Math.max(1, page - 1))}
+                            disabled={itemsPage === 1}
+                          >
+                            <ChevronLeft className="mr-1 h-4 w-4" />
+                            Previous
+                          </Button>
+                          <span className="text-sm text-muted-foreground">
+                            Page {itemsPage} of {itemsTotalPages}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setItemsPage((page) => Math.min(itemsTotalPages, page + 1))}
+                            disabled={itemsPage === itemsTotalPages}
+                          >
+                            Next
+                            <ChevronRight className="ml-1 h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
