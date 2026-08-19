@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ArrowLeft, Plus, X, Trash2, Search, CheckCircle } from "lucide-react"
+import { ArrowLeft, Plus, Trash2, Search } from "lucide-react"
 import { useState, useEffect } from "react"
 import { useToast } from "@/components/ui/use-toast"
 import { useRouter } from "next/navigation"
@@ -31,6 +31,7 @@ import { supplierService } from "@/lib/services/supplierService"
 import { productService } from "@/lib/services/productService"
 import { useTenant } from "@/contexts/tenant-context"
 import { useBusinessStore } from "@/stores/businessStore"
+import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 
 interface PurchaseOrderItem {
   product_id: number
@@ -61,10 +62,7 @@ export default function NewPurchaseOrderPage() {
   const [items, setItems] = useState<PurchaseOrderItem[]>([])
   const [productSearch, setProductSearch] = useState<string>("")
   const [selectedProductId, setSelectedProductId] = useState<string>("")
-  const [showNewProduct, setShowNewProduct] = useState(false)
-  const [newProductName, setNewProductName] = useState("")
-  const [newProductPrice, setNewProductPrice] = useState("")
-  const [newProductCost, setNewProductCost] = useState("")
+  const [showProductModal, setShowProductModal] = useState(false)
 
   // Load suppliers and outlets on mount
   useEffect(() => {
@@ -155,31 +153,6 @@ export default function NewPurchaseOrderPage() {
     setProductSearch("")
   }
 
-  const createProduct = async () => {
-    if (!newProductName.trim() || !outletId) {
-      toast({ title: "Product name and outlet are required", variant: "destructive" })
-      return
-    }
-    try {
-      const product = await productService.create({
-        name: newProductName.trim(),
-        retail_price: Number(newProductPrice) || 0.01,
-        cost: Number(newProductCost) || 0,
-        outlet_id: outletId,
-        stock: 0,
-      } as any)
-      setProducts((current) => [...current, product])
-      setSelectedProductId(String(product.id))
-      setNewProductName("")
-      setNewProductPrice("")
-      setNewProductCost("")
-      setShowNewProduct(false)
-      toast({ title: "Product created", description: "It is ready to add to this purchase." })
-    } catch (error: any) {
-      toast({ title: "Could not create product", description: error.message, variant: "destructive" })
-    }
-  }
-
   const removeItem = (index: number) => {
     setItems(items.filter((_, i) => i !== index))
   }
@@ -253,6 +226,7 @@ export default function NewPurchaseOrderPage() {
         items_data: items.map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,
+          received_quantity: item.received_quantity,
           unit_price: item.unit_price,
           notes: item.notes || undefined,
         })),
@@ -402,19 +376,10 @@ export default function NewPurchaseOrderPage() {
                   </Button>
                 </div>
 
-                <Button type="button" variant="outline" onClick={() => setShowNewProduct((value) => !value)}>
+                <Button type="button" variant="outline" onClick={() => setShowProductModal(true)} disabled={!outletId}>
                   <Plus className="mr-2 h-4 w-4" />
                   Product not in system
                 </Button>
-
-                {showNewProduct && (
-                  <div className="grid gap-3 rounded-md border p-4 md:grid-cols-4">
-                    <Input placeholder="Product name *" value={newProductName} onChange={(e) => setNewProductName(e.target.value)} />
-                    <Input type="number" min="0.01" step="0.01" placeholder="Retail price" value={newProductPrice} onChange={(e) => setNewProductPrice(e.target.value)} />
-                    <Input type="number" min="0" step="0.01" placeholder="Cost price" value={newProductCost} onChange={(e) => setNewProductCost(e.target.value)} />
-                    <Button type="button" onClick={createProduct}><CheckCircle className="mr-2 h-4 w-4" />Create product</Button>
-                  </div>
-                )}
 
                 {items.length > 0 && (
                   <Table>
@@ -544,6 +509,19 @@ export default function NewPurchaseOrderPage() {
             </Card>
           </div>
         </div>
+
+        <ProductModalTabs
+          open={showProductModal}
+          onOpenChange={setShowProductModal}
+          initialOutletId={outletId}
+          onProductSaved={(product) => {
+            if (!product) return
+            setProducts((current) => [...current, product])
+            setSelectedProductId(String(product.id))
+            setProductSearch(product.name)
+            toast({ title: "Product created", description: "It is ready to add to this purchase." })
+          }}
+        />
       </PageLayout>
     </DashboardLayout>
   )

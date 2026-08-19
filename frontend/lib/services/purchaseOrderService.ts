@@ -37,6 +37,7 @@ export interface PurchaseOrder {
   items_data?: Array<{
     product_id: number
     quantity: number
+    received_quantity?: number
     unit_price: string
     notes?: string
   }>

@@ -33,8 +33,9 @@ interface ProductModalTabsProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   product?: any
-  onProductSaved?: () => void
+  onProductSaved?: (product?: Product) => void
   initialBarcode?: string
+  initialOutletId?: string
   initialTab?: "basic" | "units" | "pricing" | "stock" | "expiry" | "restaurant" | "bar"
 }
 
@@ -44,6 +45,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
   product,
   onProductSaved,
   initialBarcode,
+  initialOutletId,
   initialTab = "basic",
 }) => {
   const { toast } = useToast()
@@ -273,7 +275,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
         setStockForm({
           track_inventory: true,
           low_stock_threshold: "0",
-          outletId: "",
+          outletId: initialOutletId || "",
           opening_stock: "0",
         })
         setStockTouched(false)
@@ -479,6 +481,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
       }
 
       let productId: string
+      let savedProduct: Product | undefined
       if (product?.id) {
         // UPDATE existing
         await productService.update(product.id, productPayload)
@@ -486,6 +489,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
       } else {
         // CREATE new
         const created = await productService.create(productPayload)
+        savedProduct = created
         productId = created.id
       }
 
@@ -532,7 +536,7 @@ export const ProductModalTabs: React.FC<ProductModalTabsProps> = ({
       }
 
       onOpenChange(false)
-      onProductSaved?.()
+      onProductSaved?.(savedProduct)
     } catch (error: any) {
       console.error("Save error:", error)
       toast({

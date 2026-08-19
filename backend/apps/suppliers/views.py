@@ -182,7 +182,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet, TenantFilterMixin):
     
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
-        """Approve purchase order"""
+        """Approve the purchase order and post entered receipts to inventory."""
         po = self.get_object()
         if po.status not in ['draft', 'pending', 'pending_supplier']:
             return Response(
@@ -195,9 +195,35 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet, TenantFilterMixin):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        po.status = 'approved'
-        po.approved_at = timezone.now()
-        po.save()
+        from apps.inventory.stock_helpers import add_stock
+        from datetime import timedelta
+        from decimal import Decimal
+
+        with transaction.atomic():
+            items = list(po.items.select_for_update().select_related('product'))
+            for item in items:
+                if item.received_quantity <= 0:
+                    continue
+                add_stock(
+                    product=item.product,
+                    outlet=po.outlet,
+                    quantity=item.received_quantity,
+                    batch_number=f"PO-{po.id}-{item.id}-{item.received_quantity}",
+                    expiry_date=timezone.now().date() + timedelta(days=3650),
+                    cost_price=Decimal(str(item.unit_price)),
+                    user=request.user,
+                    reason=f"Received against approved {po.po_number}",
+                    reference_id=str(po.id),
+                    movement_type='purchase',
+                )
+
+            all_received = all(item.received_quantity >= item.quantity for item in items)
+            any_received = any(item.received_quantity > 0 for item in items)
+            po.status = 'received' if all_received else ('partial' if any_received else 'approved')
+            po.approved_at = timezone.now()
+            if all_received:
+                po.received_at = timezone.now()
+            po.save(update_fields=['status', 'approved_at', 'received_at', 'updated_at'])
         
         serializer = self.get_serializer(po)
         return Response(serializer.data)

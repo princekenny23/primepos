@@ -149,6 +149,11 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
                 except Product.DoesNotExist:
                     raise serializers.ValidationError({'items_data': f'Product {product_id} does not belong to this outlet.'})
                 quantity = int(item_data.get('quantity', 1))
+                received_quantity = int(item_data.get('received_quantity', 0))
+                if quantity < 0 or received_quantity < 0 or received_quantity > quantity:
+                    raise serializers.ValidationError({
+                        'items_data': 'Received quantity must be between zero and the ordered quantity.'
+                    })
                 unit_price = Decimal(str(item_data.get('unit_price', '0')))
                 PurchaseOrderItem.objects.create(
                     purchase_order=purchase_order,
@@ -157,6 +162,7 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
                     supplier_status='supplier_assigned' if supplier else 'no_supplier',
                     quantity=quantity,
                     unit_price=unit_price,
+                    received_quantity=received_quantity,
                     notes=item_data.get('notes', ''),
                 )
 
