@@ -37,8 +37,9 @@ import { useBusinessStore } from "@/stores/businessStore"
 interface PurchaseOrderItem {
   product_id: number
   product_name: string
+  sku: string
   quantity: number
-  unit_price: string
+  cost: string
   notes?: string
 }
 
@@ -149,8 +150,9 @@ export default function NewPurchaseOrderPage() {
     const newItem: PurchaseOrderItem = {
       product_id: Number(product.id),
       product_name: product.name,
+      sku: String(product.sku || ""),
       quantity: 1,
-      unit_price: product.cost?.toString() || product.cost_price?.toString() || "0.00",
+      cost: String(product.cost_price ?? product.cost ?? 0),
       notes: "",
     }
 
@@ -163,23 +165,17 @@ export default function NewPurchaseOrderPage() {
     setItems(items.filter((_, i) => i !== index))
   }
 
-  const updateItem = (index: number, field: keyof PurchaseOrderItem, value: any) => {
+  const updateItem = (index: number, field: "quantity" | "cost", value: number | string) => {
     const updatedItems = [...items]
     updatedItems[index] = { ...updatedItems[index], [field]: value }
-    
-    // Recalculate total if quantity or price changed
-    if (field === "quantity" || field === "unit_price") {
-      // Total is calculated on backend, but we can show preview
-    }
-    
     setItems(updatedItems)
   }
 
   const calculateSubtotal = () => {
     return items.reduce((sum, item) => {
       const quantity = item.quantity || 0
-      const price = parseFloat(item.unit_price) || 0
-      return sum + quantity * price
+      const cost = parseFloat(item.cost) || 0
+      return sum + quantity * cost
     }, 0)
   }
 
@@ -232,7 +228,8 @@ export default function NewPurchaseOrderPage() {
         items_data: items.map((item) => ({
           product_id: item.product_id,
           quantity: item.quantity,
-          unit_price: item.unit_price,
+          // Purchase-order API calls this unit_price; this value is the product procurement cost.
+          unit_price: item.cost,
           notes: item.notes || undefined,
         })),
       }
@@ -379,18 +376,20 @@ export default function NewPurchaseOrderPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Product</TableHead>
+                        <TableHead>SKU</TableHead>
                         <TableHead>Quantity</TableHead>
-                        <TableHead>Unit Price</TableHead>
+                        <TableHead>Unit Cost</TableHead>
                         <TableHead>Total</TableHead>
                         <TableHead className="w-[50px]"></TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {items.map((item, index) => {
-                        const itemTotal = (item.quantity || 0) * (parseFloat(item.unit_price) || 0)
+                        const itemTotal = (item.quantity || 0) * (parseFloat(item.cost) || 0)
                         return (
                           <TableRow key={index}>
                             <TableCell className="font-medium">{item.product_name}</TableCell>
+                            <TableCell className="font-mono text-sm">{item.sku || "—"}</TableCell>
                             <TableCell>
                               <Input
                                 type="number"
@@ -407,9 +406,9 @@ export default function NewPurchaseOrderPage() {
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                value={item.unit_price}
+                                value={item.cost}
                                 onChange={(e) =>
-                                  updateItem(index, "unit_price", e.target.value)
+                                  updateItem(index, "cost", e.target.value)
                                 }
                                 className="w-24"
                               />

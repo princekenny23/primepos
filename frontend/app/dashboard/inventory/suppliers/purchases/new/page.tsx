@@ -36,8 +36,9 @@ import { ProductModalTabs } from "@/components/modals/product-modal-tabs"
 interface PurchaseOrderItem {
   product_id: number
   product_name: string
+  sku: string
   quantity: number
-  unit_price: string
+  cost: string
   notes?: string
   received_quantity: number
 }
@@ -158,8 +159,9 @@ export default function NewPurchaseOrderPage() {
     const newItem: PurchaseOrderItem = {
       product_id: Number(product.id),
       product_name: product.name,
+      sku: String(product.sku || ""),
       quantity: 0,
-      unit_price: product.cost?.toString() || product.cost_price?.toString() || "0.00",
+      cost: String(product.cost_price ?? product.cost ?? 0),
       received_quantity: 0,
       notes: "",
     }
@@ -174,23 +176,17 @@ export default function NewPurchaseOrderPage() {
     setItems(items.filter((_, i) => i !== index))
   }
 
-  const updateItem = (index: number, field: keyof PurchaseOrderItem, value: any) => {
+  const updateItem = (index: number, field: "quantity" | "received_quantity" | "cost", value: number | string) => {
     const updatedItems = [...items]
     updatedItems[index] = { ...updatedItems[index], [field]: value }
-    
-    // Recalculate total if quantity or price changed
-    if (field === "quantity" || field === "unit_price") {
-      // Total is calculated on backend, but we can show preview
-    }
-    
     setItems(updatedItems)
   }
 
   const calculateSubtotal = () => {
     return items.reduce((sum, item) => {
       const quantity = item.quantity || 0
-      const price = parseFloat(item.unit_price) || 0
-      return sum + quantity * price
+      const cost = parseFloat(item.cost) || 0
+      return sum + quantity * cost
     }, 0)
   }
 
@@ -231,13 +227,13 @@ export default function NewPurchaseOrderPage() {
       item.quantity < 0 ||
       item.received_quantity < 0 ||
       item.received_quantity > item.quantity ||
-      !Number.isFinite(Number(item.unit_price)) ||
-      Number(item.unit_price) < 0
+      !Number.isFinite(Number(item.cost)) ||
+      Number(item.cost) < 0
     )
     if (invalidItem) {
       toast({
         title: "Invalid purchase item",
-        description: "Check ordered quantity, received quantity, and unit price before saving.",
+        description: "Check ordered quantity, received quantity, and unit cost before saving.",
         variant: "destructive",
       })
       return
@@ -260,7 +256,8 @@ export default function NewPurchaseOrderPage() {
           product_id: item.product_id,
           quantity: item.quantity,
           received_quantity: item.received_quantity,
-          unit_price: item.unit_price,
+          // The purchase-order API stores procurement cost in its unit_price field.
+          unit_price: item.cost,
           notes: item.notes || undefined,
         })),
       }
@@ -417,23 +414,25 @@ export default function NewPurchaseOrderPage() {
                 {items.length > 0 && (
                   <>
                     <div className="max-h-[480px] overflow-auto rounded-md border">
-                      <Table className="min-w-[760px]">
+                      <Table className="min-w-[840px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead>Product</TableHead>
+                            <TableHead>SKU</TableHead>
                             <TableHead>Quantity Ordered</TableHead>
                             <TableHead>Quantity Received</TableHead>
-                            <TableHead>Unit Price</TableHead>
+                            <TableHead>Unit Cost</TableHead>
                             <TableHead>Total</TableHead>
                             <TableHead className="w-[50px]"></TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {paginatedItems.map(({ item, index }) => {
-                        const itemTotal = (item.quantity || 0) * (parseFloat(item.unit_price) || 0)
+                        const itemTotal = (item.quantity || 0) * (parseFloat(item.cost) || 0)
                         return (
                           <TableRow key={index}>
                             <TableCell className="font-medium">{item.product_name}</TableCell>
+                            <TableCell className="font-mono text-sm">{item.sku || "—"}</TableCell>
                             <TableCell>
                               <Input
                                 type="number"
@@ -460,12 +459,15 @@ export default function NewPurchaseOrderPage() {
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                value={item.unit_price}
+                                value={item.cost}
                                 onChange={(e) =>
-                                  updateItem(index, "unit_price", e.target.value)
+                                  updateItem(index, "cost", e.target.value)
                                 }
                                 className="w-24"
                               />
+                              <span className="mt-1 block text-xs text-muted-foreground">
+                                Cost price: MWK {Number(item.cost || 0).toFixed(2)}
+                              </span>
                             </TableCell>
                             <TableCell>MWK {itemTotal.toFixed(2)}</TableCell>
                             <TableCell>

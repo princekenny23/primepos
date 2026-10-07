@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { generateKPIData, generateChartData } from "@/lib/utils/dashboard-stats"
 import { productService } from "@/lib/services/productService"
-import { activityLogService } from "@/lib/services/activityLogService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
 import { KPICards } from "@/components/dashboard/kpi-cards"
@@ -21,6 +20,8 @@ import { useAuthStore } from "@/stores/authStore"
 import { mapExpiryAlerts, mapLowStockAlerts } from "@/lib/utils/inventory-alerts"
 import { useRole } from "@/contexts/role-context"
 import { format } from "date-fns"
+import { APP_REFRESH_EVENT } from "@/lib/utils/page-refresh"
+import { PageLoading } from "@/components/ui/page-loading"
 
 function formatDate(date?: Date) {
   if (!date) return undefined
@@ -41,7 +42,6 @@ export default function DashboardPage() {
   const posMode = getOutletPosMode(outlet, currentBusiness)
   const [kpiData, setKpiData] = useState<any>(null)
   const [chartData, setChartData] = useState<any[]>([])
-  const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
   const [expiryItems, setExpiryItems] = useState<any[]>([])
   const [selectedRange, setSelectedRange] = useState<{ start?: Date; end?: Date }>(() => {
@@ -55,6 +55,7 @@ export default function DashboardPage() {
   const restoringBusinessRef = useRef(false)
   const inFlightLoadRef = useRef<Promise<void> | null>(null)
   const lastLoadKeyRef = useRef<string>("")
+  const loadSequenceRef = useRef(0)
   const { user } = useAuthStore()
   const { hasPermission } = useRole()
   const tenantPermissions =
@@ -131,6 +132,7 @@ export default function DashboardPage() {
       }
 
       lastLoadKeyRef.current = loadKey
+      const requestId = ++loadSequenceRef.current
 
       const loader = (async () => {
         setIsLoadingData(true)
@@ -140,51 +142,30 @@ export default function DashboardPage() {
           today.setHours(0, 0, 0, 0)
           const startDate = selectedRange.start || today
           const endDate = selectedRange.end || today
-          const [kpi, chart, lowStockData, productsData, activityLogs] = await Promise.all([
+          const [kpi, chart, lowStockData, productsData] = await Promise.all([
             generateKPIData(currentBusiness.id, currentBusiness, outletId, selectedRange),
             generateChartData(currentBusiness.id, outletId, selectedRange),
             productService.getLowStock(outletId).catch(() => []),
-            productService.list({ outlet: outletId, limit: 1000 }).catch(() => ({ results: [] })),
-            activityLogService.list({ page_size: 20 }).catch(() => ({ results: [], count: 0 })),
+            productService.list({ outlet: outletId, limit: 100 }).catch(() => ({ results: [] })),
           ])
+
+          if (requestId !== loadSequenceRef.current) return
 
           setKpiData(kpi)
           setChartData(chart)
-          const activities = (activityLogs.results || []).slice(0, 10).map((activity: any) => {
-            const activityModule = String(activity.module || "").toLowerCase()
-            const action = String(activity.action || "").toLowerCase()
-            const type = activityModule === "sales" ? "sale" :
-              activityModule === "suppliers" ? "purchase" :
-              activityModule === "expenses" || activityModule === "payments" ? "expense" :
-              activityModule === "products" ? "product" :
-              activityModule === "shifts" ? "shift" :
-              activityModule === "auth" || action === "login" ? "login" :
-              activityModule === "inventory" && activity.resource_type?.toLowerCase().includes("stocktake") ? "stock_take" :
-              activityModule === "customers" ? "customer" :
-              activityModule === "inventory" ? "inventory" : "alert"
-            return {
-            id: `activity-${activity.id}`,
-            type,
-            title: activity.user_details?.name ? `${activity.user_details.name}: ${activity.action}` : activity.action,
-            description: activity.description || `${activity.module} activity`,
-            timestamp: new Date(activity.created_at),
-            amount: Number(activity.metadata?.amount || activity.metadata?.total || 0) || undefined,
-          }
-          })
-          setRecentActivities(activities)
-
           const lowStock = Array.isArray(lowStockData) ? lowStockData : ((lowStockData as any)?.results || [])
           setLowStockItems(mapLowStockAlerts(lowStock))
 
           const products = Array.isArray(productsData) ? productsData : (productsData.results || [])
           setExpiryItems(mapExpiryAlerts(products))
         } catch (error: any) {
+          if (requestId !== loadSequenceRef.current) return
           console.error("Failed to load dashboard data:", error)
           if (error?.status === 429 || String(error?.message || "").toLowerCase().includes("throttled")) {
             setDashboardWarning("Backend is throttling requests. Showing cached or partial data until cooldown ends.")
           }
         } finally {
-          setIsLoadingData(false)
+          if (requestId === loadSequenceRef.current) setIsLoadingData(false)
         }
       })()
 
@@ -207,9 +188,11 @@ export default function DashboardPage() {
 
     window.addEventListener("sale-completed", handleDashboardRefresh)
     window.addEventListener("expense-updated", handleDashboardRefresh)
+    window.addEventListener(APP_REFRESH_EVENT, handleDashboardRefresh)
     return () => {
       window.removeEventListener("sale-completed", handleDashboardRefresh)
       window.removeEventListener("expense-updated", handleDashboardRefresh)
+      window.removeEventListener(APP_REFRESH_EVENT, handleDashboardRefresh)
     }
   }, [])
 
@@ -235,7 +218,7 @@ export default function DashboardPage() {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Loading business...</p>
+          <PageLoading label="Loading business…" />
         </div>
       </DashboardLayout>
     )
@@ -246,7 +229,7 @@ export default function DashboardPage() {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Loading dashboard data...</p>
+          <PageLoading label="Loading dashboard…" />
         </div>
       </DashboardLayout>
     )
@@ -287,10 +270,10 @@ export default function DashboardPage() {
           <Card className="h-full min-h-[300px]">
             <CardHeader>
               <CardTitle>Sales Performance</CardTitle>
-              <CardDescription>Sales and profit trends for the selected period.</CardDescription>
+              <CardDescription>Sales and profit trends by day for the selected period. Sales and profit use separate scales.</CardDescription>
             </CardHeader>
             <CardContent>
-              <SalesChart data={chartData} type="line" />
+              <SalesChart data={chartData} />
             </CardContent>
           </Card>
         </div>
@@ -298,7 +281,7 @@ export default function DashboardPage() {
         {/* Low Stock and Recent Activity */}
         <div className="grid gap-4 md:grid-cols-2">
           {canSeeInventoryWidgets && <LowStockAlerts items={lowStockItems} expiryItems={expiryItems} />}
-          <RecentActivity activities={recentActivities} business={currentBusiness} />
+          <RecentActivity />
         </div>
 
       </div>

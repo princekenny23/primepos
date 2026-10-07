@@ -171,6 +171,8 @@ export function NotificationBell({ triggerClassName, unreadRingClassName }: Noti
     switch (priority) {
       case "high":
         return "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200"
+      case "urgent":
+        return "bg-red-200 text-red-900 dark:bg-red-900 dark:text-red-100"
       case "normal":
         return "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200"
       case "low":

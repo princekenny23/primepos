@@ -162,6 +162,34 @@ export default function StorefrontOrderTrackingPage({
                   </div>
                 ))}
               </div>
+
+              <div className="mt-6 rounded-[8px] border border-gray-3 bg-white p-5">
+                <p className="text-custom-xs font-semibold uppercase tracking-[0.16em] text-body">Items ordered</p>
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[520px] text-left text-custom-sm">
+                    <thead>
+                      <tr className="border-b border-gray-3 text-body">
+                        <th className="px-3 py-3 font-semibold">Product</th>
+                        <th className="px-3 py-3 font-semibold">Unit</th>
+                        <th className="px-3 py-3 text-right font-semibold">Qty</th>
+                        <th className="px-3 py-3 text-right font-semibold">Price</th>
+                        <th className="px-3 py-3 text-right font-semibold">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {order.items?.map((item, index) => (
+                        <tr key={`${item.product_name}-${index}`} className="border-b border-gray-3 last:border-0">
+                          <td className="px-3 py-3 font-medium text-dark">{item.product_name}</td>
+                          <td className="px-3 py-3 text-body">{item.unit_name || "-"}</td>
+                          <td className="px-3 py-3 text-right text-dark">{item.quantity}</td>
+                          <td className="px-3 py-3 text-right text-body">{item.price}</td>
+                          <td className="px-3 py-3 text-right font-semibold text-dark">{item.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
 
             <aside className="rounded-[10px] border border-gray-3 bg-dark p-6 text-white shadow-2">

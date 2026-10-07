@@ -24,22 +24,11 @@ class PrintingAgentApplication : Application(), Configuration.Provider {
         // Create notification channels
         NotificationHelper.createNotificationChannel(this)
 
-        // Start the print job service
-        startPrintJobService()
+        // DO NOT start service here on Android 14+ to prevent SecurityException before permissions are granted
     }
 
-    private fun startPrintJobService() {
-        try {
-            val serviceIntent = Intent(this, PrintJobService::class.java)
-            startForegroundService(serviceIntent)
-            Timber.d("Print job service started")
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to start print job service")
-        }
-    }
-
-    override val workManagerConfiguration: Configuration
-        get() = Configuration.Builder()
+    override fun getWorkManagerConfiguration(): Configuration =
+        Configuration.Builder()
             .setMinimumLoggingLevel(android.util.Log.DEBUG)
             .build()
 

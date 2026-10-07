@@ -1,40 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Typography -->
-    <attr name="headlineLarge" format="reference" />
-    <attr name="headlineMedium" format="reference" />
-    <attr name="headlineSmall" format="reference" />
-    <attr name="titleLarge" format="reference" />
-    <attr name="titleMedium" format="reference" />
-    <attr name="titleSmall" format="reference" />
-    <attr name="bodyLarge" format="reference" />
-    <attr name="bodyMedium" format="reference" />
-    <attr name="bodySmall" format="reference" />
-    <attr name="labelLarge" format="reference" />
-    <attr name="labelMedium" format="reference" />
-    <attr name="labelSmall" format="reference" />
-    
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Material 3 Light Theme -->
-    <style name="Theme.PrimePOSPrintingAgent" parent="android:Theme.Material">
+    <style name="Theme.PrimePOSPrintingAgent" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Primary colors -->
-        <item name="android:colorPrimary">@color/light_primary</item>
-        <item name="android:colorAccent">@color/light_secondary</item>
+        <item name="colorPrimary">@color/light_primary</item>
+        <item name="colorOnPrimary">@color/light_on_primary</item>
+        <item name="colorPrimaryContainer">@color/light_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/light_on_primary_container</item>
+
+        <item name="colorSecondary">@color/light_secondary</item>
+        <item name="colorOnSecondary">@color/light_on_secondary</item>
+        <item name="colorSecondaryContainer">@color/light_secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/light_on_secondary_container</item>
+
+        <item name="colorTertiary">@color/light_tertiary</item>
+        <item name="colorOnTertiary">@color/light_on_tertiary</item>
+        <item name="colorTertiaryContainer">@color/light_tertiary_container</item>
+        <item name="colorOnTertiaryContainer">@color/light_on_tertiary_container</item>
+
+        <item name="colorError">@color/light_error</item>
+        <item name="colorOnError">@color/light_on_error</item>
+        <item name="colorErrorContainer">@color/light_error_container</item>
+        <item name="colorOnErrorContainer">@color/light_on_error_container</item>
+
         <item name="android:colorBackground">@color/light_background</item>
-        
+        <item name="colorOnBackground">@color/light_on_background</item>
+        <item name="colorSurface">@color/light_surface</item>
+        <item name="colorOnSurface">@color/light_on_surface</item>
+        <item name="colorSurfaceVariant">@color/light_surface_variant</item>
+        <item name="colorOnSurfaceVariant">@color/light_on_surface_variant</item>
+
+        <item name="colorOutline">@color/light_outline</item>
+        <item name="colorOutlineVariant">@color/light_outline_variant</item>
+
         <!-- Status bar -->
         <item name="android:statusBarColor">@color/light_primary</item>
         <item name="android:windowLightStatusBar">false</item>
-    </style>
-    
-    <!-- Material 3 Dark Theme -->
-    <style name="Theme.PrimePOSPrintingAgent.Dark" parent="android:Theme.Material">
-        <!-- Primary colors -->
-        <item name="android:colorPrimary">@color/dark_primary</item>
-        <item name="android:colorAccent">@color/dark_secondary</item>
-        <item name="android:colorBackground">@color/dark_background</item>
-        
-        <!-- Status bar -->
-        <item name="android:statusBarColor">@color/dark_background</item>
-        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

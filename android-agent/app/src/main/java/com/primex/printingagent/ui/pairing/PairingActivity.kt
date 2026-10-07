@@ -11,11 +11,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.primex.printingagent.BuildConfig
 import com.primex.printingagent.data.api.ApiClient
 import com.primex.printingagent.data.repository.PairingRepository
 import com.primex.printingagent.domain.DeviceManager
 import com.primex.printingagent.domain.PrinterManager
 import com.primex.printingagent.domain.PrinterType
+import com.primex.printingagent.service.PrintJobService
 import kotlinx.coroutines.launch
 import timber.log.Timber
 
@@ -30,9 +32,8 @@ class PairingActivity : ComponentActivity() {
         printerManager = PrinterManager(this)
 
         setContent {
-            PairingScreen(
+            SimplePairingScreen(
                 deviceManager = deviceManager,
-                printerManager = printerManager,
                 onPairingComplete = { 
                     startMainActivity()
                 }
@@ -44,6 +45,80 @@ class PairingActivity : ComponentActivity() {
         startService(Intent(this, PrintJobService::class.java))
         Timber.d("Pairing complete, navigating to main activity")
         finish()
+    }
+}
+
+@Composable
+private fun SimplePairingScreen(
+    deviceManager: DeviceManager,
+    onPairingComplete: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pairingCode by remember { mutableStateOf<String?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    fun requestCode() {
+        scope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                val api = ApiClient.getApiService(BuildConfig.BACKEND_BASE_URL, context)
+                val identifier = "android_builtin_thermal"
+                PairingRepository(api, deviceManager)
+                    .requestPairingCode(BuildConfig.BACKEND_BASE_URL, identifier)
+                    .onSuccess { pairingCode = it }
+                    .onFailure { errorMessage = it.message ?: "Unable to create pairing code" }
+            } finally {
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { requestCode() }
+
+    LaunchedEffect(pairingCode) {
+        val code = pairingCode ?: return@LaunchedEffect
+        val api = ApiClient.getApiService(BuildConfig.BACKEND_BASE_URL, context)
+        PairingRepository(api, deviceManager).waitForPairing(code)
+            .onSuccess { apiKey ->
+                deviceManager.saveApiKey(apiKey)
+                deviceManager.saveBaseUrl(BuildConfig.BACKEND_BASE_URL)
+                deviceManager.savePrinterIdentifier("android_builtin_thermal")
+                onPairingComplete()
+            }
+            .onFailure { errorMessage = it.message ?: "Pairing failed" }
+    }
+
+    Scaffold { paddingValues ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(paddingValues).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Connect this POS to PrimePOS", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+            Spacer(modifier = Modifier.height(24.dp))
+            if (isLoading) {
+                CircularProgressIndicator()
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Creating pairing code...")
+            } else if (pairingCode != null) {
+                Text("Pairing code", style = MaterialTheme.typography.titleMedium)
+                Text(pairingCode!!, style = MaterialTheme.typography.displayMedium, modifier = Modifier.padding(16.dp))
+                Text("In PrimePOS, open Settings > Integrations, enter this code, and click Connect Device.", textAlign = TextAlign.Center)
+            } else {
+                Text(errorMessage ?: "Unable to create pairing code", color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = { requestCode() }) { Text("Try again") }
+            }
+            errorMessage?.let {
+                if (pairingCode != null) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                }
+            }
+        }
     }
 }
 

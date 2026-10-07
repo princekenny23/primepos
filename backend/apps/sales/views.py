@@ -2315,7 +2315,7 @@ class SaleViewSet(viewsets.ModelViewSet, TenantFilterMixin):
             day_stats = stats_map.get(date_str, {'sales': 0, 'count': 0})
             
             chart_data.append({
-                'date': date.strftime('%a'),  # Weekday abbreviation
+                'date': date.isoformat(),
                 'sales': float(day_stats['sales'] or 0),
                 'profit': float((Decimal(str(day_stats['sales'] or 0)) - daily_costs.get(date_str, Decimal('0.00')))),
             })

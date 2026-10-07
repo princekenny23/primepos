@@ -41,10 +41,10 @@ const notificationIcons: Record<string, React.ComponentType<any>> = {
 }
 
 const priorityColors: Record<string, string> = {
-  high: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
-  medium: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-  low: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  info: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200",
+  urgent: "bg-red-200 text-red-900 dark:bg-red-900 dark:text-red-100",
+  high: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
+  normal: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
+  low: "bg-gray-100 text-gray-800 dark:bg-gray-950 dark:text-gray-200",
 }
 
 export function NotificationDetailModal({
@@ -55,7 +55,7 @@ export function NotificationDetailModal({
   if (!notification) return null
 
   const IconComponent = notificationIcons[notification.type] || Bell
-  const priorityColor = priorityColors[notification.priority] || priorityColors.info
+  const priorityColor = priorityColors[notification.priority] || priorityColors.normal
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

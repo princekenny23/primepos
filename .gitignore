@@ -54,6 +54,11 @@ yarn-error.log*
 *.tmp
 *.temp
 
+# Android local build state and machine-specific SDK path
+/android-agent/.gradle/
+/android-agent/local.properties
+/android-agent/.artifacts/
+
 # .NET build artifacts
 primeposconnector/bin/
 primeposconnector/obj/

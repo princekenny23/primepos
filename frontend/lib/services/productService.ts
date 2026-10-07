@@ -373,6 +373,27 @@ export const productService = {
     }
   },
 
+  async listAll(filters?: ProductFilters, concurrency = 4): Promise<Product[]> {
+    const pageSize = Math.min(filters?.limit || filters?.pageSize || 18, 500)
+    const pagedFilters = { ...filters, limit: undefined, pageSize }
+    const firstPage = await this.list({ ...pagedFilters, page: 1 })
+    const pageCount = Math.ceil(firstPage.count / pageSize)
+    if (pageCount <= 1) return firstPage.results
+
+    const results = [...firstPage.results]
+    for (let start = 2; start <= pageCount; start += concurrency) {
+      const pageNumbers = Array.from(
+        { length: Math.min(concurrency, pageCount - start + 1) },
+        (_, index) => start + index
+      )
+      const pages = await Promise.all(
+        pageNumbers.map((page) => this.list({ ...pagedFilters, page }))
+      )
+      pages.forEach((page) => results.push(...page.results))
+    }
+    return results
+  },
+
   async get(id: string): Promise<Product> {
     const response = await api.get<any>(apiEndpoints.products.get(id))
     return transformProduct(response)

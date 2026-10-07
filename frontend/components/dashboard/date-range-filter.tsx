@@ -90,10 +90,12 @@ export function DateRangeFilter({ onRangeChange, defaultPreset = "today" }: Date
     if (selectedPreset === "custom") {
       // Emit only complete custom ranges to avoid half-state filter glitches.
       if (startDate && endDate) {
-        const key = `${selectedPreset}:${startDate.getTime()}:${endDate.getTime()}`
+        const orderedStart = startDate <= endDate ? startDate : endDate
+        const orderedEnd = startDate <= endDate ? endDate : startDate
+        const key = `${selectedPreset}:${orderedStart.getTime()}:${orderedEnd.getTime()}`
         if (lastEmittedKeyRef.current !== key) {
           lastEmittedKeyRef.current = key
-          onRangeChangeRef.current?.({ start: startDate, end: endDate })
+          onRangeChangeRef.current?.({ start: orderedStart, end: orderedEnd })
         }
       }
       return

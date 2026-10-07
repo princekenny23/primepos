@@ -5,6 +5,7 @@ from rest_framework.decorators import action
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from .models import (
     Supplier, PurchaseOrder, SupplierInvoice,
@@ -54,7 +55,9 @@ class SupplierViewSet(viewsets.ModelViewSet, TenantFilterMixin):
         # Apply outlet filter if provided (suppliers can be outlet-specific or tenant-level)
         outlet = self.get_outlet_for_request(self.request)
         if outlet:
-            queryset = queryset.filter(outlet=outlet)
+            # Suppliers without an outlet are shared across the tenant; include
+            # those alongside suppliers assigned to the current outlet.
+            queryset = queryset.filter(Q(outlet=outlet) | Q(outlet__isnull=True))
         
         return queryset
     

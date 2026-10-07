@@ -110,6 +110,19 @@ class StorefrontOrderSerializer(serializers.ModelSerializer):
     sale_id = serializers.IntegerField(source='sale.id', read_only=True)
     receipt_number = serializers.CharField(source='sale.receipt_number', read_only=True)
     total = serializers.DecimalField(source='sale.total', max_digits=10, decimal_places=2, read_only=True)
+    items = serializers.SerializerMethodField()
+
+    def get_items(self, obj):
+        return [
+            {
+                'product_name': item.product_name,
+                'unit_name': item.unit_name,
+                'quantity': item.quantity,
+                'price': str(item.price),
+                'total': str(item.total),
+            }
+            for item in obj.sale.items.all()
+        ]
 
     class Meta:
         model = StorefrontOrder
@@ -123,6 +136,7 @@ class StorefrontOrderSerializer(serializers.ModelSerializer):
             'sale_id',
             'receipt_number',
             'total',
+            'items',
             'created_at',
         )
 

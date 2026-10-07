@@ -50,7 +50,7 @@ export interface StockTakeData {
 export interface StockTakeItemData {
   product_id?: string
   expected_quantity?: number
-  counted_quantity: number
+  counted_quantity?: number
   notes?: string
 }
 
@@ -335,7 +335,7 @@ export const inventoryService = {
   async getStockTakeItems(stockTakeId: string): Promise<any[]> {
     try {
       const results: any[] = []
-      let url = `${apiEndpoints.inventory.stockTakes}${stockTakeId}/items/`
+      let url = `${apiEndpoints.inventory.stockTakes}${stockTakeId}/items/?page_size=500`
 
       while (url) {
         const response = await api.get<any>(url)

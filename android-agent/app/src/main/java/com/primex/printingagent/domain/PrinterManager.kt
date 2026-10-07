@@ -7,6 +7,8 @@ import android.hardware.usb.UsbManager
 import android.os.Build
 import android.print.PrintAttributes
 import android.print.PrintManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.BufferedWriter
 import java.io.File
@@ -28,7 +30,7 @@ class PrinterManager(private val context: Context) {
      * Detects available printers on the device
      */
     @SuppressLint("NewApi")
-    suspend fun detectAvailablePrinters(): List<PrinterType> {
+    suspend fun detectAvailablePrinters(): List<PrinterType> = withContext(Dispatchers.IO) {
         val printers = mutableListOf<PrinterType>()
 
         try {
@@ -60,7 +62,13 @@ class PrinterManager(private val context: Context) {
             Timber.e(e, "Error detecting printers")
         }
 
-        return printers
+        printers
+    }
+
+    /** Returns only device-file printers suitable for unattended built-in receipt printing. */
+    suspend fun detectBuiltInThermalPrinter(): PrinterType.Thermal? = withContext(Dispatchers.IO) {
+        val paths = listOf("/dev/lp0", "/dev/lp1", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyS0", "/dev/ttyS1")
+        paths.firstOrNull { File(it).exists() }?.let { PrinterType.Thermal(it) }
     }
 
     /**
@@ -99,8 +107,8 @@ class PrinterManager(private val context: Context) {
         printerPath: String,
         contentBase64: String,
         copies: Int = 1
-    ): Boolean {
-        return try {
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
             val decodedBytes = android.util.Base64.decode(contentBase64, android.util.Base64.DEFAULT)
             
             repeat(copies) {
@@ -125,13 +133,13 @@ class PrinterManager(private val context: Context) {
         device: UsbDevice,
         contentBase64: String,
         copies: Int = 1
-    ): Boolean {
-        return try {
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
             val decodedBytes = android.util.Base64.decode(contentBase64, android.util.Base64.DEFAULT)
             
             val connection = usbManager.openDevice(device) ?: run {
                 Timber.e("Cannot open USB device: ${device.deviceName}")
-                return false
+                return@withContext false
             }
 
             // Find bulk-out endpoint
@@ -143,7 +151,7 @@ class PrinterManager(private val context: Context) {
                 .firstOrNull() ?: run {
                     connection.close()
                     Timber.e("No OUT endpoint found")
-                    return false
+                    return@withContext false
                 }
 
             repeat(copies) {
@@ -232,7 +240,7 @@ class PrinterManager(private val context: Context) {
      */
     suspend fun testPrint(printer: PrinterType): Boolean {
         val testContent = buildTestPrintContent()
-        val base64Content = android.util.Base64.encodeToString(testContent.toByteArray(), android.util.Base64.DEFAULT)
+        val base64Content = android.util.Base64.encodeToString(testContent, android.util.Base64.DEFAULT)
 
         return when (printer) {
             is PrinterType.Thermal -> printToThermalPrinter(printer.path, base64Content, 1)
@@ -242,22 +250,21 @@ class PrinterManager(private val context: Context) {
         }
     }
 
-    private fun buildTestPrintContent(): String {
+    private fun buildTestPrintContent(): ByteArray {
         val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
             .format(java.util.Date())
 
-        return """
-            ${'$'}1b${'$'}40
-            PRIMEPOS TEST PRINT
-            ===================
-            $timestamp
-            
-            If you see this your
-            connector is working!
-            
-            
-            
-            ${'$'}1d${'$'}56${'$'}00
-        """.trimIndent()
+        val esc = 0x1B.toByte()
+        val gs = 0x1D.toByte()
+
+        val init = byteArrayOf(esc, 0x40) // ESC @ (Initialize)
+        val text = ("\nPRIMEPOS TEST PRINT\n" +
+                   "===================\n" +
+                   "Time: $timestamp\n\n" +
+                   "If you see this your\n" +
+                   "connector is working!\n\n\n\n").toByteArray()
+        val cut = byteArrayOf(gs, 0x56, 0x00) // GS V 0 (Cut)
+
+        return init + text + cut
     }
 }

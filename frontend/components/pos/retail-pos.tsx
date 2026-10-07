@@ -82,6 +82,8 @@ import { ProductGrid } from "@/components/pos/product-grid-enhanced"
 import { CartItem as CartItemDisplay, CartSummary } from "@/components/pos/cart-item"
 import { isDistributionEnabledForOutlet } from "@/lib/utils/tenant-permissions"
 import { useTenant } from "@/contexts/tenant-context"
+import { PageLoading } from "@/components/ui/page-loading"
+import { APP_REFRESH_EVENT } from "@/lib/utils/page-refresh"
 // Printing helper removed - reverted to receipt preview flow
 
 type SaleType = "retail" | "wholesale"
@@ -262,19 +264,10 @@ export function RetailPOS() {
       const outletId = outlet?.id ? String(outlet.id) : undefined
       const categoriesPromise = categoryService.list({ outlet: outletId })
 
-      const allProducts: Product[] = []
-      let page = 1
-      let hasNext = true
-
-      while (hasNext) {
-        const productsData: any = await productService.list({ is_active: true, page, outlet: outletId, limit: 100 })
-        const pageItems = Array.isArray(productsData?.results) ? productsData.results : []
-        allProducts.push(...pageItems)
-        hasNext = Boolean(productsData?.next)
-        page += 1
-      }
-
-      const categoriesData = await categoriesPromise
+      const [allProducts, categoriesData] = await Promise.all([
+        productService.listAll({ is_active: true, outlet: outletId, limit: 100 }),
+        categoriesPromise,
+      ])
       setProducts(allProducts)
       setCategories(["all", ...(categoriesData.map((c: any) => c.name) || [])])
     } catch (error: any) {
@@ -289,6 +282,9 @@ export function RetailPOS() {
 
   useEffect(() => {
     void fetchProductsAndCategories()
+    const handleRefresh = () => { void fetchProductsAndCategories() }
+    window.addEventListener(APP_REFRESH_EVENT, handleRefresh)
+    return () => window.removeEventListener(APP_REFRESH_EVENT, handleRefresh)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentBusiness, currentOutlet, tenantOutlet])
 
@@ -1499,7 +1495,7 @@ export function RetailPOS() {
             {/* Products Grid - Enhanced */}
             <div className="relative flex-1 overflow-hidden bg-gray-200 p-3">
               {isLoadingProducts ? (
-                <div className="p-8 text-center text-muted-foreground">Loading products...</div>
+                <PageLoading label="Loading retail POS products…" />
               ) : productsError ? (
                 <div className="p-8 text-center text-destructive">{productsError}</div>
               ) : filteredProducts.length === 0 ? (

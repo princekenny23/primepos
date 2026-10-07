@@ -101,6 +101,7 @@ if (typeof window !== 'undefined') {
     requestCache.invalidate('top-selling-')
     requestCache.invalidate('pnl-')
     requestCache.invalidate('customer-summary-')
+    requestCache.invalidate('chart-')
   })
 
   window.addEventListener('expense-updated', () => {
@@ -110,6 +111,7 @@ if (typeof window !== 'undefined') {
     requestCache.invalidate('top-selling-')
     requestCache.invalidate('pnl-')
     requestCache.invalidate('customer-summary-')
+    requestCache.invalidate('chart-')
   })
   
   window.addEventListener('outlet-changed', () => {

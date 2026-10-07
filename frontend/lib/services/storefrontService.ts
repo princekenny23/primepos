@@ -95,6 +95,13 @@ export interface StorefrontOrder {
   sale_id: number
   receipt_number: string
   total: string
+  items: Array<{
+    product_name: string
+    unit_name: string
+    quantity: number
+    price: string
+    total: string
+  }>
   created_at: string
 }
 

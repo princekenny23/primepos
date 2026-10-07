@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { DashboardLayout } from "@/components/layouts/dashboard-layout"
 import { generateKPIData, generateChartData } from "@/lib/utils/dashboard-stats"
-import { saleService } from "@/lib/services/saleService"
 import { productService } from "@/lib/services/productService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useTenant } from "@/contexts/tenant-context"
@@ -19,6 +18,8 @@ import { DateRangeFilter } from "@/components/dashboard/date-range-filter"
 import { PageRefreshButton } from "@/components/dashboard/page-refresh-button"
 import { getOutletDashboardRoute, getOutletPosMode } from "@/lib/utils/outlet-settings"
 import { mapExpiryAlerts, mapLowStockAlerts } from "@/lib/utils/inventory-alerts"
+import { APP_REFRESH_EVENT } from "@/lib/utils/page-refresh"
+import { PageLoading } from "@/components/ui/page-loading"
 
 function formatDate(date?: Date) {
   if (!date) return undefined
@@ -37,7 +38,6 @@ export default function RestaurantDashboardPage() {
   const { isAuthenticated } = useAuthStore()
   const [kpiData, setKpiData] = useState<any>(null)
   const [chartData, setChartData] = useState<any[]>([])
-  const [recentActivities, setRecentActivities] = useState<any[]>([])
   const [lowStockItems, setLowStockItems] = useState<any[]>([])
   const [expiryItems, setExpiryItems] = useState<any[]>([])
   const [selectedRange, setSelectedRange] = useState<{ start?: Date; end?: Date }>(() => {
@@ -50,6 +50,7 @@ export default function RestaurantDashboardPage() {
   const [dashboardWarning, setDashboardWarning] = useState<string | null>(null)
   const inFlightLoadRef = useRef<Promise<void> | null>(null)
   const lastLoadKeyRef = useRef<string>("")
+  const loadSequenceRef = useRef(0)
   
   // Use tenant outlet if available, otherwise fall back to business store outlet
   const currentOutlet = tenantOutlet || businessOutlet
@@ -103,48 +104,23 @@ export default function RestaurantDashboardPage() {
       }
 
       lastLoadKeyRef.current = loadKey
+      const requestId = ++loadSequenceRef.current
 
       const loader = (async () => {
       
         setIsLoadingData(true)
         setDashboardWarning(null)
         try {
-          const today = new Date()
-          today.setHours(0, 0, 0, 0)
-          const startDate = selectedRange.start || today
-          const endDate = selectedRange.end || today
-          const startDateStr = formatDate(startDate)
-          const endDateStr = formatDate(endDate)
-
-          const [kpi, chart, recentSales, lowStockData, productsData] = await Promise.all([
+          const [kpi, chart, lowStockData, productsData] = await Promise.all([
             generateKPIData(currentBusiness.id, currentBusiness, outletId, selectedRange),
             generateChartData(currentBusiness.id, outletId, selectedRange),
-            saleService.list({ outlet: outletId, start_date: startDateStr, end_date: endDateStr, limit: 20 }).catch(() => ({ results: [] })),
             productService.getLowStock(outletId).catch(() => []),
-            productService.list({ outlet: outletId, limit: 1000 }).catch(() => ({ results: [] })),
+            productService.list({ outlet: outletId, limit: 100 }).catch(() => ({ results: [] })),
           ])
+          if (requestId !== loadSequenceRef.current) return
           
           setKpiData(kpi)
           setChartData(chart)
-
-          // Convert recent sales to activity format
-          const sales = (Array.isArray(recentSales) ? recentSales : (recentSales.results || []))
-            .filter((sale: any) => {
-              const status = String(sale.status || "").toLowerCase()
-              const paymentMethod = String(sale.payment_method || sale.paymentMethod || "").toLowerCase()
-              return status === "completed" || paymentMethod === "tab"
-            })
-            .slice(0, 10)
-
-          const activities = sales.map((sale: any) => ({
-            id: sale.id || `sale-${Math.random()}`,
-            type: "sale" as const,
-            title: `Sale #${sale.id?.toString().slice(-6)}`,
-            description: `${sale.items?.length || 1} item(s) - Amount: ${sale.total || sale.amount || 0}`,
-            timestamp: new Date(sale.created_at || sale.createdAt || new Date()),
-            amount: sale.total || sale.amount || 0,
-          }))
-          setRecentActivities(activities)
 
           const lowStock = Array.isArray(lowStockData) ? lowStockData : ((lowStockData as any)?.results || [])
           setLowStockItems(mapLowStockAlerts(lowStock))
@@ -152,12 +128,13 @@ export default function RestaurantDashboardPage() {
           const products = Array.isArray(productsData) ? productsData : (productsData.results || [])
           setExpiryItems(mapExpiryAlerts(products))
         } catch (error: any) {
+          if (requestId !== loadSequenceRef.current) return
           console.error("Failed to load dashboard data:", error)
           if (error?.status === 429 || String(error?.message || "").toLowerCase().includes("throttled")) {
             setDashboardWarning("Backend is throttling requests. Showing cached or partial data until cooldown ends.")
           }
         } finally {
-          setIsLoadingData(false)
+          if (requestId === loadSequenceRef.current) setIsLoadingData(false)
         }
       })()
 
@@ -180,9 +157,11 @@ export default function RestaurantDashboardPage() {
 
     window.addEventListener("sale-completed", handleDashboardRefresh)
     window.addEventListener("expense-updated", handleDashboardRefresh)
+    window.addEventListener(APP_REFRESH_EVENT, handleDashboardRefresh)
     return () => {
       window.removeEventListener("sale-completed", handleDashboardRefresh)
       window.removeEventListener("expense-updated", handleDashboardRefresh)
+      window.removeEventListener(APP_REFRESH_EVENT, handleDashboardRefresh)
     }
   }, [])
 
@@ -190,7 +169,7 @@ export default function RestaurantDashboardPage() {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Loading dashboard...</p>
+          <PageLoading label="Loading restaurant dashboard…" />
         </div>
       </DashboardLayout>
     )
@@ -256,7 +235,7 @@ export default function RestaurantDashboardPage() {
         {/* Low Stock and Recent Activity */}
         <div className="grid gap-4 md:grid-cols-2">
           <LowStockAlerts items={lowStockItems} expiryItems={expiryItems} />
-          <RecentActivity activities={recentActivities} business={currentBusiness} />
+          <RecentActivity />
         </div>
 
       </div>

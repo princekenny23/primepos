@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { requestAppRefresh } from "@/lib/utils/page-refresh"
 
 interface PageRefreshButtonProps {
   variant?: "default" | "outline" | "ghost" | "link" | "destructive" | "secondary"
@@ -23,7 +24,7 @@ export function PageRefreshButton({
 
   const handleRefresh = () => {
     setIsRefreshing(true)
-    // Use Next.js router refresh to refresh the current page without navigation
+    requestAppRefresh()
     router.refresh()
     
     // Also trigger a small delay to show the loading state

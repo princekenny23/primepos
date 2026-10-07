@@ -28,6 +28,7 @@ export interface ActivityLogFilters {
   action?: string
   module?: string
   user?: number
+  outlet?: number | string
   resource_type?: string
   date_from?: string
   date_to?: string
@@ -55,6 +56,7 @@ class ActivityLogService {
     if (filters.action) params.append('action', filters.action)
     if (filters.module) params.append('module', filters.module)
     if (filters.user) params.append('user', String(filters.user))
+    if (filters.outlet) params.append('outlet', String(filters.outlet))
     if (filters.resource_type) params.append('resource_type', filters.resource_type)
     if (filters.date_from) params.append('date_from', filters.date_from)
     if (filters.date_to) params.append('date_to', filters.date_to)

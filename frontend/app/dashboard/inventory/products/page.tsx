@@ -58,6 +58,8 @@ import {
 } from "@/components/ui/alert-dialog"
 import { useI18n } from "@/contexts/i18n-context"
 import { useTenant } from "@/contexts/tenant-context"
+import { PageLoading } from "@/components/ui/page-loading"
+import { APP_REFRESH_EVENT } from "@/lib/utils/page-refresh"
 
 export default function ProductsPage() {
   const { t } = useI18n()
@@ -207,30 +209,17 @@ export default function ProductsPage() {
       const categoriesPromise = categoryService.list({
         outlet: outlet?.id ? String(outlet.id) : undefined,
       })
-      const allProducts: any[] = []
-      let page = 1
-      let next: string | undefined = undefined
+      const filters: any = {
+        pageSize: fetchPageSize,
+        outlet: outlet?.id ? String(outlet.id) : undefined,
+      }
+      if (showArchivedProducts) filters.include_archived = true
+      else filters.is_active = true
 
-      do {
-        const filters: any = {
-          page,
-          pageSize: fetchPageSize,
-          outlet: outlet?.id ? String(outlet.id) : undefined,
-        }
-
-        if (showArchivedProducts) {
-          filters.include_archived = true
-        } else {
-          filters.is_active = true
-        }
-
-        const response = await productService.list(filters)
-        allProducts.push(...(response.results || []))
-        next = response.next
-        page += 1
-      } while (next)
-
-      const categoriesResponse = await categoriesPromise
+      const [allProducts, categoriesResponse] = await Promise.all([
+        productService.listAll(filters),
+        categoriesPromise,
+      ])
       setProducts(allProducts)
       setCategories(Array.isArray(categoriesResponse) ? categoriesResponse : categoriesResponse || [])
     } catch (error) {
@@ -247,6 +236,9 @@ export default function ProductsPage() {
 
   useEffect(() => {
     loadData()
+    const handleRefresh = () => { void loadData() }
+    window.addEventListener(APP_REFRESH_EVENT, handleRefresh)
+    return () => window.removeEventListener(APP_REFRESH_EVENT, handleRefresh)
   }, [loadData])
 
   const getDisplayStock = (product: any) => {
@@ -820,7 +812,7 @@ export default function ProductsPage() {
                 <div>
                 {isLoading ? (
                   <div className="flex items-center justify-center h-64">
-                    <p className="text-muted-foreground">Loading products...</p>
+                    <PageLoading label="Loading products…" />
                   </div>
                 ) : sortedProducts.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-64 text-center">
@@ -1009,7 +1001,7 @@ export default function ProductsPage() {
                 <div>
                 {isLoading ? (
                   <div className="flex items-center justify-center h-64">
-                    <p className="text-gray-600">Loading products...</p>
+                    <PageLoading label="Refreshing products…" />
                   </div>
                 ) : (
                   <div className="overflow-x-auto rounded-md border border-gray-300 bg-white">
@@ -1182,7 +1174,7 @@ export default function ProductsPage() {
                 <div>
                 {isLoading ? (
                   <div className="flex items-center justify-center h-64">
-                    <p className="text-gray-600">Loading products...</p>
+                    <PageLoading label="Loading product list…" />
                   </div>
                 ) : (
                   <div className="overflow-x-auto rounded-md border border-gray-300 bg-white">

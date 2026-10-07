@@ -78,6 +78,8 @@ import { printReceipt } from "@/lib/print"
 import { useShift } from "@/contexts/shift-context"
 import { useTenant } from "@/contexts/tenant-context"
 import { useToast } from "@/components/ui/use-toast"
+import { PageLoading } from "@/components/ui/page-loading"
+import { APP_REFRESH_EVENT } from "@/lib/utils/page-refresh"
 import { customerService, type Customer } from "@/lib/services/customerService"
 import { cn } from "@/lib/utils"
 import { isDistributionEnabledForOutlet } from "@/lib/utils/tenant-permissions"
@@ -267,23 +269,7 @@ export function BarPOS() {
 
     try {
       const outletId = currentOutlet?.id ? String(currentOutlet.id) : undefined
-      const allProducts: Product[] = []
-      let page = 1
-      let hasNext = true
-
-      while (hasNext) {
-        const response: any = await productService.list({
-          is_active: true,
-          page,
-          outlet: outletId,
-          limit: 100,
-        })
-        const productsList = Array.isArray(response?.results) ? response.results : []
-        allProducts.push(...productsList)
-        hasNext = Boolean(response?.next)
-        page += 1
-      }
-
+      const allProducts = await productService.listAll({ is_active: true, outlet: outletId, limit: 100 })
       setProducts(allProducts)
     } catch (error: any) {
       console.error("Failed to load products:", error)
@@ -416,6 +402,12 @@ export function BarPOS() {
   // Initial load
   useEffect(() => {
     loadProducts()
+  }, [loadProducts])
+
+  useEffect(() => {
+    const handleRefresh = () => { void loadProducts() }
+    window.addEventListener(APP_REFRESH_EVENT, handleRefresh)
+    return () => window.removeEventListener(APP_REFRESH_EVENT, handleRefresh)
   }, [loadProducts])
 
   useEffect(() => {
@@ -1519,9 +1511,7 @@ export function BarPOS() {
                 <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden bg-gray-200">
                   <ScrollArea className="flex-1 min-h-0">
                     {isLoadingProducts ? (
-                      <div className="flex items-center justify-center h-64">
-                        <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-                      </div>
+                      <PageLoading label="Loading bar POS products…" className="h-64 min-h-0" />
                     ) : productsError ? (
                       <div className="flex flex-col items-center justify-center h-64">
                         <AlertCircle className="h-8 w-8 text-destructive mb-2" />

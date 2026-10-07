@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import timber.log.Timber
 import java.security.MessageDigest
 import java.util.*
@@ -19,12 +20,16 @@ class DeviceManager(private val context: Context) {
         private val OUTLET_ID_KEY = stringPreferencesKey("outlet_id")
         private val PRINTER_IDENTIFIER_KEY = stringPreferencesKey("printer_identifier")
         private val BASE_URL_KEY = stringPreferencesKey("base_url")
+
+        private const val DATASTORE_TIMEOUT_MS = 3000L
     }
 
     suspend fun getOrCreateDeviceId(): String {
         return try {
-            val preferences = context.dataStore.data.first()
-            val existing = preferences[DEVICE_ID_KEY]
+            val preferences = withTimeoutOrNull(DATASTORE_TIMEOUT_MS) {
+                context.dataStore.data.first()
+            }
+            val existing = preferences?.get(DEVICE_ID_KEY)
             
             if (existing != null) {
                 existing
@@ -61,8 +66,10 @@ class DeviceManager(private val context: Context) {
 
     suspend fun getApiKey(): String? {
         return try {
-            val preferences = context.dataStore.data.first()
-            preferences[API_KEY_KEY]
+            val preferences = withTimeoutOrNull(DATASTORE_TIMEOUT_MS) {
+                context.dataStore.data.first()
+            }
+            preferences?.get(API_KEY_KEY)
         } catch (e: Exception) {
             Timber.e(e, "Error retrieving API key")
             null
@@ -81,8 +88,10 @@ class DeviceManager(private val context: Context) {
 
     suspend fun getOutletId(): String? {
         return try {
-            val preferences = context.dataStore.data.first()
-            preferences[OUTLET_ID_KEY]
+            val preferences = withTimeoutOrNull(DATASTORE_TIMEOUT_MS) {
+                context.dataStore.data.first()
+            }
+            preferences?.get(OUTLET_ID_KEY)
         } catch (e: Exception) {
             Timber.e(e, "Error retrieving outlet ID")
             null
@@ -101,8 +110,10 @@ class DeviceManager(private val context: Context) {
 
     suspend fun getPrinterIdentifier(): String? {
         return try {
-            val preferences = context.dataStore.data.first()
-            preferences[PRINTER_IDENTIFIER_KEY]
+            val preferences = withTimeoutOrNull(DATASTORE_TIMEOUT_MS) {
+                context.dataStore.data.first()
+            }
+            preferences?.get(PRINTER_IDENTIFIER_KEY)
         } catch (e: Exception) {
             Timber.e(e, "Error retrieving printer identifier")
             null
@@ -121,8 +132,10 @@ class DeviceManager(private val context: Context) {
 
     suspend fun getBaseUrl(): String? {
         return try {
-            val preferences = context.dataStore.data.first()
-            preferences[BASE_URL_KEY]
+            val preferences = withTimeoutOrNull(DATASTORE_TIMEOUT_MS) {
+                context.dataStore.data.first()
+            }
+            preferences?.get(BASE_URL_KEY)
         } catch (e: Exception) {
             Timber.e(e, "Error retrieving base URL")
             null

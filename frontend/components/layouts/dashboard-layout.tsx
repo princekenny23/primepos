@@ -55,6 +55,7 @@ import { canAccessTenantPath, hasDistributionAccess, isTenantFeatureEnabled } fr
 import { useToast } from "@/components/ui/use-toast"
 import { authService } from "@/lib/services/authService"
 import { api } from "@/lib/api"
+import { requestAppRefresh } from "@/lib/utils/page-refresh"
 
 // Navigation translation keys mapping
 const navTranslationKeys: Record<string, string> = {
@@ -623,17 +624,8 @@ export function DashboardLayout({ children, showSubNavbar = true }: DashboardLay
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-40">
-                  <DropdownMenuItem onClick={() => router.refresh()}>
+                  <DropdownMenuItem onClick={requestAppRefresh}>
                     Refresh
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      if (typeof window !== "undefined") {
-                        window.location.reload()
-                      }
-                    }}
-                  >
-                    Sync all
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem

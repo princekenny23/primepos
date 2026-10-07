@@ -21,6 +21,7 @@ import { supplierService, type Supplier } from "@/lib/services/supplierService"
 import { useBusinessStore } from "@/stores/businessStore"
 import { useRealAPI } from "@/lib/utils/api-config"
 import { useToast } from "@/components/ui/use-toast"
+import { APP_REFRESH_EVENT } from "@/lib/utils/page-refresh"
 import {
   Select,
   SelectContent,
@@ -69,13 +70,24 @@ export default function SuppliersListPage() {
       } else {
         setSuppliers([])
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to load suppliers:", error)
       setSuppliers([])
+      toast({
+        title: "Could not load suppliers",
+        description: error?.message || "Check your outlet selection and inventory access, then retry.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoading(false)
     }
-  }, [currentBusiness, useReal])
+  }, [currentBusiness, useReal, toast])
+
+  useEffect(() => {
+    void loadSuppliers()
+    window.addEventListener(APP_REFRESH_EVENT, loadSuppliers)
+    return () => window.removeEventListener(APP_REFRESH_EVENT, loadSuppliers)
+  }, [loadSuppliers])
   
   const handleDeleteSupplier = useCallback(async (supplierId: string) => {
     if (currentBusiness) {

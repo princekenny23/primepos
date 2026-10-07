@@ -7,6 +7,7 @@ import android.os.ParcelFileDescriptor
 import android.print.PageRange
 import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
+import android.print.PrintDocumentInfo
 import timber.log.Timber
 import java.io.FileOutputStream
 

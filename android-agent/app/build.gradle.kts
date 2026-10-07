@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.kapt")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -23,6 +24,7 @@ android {
         // Add Firebase configuration if needed
         buildConfigField("boolean", "FIREBASE_ENABLED", "false")
         buildConfigField("boolean", "DEBUG_LOGGING", "true")
+        buildConfigField("String", "BACKEND_BASE_URL", "\"https://api.primepos.com/api/v1/\"")
     }
 
     buildTypes {
@@ -54,10 +56,6 @@ android {
         buildConfig = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.4"
-    }
-
     packagingOptions {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -70,6 +68,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.activity:activity-ktx:1.8.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
+
+    // Material Components for XML Theming
+    implementation("com.google.android.material:material:1.11.0")
 
     // Compose
     implementation("androidx.compose.ui:ui:1.5.4")
@@ -111,7 +112,7 @@ dependencies {
     implementation("com.jakewharton.timber:timber:5.0.1")
 
     // USB Communication
-    implementation("com.felhr:usbserialcommunication:1.0")
+    implementation("com.github.felHR85:UsbSerial:6.1.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

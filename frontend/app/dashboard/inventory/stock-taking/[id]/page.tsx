@@ -56,11 +56,14 @@ import { productService } from "@/lib/services/productService"
 import { useToast } from "@/components/ui/use-toast"
 import { exportToXLSX, type ExportColumn } from "@/lib/services/exportService"
 import { FilterableTabs, TabsContent, type TabConfig } from "@/components/ui/filterable-tabs"
+import { PageLoading } from "@/components/ui/page-loading"
+import { APP_REFRESH_EVENT } from "@/lib/utils/page-refresh"
 
 interface StockTakingItem {
   id: string
   product_id: string
   product_name: string
+  sku: string
   barcode: string
   isActive: boolean
   quantityBefore: number
@@ -100,6 +103,7 @@ export default function StockTakingDetailPage() {
   const [stockTake, setStockTake] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isSavingCount, setIsSavingCount] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [rejectedPage, setRejectedPage] = useState(1)
   const [importRejectedPage, setImportRejectedPage] = useState(1)
@@ -114,6 +118,9 @@ export default function StockTakingDetailPage() {
   const [isExportingSession, setIsExportingSession] = useState(false)
   useEffect(() => {
     loadStockTakeData()
+    const handleRefresh = () => { void loadStockTakeData() }
+    window.addEventListener(APP_REFRESH_EVENT, handleRefresh)
+    return () => window.removeEventListener(APP_REFRESH_EVENT, handleRefresh)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stockTakeId])
 
@@ -198,8 +205,6 @@ export default function StockTakingDetailPage() {
       
       setStockTake(stockTakeData)
       
-      console.log("Raw items data from API:", itemsData)
-      
       const transformedItems: StockTakingItem[] = itemsData.map((item: any) => {
         // Ensure we parse the counted_quantity correctly
         const countedQty = typeof item.counted_quantity === 'number' 
@@ -220,6 +225,7 @@ export default function StockTakingDetailPage() {
           id: String(item.id),
           product_id: String(item.product?.id || item.product_id || ""),
           product_name: item.product?.name || "Unknown Product",
+          sku: item.product?.sku || "",
           barcode: item.product?.barcode || "",
           isActive: item.product?.is_active !== false,
           quantityBefore: expectedQty,
@@ -231,36 +237,10 @@ export default function StockTakingDetailPage() {
           notes: item.notes || "",
         }
         
-        // Log if we find an item with countedQty > 0
-        if (countedQty > 0) {
-          console.log("Found counted item:", {
-            id: transformed.id,
-            name: transformed.product_name,
-            countedQty: transformed.countedQty,
-            isCounted: transformed.isCounted,
-            rawCountedQuantity: item.counted_quantity,
-            rawItem: item
-          })
-        }
-        
         return transformed
       })
       
       const allItems = transformedItems
-      
-      const countedItemsList = allItems.filter(i => i.countedQty > 0)
-      console.log("Loaded stock take items:", {
-        total: allItems.length,
-        counted: countedItemsList.length,
-        itemsWithCountedQty: allItems.filter(i => i.countedQty > 0).length,
-        countedItems: countedItemsList.map(i => ({
-          id: i.id,
-          name: i.product_name,
-          countedQty: i.countedQty,
-          isCounted: i.isCounted
-        }))
-      })
-      
       setItems(allItems)
     } catch (error) {
       console.error("Failed to load stock take data:", error)
@@ -381,51 +361,29 @@ export default function StockTakingDetailPage() {
   const handleCountChange = async (itemId: string, value: string) => {
     const numValue = parseInt(value) || 0
     const item = items.find(i => i.id === itemId)
-    if (!item) return
+    if (!item) return false
 
-    console.log("Updating item count:", { 
-      itemId, 
-      numValue, 
-      itemName: item.product_name, 
-      currentCountedQty: item.countedQty,
-      stockTakeId 
-    })
-
-    // Save to backend first
     try {
-      console.log("Calling updateStockTakeItem with:", {
-        stockTakeId,
-        itemId,
-        data: { counted_quantity: numValue }
-      })
-      
       const response = await inventoryService.updateStockTakeItem(stockTakeId, itemId, {
         counted_quantity: numValue,
       })
       
-      console.log("Backend response after update:", response)
-      
-      // Small delay to ensure backend has processed
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
-      // Reload data to ensure sync with backend (don't show loading spinner)
-      await loadStockTakeData(false)
-      
-      console.log("Data reloaded after update, items state:", items.length)
+      const countedQty = Number(response?.counted_quantity ?? numValue)
+      const difference = Number(response?.difference ?? countedQty - item.expectedQty)
+      setItems((previous) => previous.map((row) => row.id === itemId ? {
+        ...row,
+        countedQty,
+        difference,
+        quantityAfter: row.expectedQty + difference,
+        isCounted: response?.is_counted === false ? false : true,
+      } : row))
       
       toast({
         title: "Count Updated",
         description: `${item.product_name} count has been updated to ${numValue}.`,
       })
+      return true
     } catch (error: any) {
-      console.error("Failed to update item count - Full error:", error)
-      console.error("Error details:", {
-        message: error?.message,
-        status: error?.status,
-        data: error?.data,
-        stack: error?.stack,
-      })
-      
       const errorMessage = error?.message || 
                           error?.data?.detail || 
                           error?.data?.message ||
@@ -436,8 +394,7 @@ export default function StockTakingDetailPage() {
         description: errorMessage,
         variant: "destructive",
       })
-      // Reload to get correct state
-      await loadStockTakeData(false)
+      return false
     }
   }
 
@@ -449,20 +406,17 @@ export default function StockTakingDetailPage() {
         const response = await inventoryService.createStockTakeItem(stockTakeId, {
           product_id: item.product_id,
           expected_quantity: item.expectedQty,
-          counted_quantity: 0,
         })
-
-        // Reload data to get the real item ID from database
-        await loadStockTakeData(false)
 
         const newItem = response
         if (newItem) {
           const transformed = {
             id: String(newItem.id),
             product_id: String(newItem.product?.id || newItem.product_id || ""),
-            product_name: newItem.product?.name || "Unknown Product",
-            barcode: newItem.product?.barcode || "",
-            isActive: newItem.product?.is_active !== false,
+            product_name: newItem.product?.name || item.product_name || "Unknown Product",
+            sku: newItem.product?.sku || item.sku || "",
+            barcode: newItem.product?.barcode || item.barcode || "",
+            isActive: newItem.product?.is_active !== false && item.isActive,
             quantityBefore: typeof newItem.expected_quantity === 'number'
               ? newItem.expected_quantity
               : parseInt(String(newItem.expected_quantity || 0)),
@@ -476,9 +430,10 @@ export default function StockTakingDetailPage() {
               ? newItem.difference
               : parseInt(String(newItem.difference || 0)),
             quantityAfter: (typeof newItem.expected_quantity === 'number' ? newItem.expected_quantity : parseInt(String(newItem.expected_quantity || 0))) + (typeof newItem.difference === 'number' ? newItem.difference : parseInt(String(newItem.difference || 0))),
-            isCounted: (typeof newItem.counted_quantity === 'number' ? newItem.counted_quantity : parseInt(String(newItem.counted_quantity || 0))) > 0,
+            isCounted: Boolean(newItem.is_counted || newItem.counted_at),
             notes: newItem.notes || "",
           }
+          setItems((previous) => previous.map((row) => row.id === item.id ? transformed : row))
           setSelectedItemForEdit(transformed)
           setEditCountValue(transformed.countedQty.toString())
         }
@@ -500,11 +455,17 @@ export default function StockTakingDetailPage() {
 
   const handleSaveEdit = async () => {
     if (!selectedItemForEdit) return
-    
+    setIsSavingCount(true)
     const numValue = parseInt(editCountValue) || 0
-    await handleCountChange(selectedItemForEdit.id, numValue.toString())
-    setSelectedItemForEdit(null)
-    setEditCountValue("")
+    try {
+      const saved = await handleCountChange(selectedItemForEdit.id, numValue.toString())
+      if (saved) {
+        setSelectedItemForEdit(null)
+        setEditCountValue("")
+      }
+    } finally {
+      setIsSavingCount(false)
+    }
   }
 
   const handleSaveAll = async () => {
@@ -666,9 +627,7 @@ export default function StockTakingDetailPage() {
   if (isLoading) {
     return (
       <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Loading stock take...</p>
-        </div>
+        <PageLoading label="Counting stock…" />
       </DashboardLayout>
     )
   }
@@ -918,6 +877,7 @@ export default function StockTakingDetailPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Barcode</TableHead>
+                        <TableHead>SKU</TableHead>
                         <TableHead>Item Name</TableHead>
                         <TableHead className="text-right">Quantity Before</TableHead>
                         <TableHead className="text-right">Count</TableHead>
@@ -931,6 +891,7 @@ export default function StockTakingDetailPage() {
                       {paginatedCountedItems.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell className="font-mono text-sm">{item.barcode || "N/A"}</TableCell>
+                          <TableCell className="font-mono text-sm">{item.sku || "N/A"}</TableCell>
                           <TableCell className="font-medium">{item.product_name}</TableCell>
                           <TableCell className="text-right">{item.quantityBefore}</TableCell>
                           <TableCell className="text-right">{item.countedQty}</TableCell>
@@ -1008,6 +969,7 @@ export default function StockTakingDetailPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Barcode</TableHead>
+                        <TableHead>SKU</TableHead>
                         <TableHead>Item Name</TableHead>
                         <TableHead className="text-right">Quantity Before</TableHead>
                         <TableHead className="text-right">Count</TableHead>
@@ -1020,6 +982,7 @@ export default function StockTakingDetailPage() {
                       {paginatedRejectedItems.map((item) => (
                         <TableRow key={item.id}>
                           <TableCell className="font-mono text-sm">{item.barcode || "N/A"}</TableCell>
+                          <TableCell className="font-mono text-sm">{item.sku || "N/A"}</TableCell>
                           <TableCell className="font-medium">{item.product_name}</TableCell>
                           <TableCell className="text-right">{item.quantityBefore}</TableCell>
                           <TableCell className="text-right">{item.countedQty}</TableCell>
@@ -1029,8 +992,9 @@ export default function StockTakingDetailPage() {
                           </TableCell>
                           <TableCell>
                             <Button
-                              variant="ghost"
+                              variant="default"
                               size="sm"
+                              className="h-8"
                               onClick={() => handleItemClick(item)}
                               disabled={isCompleted}
                             >
@@ -1149,7 +1113,7 @@ export default function StockTakingDetailPage() {
       <Dialog open={!!selectedItemForEdit} onOpenChange={(open) => !open && setSelectedItemForEdit(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Adjust Count</DialogTitle>
+            <DialogTitle>Count {selectedItemForEdit?.product_name || "Item"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -1166,11 +1130,11 @@ export default function StockTakingDetailPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedItemForEdit(null)}>
+            <Button variant="outline" onClick={() => setSelectedItemForEdit(null)} disabled={isSavingCount}>
               Cancel
             </Button>
-            <Button onClick={handleSaveEdit}>
-              Save Count
+            <Button onClick={handleSaveEdit} disabled={isSavingCount || !editCountValue.trim()}>
+              {isSavingCount ? "Saving count…" : "Save Count"}
             </Button>
           </DialogFooter>
         </DialogContent>

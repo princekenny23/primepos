@@ -890,7 +890,6 @@ export function PrinterSettings() {
     setPrinters([])
     setExtraPrinters([])
     setRawPrinters(null)
-    setPairingCode("")
     setPairingStatusMessage("")
     setStep(connected ? 2 : 1)
   }
@@ -928,8 +927,7 @@ export function PrinterSettings() {
           </div>
         </div>
 
-        {hostMode !== "local" && (
-          <div className="rounded border p-3 space-y-3">
+        <div className="rounded border p-3 space-y-3">
             <div className="font-medium">Step 2: Pair cloud connector</div>
             <p className="text-xs text-muted-foreground">
               Start the Windows connector. It will display a 6-digit pairing code. Enter it here to link this outlet.
@@ -976,8 +974,7 @@ export function PrinterSettings() {
             {!!pairedDevicePk && (
               <div className="text-xs text-green-600">Connector linked to this outlet.</div>
             )}
-          </div>
-        )}
+        </div>
 
         {hostMode === "local" && (
           <div className="rounded border p-3 space-y-2">
@@ -985,43 +982,6 @@ export function PrinterSettings() {
             <div className="text-xs text-muted-foreground">Local connector detected. Cloud pairing is not required on this machine.</div>
           </div>
         )}
-
-        <div className="rounded border p-3 space-y-3">
-          <div className="font-medium">QZ Tray printer mode</div>
-          <p className="text-xs text-muted-foreground">
-            Enable QZ Tray to let the POS discover and print to local Windows printers automatically after each sale.
-          </p>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={qzEnabled}
-                onChange={(event) => {
-                  const next = event.target.checked
-                  setQzEnabled(next)
-                  persistQzPreference(next)
-                  if (next) {
-                    localStorage.setItem("printChannel", "qztray")
-                  }
-                }}
-              />
-              <span>Use QZ Tray for printer detection</span>
-            </label>
-            <Button variant="outline" onClick={() => connectQzTray(false)} disabled={!qzEnabled || isScanningQz}>
-              {isScanningQz ? "Connecting..." : "Connect QZ Tray"}
-            </Button>
-          </div>
-          {qzStatus !== "idle" && (
-            <div className="text-xs text-muted-foreground">
-              QZ status: {qzStatus === "ready" ? "Ready" : qzStatus === "connecting" ? "Connecting" : "Error"}
-            </div>
-          )}
-          {qzPrinters.length > 0 && (
-            <div className="text-xs text-muted-foreground">
-              Detected printers: {qzPrinters.join(", ")}
-            </div>
-          )}
-        </div>
 
         <div className="rounded border p-3 space-y-3">
           <div className="font-medium">Step 3: Search printers</div>

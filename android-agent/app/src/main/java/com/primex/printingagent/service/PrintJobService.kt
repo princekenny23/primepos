@@ -12,7 +12,12 @@ import com.primex.printingagent.domain.DeviceManager
 import com.primex.printingagent.domain.PrinterManager
 import com.primex.printingagent.domain.PrinterType
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import timber.log.Timber
+import java.text.SimpleDateFormat
+import java.util.*
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,11 +34,21 @@ class PrintJobService : Service() {
     companion object {
         private const val POLL_INTERVAL_SECONDS = 5L
         private const val CHANNEL = "mobile"
+
+        private val _isRunning = MutableStateFlow(false)
+        val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
+
+        private val _isPolling = MutableStateFlow(false)
+        val isPolling: StateFlow<Boolean> = _isPolling.asStateFlow()
+
+        private val _lastPollTime = MutableStateFlow<String?>(null)
+        val lastPollTime: StateFlow<String?> = _lastPollTime.asStateFlow()
     }
 
     override fun onCreate() {
         super.onCreate()
         Timber.d("PrintJobService created")
+        _isRunning.value = true
         
         deviceManager = DeviceManager(this)
         printerManager = PrinterManager(this)
@@ -50,14 +65,12 @@ class PrintJobService : Service() {
     private fun initializeAndStartPolling() {
         scope.launch {
             try {
-                // Detect and select printer
-                val printers = printerManager.detectAvailablePrinters()
-                if (printers.isNotEmpty()) {
-                    val savedIdentifier = deviceManager.getPrinterIdentifier()
-                    selectedPrinter = printers.firstOrNull { printer ->
-                        printerManager.getPrinterIdentifier(printer) == savedIdentifier
-                    } ?: printers.first()
-                    Timber.d("Selected printer: ${printerManager.getPrinterDisplayName(selectedPrinter!!)}")
+                _isPolling.value = false
+                // Use the built-in thermal device only.
+                val builtInPrinter = printerManager.detectBuiltInThermalPrinter()
+                if (builtInPrinter != null) {
+                    selectedPrinter = builtInPrinter
+                    Timber.d("Selected built-in printer: ${printerManager.getPrinterDisplayName(builtInPrinter)}")
                 } else {
                     Timber.w("No printers detected")
                 }
@@ -67,14 +80,8 @@ class PrintJobService : Service() {
                 val apiKey = deviceManager.getApiKey()
                 val baseUrl = deviceManager.getBaseUrl()
 
-                if (baseUrl == null) {
-                    Timber.e("Base URL not configured")
-                    return@launch
-                }
-
-                if (apiKey == null) {
-                    Timber.w("API key not set, attempting pairing")
-                    // Device needs pairing
+                if (baseUrl == null || apiKey == null) {
+                    Timber.w("Device not fully configured (BaseURL: $baseUrl, ApiKey: ${apiKey?.take(4)}...)")
                     return@launch
                 }
 
@@ -88,11 +95,14 @@ class PrintJobService : Service() {
     private fun startPolling(deviceId: String, apiKey: String, baseUrl: String) {
         // Cancel existing polling job
         pollingJob?.cancel()
+        _isPolling.value = true
 
         pollingJob = scope.launch {
             while (isActive) {
                 try {
                     Timber.d("Polling for print jobs...")
+                    val currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                    _lastPollTime.value = currentTime
                     
                     val apiService = ApiClient.getApiService(baseUrl, this@PrintJobService)
                     val authHeader = deviceManager.getAuthHeader(apiKey)
@@ -208,6 +218,7 @@ class PrintJobService : Service() {
 
     override fun onDestroy() {
         Timber.d("PrintJobService destroyed")
+        _isRunning.value = false
         pollingJob?.cancel()
         scope.cancel()
         super.onDestroy()
